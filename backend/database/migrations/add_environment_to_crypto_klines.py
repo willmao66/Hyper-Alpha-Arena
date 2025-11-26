@@ -31,11 +31,11 @@ def upgrade():
 
     db = SessionLocal()
     try:
-        # Step 1: Add environment column with default value
+        # Step 1: Add environment column with default value (idempotent)
         print("Adding environment column to crypto_klines table...")
         db.execute(text("""
             ALTER TABLE crypto_klines
-            ADD COLUMN environment VARCHAR(20) NOT NULL DEFAULT 'mainnet'
+            ADD COLUMN IF NOT EXISTS environment VARCHAR(20) NOT NULL DEFAULT 'mainnet'
         """))
 
         # Step 2: Update all existing records to 'mainnet'
@@ -53,21 +53,31 @@ def upgrade():
             DROP CONSTRAINT IF EXISTS crypto_klines_exchange_symbol_market_period_timestamp_key
         """))
 
-        # Step 4: Create new unique constraint including environment
+        # Step 4: Create new unique constraint including environment (idempotent)
         print("Creating new unique constraint with environment field...")
-        db.execute(text("""
-            ALTER TABLE crypto_klines
-            ADD CONSTRAINT crypto_klines_exchange_symbol_market_period_timestamp_environment_key
-            UNIQUE (exchange, symbol, market, period, timestamp, environment)
+        # Check if constraint already exists
+        constraint_check = db.execute(text("""
+            SELECT COUNT(*) FROM information_schema.table_constraints
+            WHERE constraint_name = 'crypto_klines_exchange_symbol_market_period_timestamp_environment_key'
+            AND table_name = 'crypto_klines'
         """))
+        if constraint_check.scalar() == 0:
+            db.execute(text("""
+                ALTER TABLE crypto_klines
+                ADD CONSTRAINT crypto_klines_exchange_symbol_market_period_timestamp_environment_key
+                UNIQUE (exchange, symbol, market, period, timestamp, environment)
+            """))
+            print("  ✓ New unique constraint created")
+        else:
+            print("  ✓ Unique constraint already exists, skipping")
 
-        # Step 5: Create indexes for performance
+        # Step 5: Create indexes for performance (idempotent)
         print("Creating performance indexes...")
         db.execute(text("""
-            CREATE INDEX idx_crypto_klines_environment ON crypto_klines(environment)
+            CREATE INDEX IF NOT EXISTS idx_crypto_klines_environment ON crypto_klines(environment)
         """))
         db.execute(text("""
-            CREATE INDEX idx_crypto_klines_symbol_period_env ON crypto_klines(symbol, period, environment)
+            CREATE INDEX IF NOT EXISTS idx_crypto_klines_symbol_period_env ON crypto_klines(symbol, period, environment)
         """))
 
         db.commit()
