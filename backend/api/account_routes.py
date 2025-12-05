@@ -1166,8 +1166,28 @@ async def approve_builder_fee(
         if not account:
             raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
 
-        # Verify it's a Hyperliquid account
+        # Verify it's a Hyperliquid account - check both old and new architecture
         hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+
+        # If not set in accounts table, check hyperliquid_wallets table for mainnet wallet
+        if hyperliquid_environment not in ["testnet", "mainnet"]:
+            mainnet_wallet = db.query(HyperliquidWallet).filter(
+                HyperliquidWallet.account_id == account_id,
+                HyperliquidWallet.environment == "mainnet",
+                HyperliquidWallet.private_key_encrypted.isnot(None)
+            ).first()
+            if mainnet_wallet:
+                hyperliquid_environment = "mainnet"
+            else:
+                # Also check for testnet wallet
+                testnet_wallet = db.query(HyperliquidWallet).filter(
+                    HyperliquidWallet.account_id == account_id,
+                    HyperliquidWallet.environment == "testnet",
+                    HyperliquidWallet.private_key_encrypted.isnot(None)
+                ).first()
+                if testnet_wallet:
+                    hyperliquid_environment = "testnet"
+
         if hyperliquid_environment not in ["testnet", "mainnet"]:
             raise HTTPException(
                 status_code=400,
