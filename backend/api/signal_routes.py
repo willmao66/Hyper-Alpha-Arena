@@ -37,15 +37,21 @@ def get_db():
 @router.get("/", response_model=SignalListResponse)
 def list_signals(db: Session = Depends(get_db)) -> SignalListResponse:
     """List all signal definitions and pools"""
+    import json
+
     signals_result = db.execute(text("""
         SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at
         FROM signal_definitions ORDER BY id
     """))
     signals = []
     for row in signals_result:
+        # Parse trigger_condition from JSON string if needed
+        trigger_condition = row[3]
+        if isinstance(trigger_condition, str):
+            trigger_condition = json.loads(trigger_condition)
         signals.append(SignalDefinitionResponse(
             id=row[0], signal_name=row[1], description=row[2],
-            trigger_condition=row[3], enabled=row[4],
+            trigger_condition=trigger_condition, enabled=row[4],
             created_at=row[5], updated_at=row[6]
         ))
 
@@ -55,9 +61,16 @@ def list_signals(db: Session = Depends(get_db)) -> SignalListResponse:
     """))
     pools = []
     for row in pools_result:
+        # Parse JSON fields if they are strings
+        signal_ids = row[2]
+        if isinstance(signal_ids, str):
+            signal_ids = json.loads(signal_ids)
+        symbols = row[3]
+        if isinstance(symbols, str):
+            symbols = json.loads(symbols)
         pools.append(SignalPoolResponse(
-            id=row[0], pool_name=row[1], signal_ids=row[2] or [],
-            symbols=row[3] or [], enabled=row[4], created_at=row[5],
+            id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
+            symbols=symbols or [], enabled=row[4], created_at=row[5],
             logic=row[6] or "OR"
         ))
 
@@ -80,9 +93,12 @@ def create_signal(payload: SignalDefinitionCreate, db: Session = Depends(get_db)
     })
     db.commit()
     row = result.fetchone()
+    trigger_condition = row[3]
+    if isinstance(trigger_condition, str):
+        trigger_condition = json.loads(trigger_condition)
     return SignalDefinitionResponse(
         id=row[0], signal_name=row[1], description=row[2],
-        trigger_condition=row[3], enabled=row[4],
+        trigger_condition=trigger_condition, enabled=row[4],
         created_at=row[5], updated_at=row[6]
     )
 
@@ -90,6 +106,7 @@ def create_signal(payload: SignalDefinitionCreate, db: Session = Depends(get_db)
 @router.get("/definitions/{signal_id}", response_model=SignalDefinitionResponse)
 def get_signal(signal_id: int, db: Session = Depends(get_db)):
     """Get a signal definition by ID"""
+    import json
     result = db.execute(text("""
         SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at
         FROM signal_definitions WHERE id = :id
@@ -97,9 +114,12 @@ def get_signal(signal_id: int, db: Session = Depends(get_db)):
     row = result.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Signal not found")
+    trigger_condition = row[3]
+    if isinstance(trigger_condition, str):
+        trigger_condition = json.loads(trigger_condition)
     return SignalDefinitionResponse(
         id=row[0], signal_name=row[1], description=row[2],
-        trigger_condition=row[3], enabled=row[4],
+        trigger_condition=trigger_condition, enabled=row[4],
         created_at=row[5], updated_at=row[6]
     )
 
@@ -134,9 +154,12 @@ def update_signal(signal_id: int, payload: SignalDefinitionUpdate, db: Session =
     row = result.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Signal not found")
+    trigger_condition = row[3]
+    if isinstance(trigger_condition, str):
+        trigger_condition = json.loads(trigger_condition)
     return SignalDefinitionResponse(
         id=row[0], signal_name=row[1], description=row[2],
-        trigger_condition=row[3], enabled=row[4],
+        trigger_condition=trigger_condition, enabled=row[4],
         created_at=row[5], updated_at=row[6]
     )
 
@@ -170,9 +193,15 @@ def create_pool(payload: SignalPoolCreate, db: Session = Depends(get_db)):
     })
     db.commit()
     row = result.fetchone()
+    signal_ids = row[2]
+    if isinstance(signal_ids, str):
+        signal_ids = json.loads(signal_ids)
+    symbols = row[3]
+    if isinstance(symbols, str):
+        symbols = json.loads(symbols)
     return SignalPoolResponse(
-        id=row[0], pool_name=row[1], signal_ids=row[2] or [],
-        symbols=row[3] or [], enabled=row[4], created_at=row[5],
+        id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
+        symbols=symbols or [], enabled=row[4], created_at=row[5],
         logic=row[6] or "OR"
     )
 
@@ -180,6 +209,7 @@ def create_pool(payload: SignalPoolCreate, db: Session = Depends(get_db)):
 @router.get("/pools/{pool_id}", response_model=SignalPoolResponse)
 def get_pool(pool_id: int, db: Session = Depends(get_db)):
     """Get a signal pool by ID"""
+    import json
     result = db.execute(text("""
         SELECT id, pool_name, signal_ids, symbols, enabled, created_at, logic
         FROM signal_pools WHERE id = :id
@@ -187,9 +217,15 @@ def get_pool(pool_id: int, db: Session = Depends(get_db)):
     row = result.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Pool not found")
+    signal_ids = row[2]
+    if isinstance(signal_ids, str):
+        signal_ids = json.loads(signal_ids)
+    symbols = row[3]
+    if isinstance(symbols, str):
+        symbols = json.loads(symbols)
     return SignalPoolResponse(
-        id=row[0], pool_name=row[1], signal_ids=row[2] or [],
-        symbols=row[3] or [], enabled=row[4], created_at=row[5],
+        id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
+        symbols=symbols or [], enabled=row[4], created_at=row[5],
         logic=row[6] or "OR"
     )
 
@@ -225,9 +261,15 @@ def update_pool(pool_id: int, payload: SignalPoolUpdate, db: Session = Depends(g
     row = result.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Pool not found")
+    signal_ids = row[2]
+    if isinstance(signal_ids, str):
+        signal_ids = json.loads(signal_ids)
+    symbols = row[3]
+    if isinstance(symbols, str):
+        symbols = json.loads(symbols)
     return SignalPoolResponse(
-        id=row[0], pool_name=row[1], signal_ids=row[2] or [],
-        symbols=row[3] or [], enabled=row[4], created_at=row[5],
+        id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
+        symbols=symbols or [], enabled=row[4], created_at=row[5],
         logic=row[6] or "OR"
     )
 
