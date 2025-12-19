@@ -432,12 +432,20 @@ def get_trigger_logs(
         FROM signal_trigger_logs {where_clause}
         ORDER BY triggered_at DESC LIMIT :limit
     """
+    import json
     result = db.execute(text(query), params)
     logs = []
     for row in result:
+        # Parse trigger_value - ORM defines as Text, so it may be string
+        trigger_val = row[4]
+        if isinstance(trigger_val, str):
+            try:
+                trigger_val = json.loads(trigger_val)
+            except json.JSONDecodeError:
+                trigger_val = None
         logs.append(SignalTriggerLogResponse(
             id=row[0], signal_id=row[1], pool_id=row[2],
-            symbol=row[3], trigger_value=row[4], triggered_at=row[5]
+            symbol=row[3], trigger_value=trigger_val, triggered_at=row[5]
         ))
 
     # Get total count
@@ -460,6 +468,7 @@ def test_signal(
     Test a signal against current market data.
     Returns the current metric value and whether the condition is met.
     """
+    import json
     from services.signal_detection_service import signal_detection_service
     from services.market_flow_collector import market_flow_collector
 
@@ -472,11 +481,19 @@ def test_signal(
     if not row:
         raise HTTPException(status_code=404, detail="Signal not found")
 
+    # Parse trigger_condition - may be string (TEXT) or dict (JSONB)
+    trigger_condition = row[3]
+    if isinstance(trigger_condition, str):
+        try:
+            trigger_condition = json.loads(trigger_condition)
+        except json.JSONDecodeError:
+            trigger_condition = {}
+
     signal_def = {
         "id": row[0],
         "signal_name": row[1],
         "description": row[2],
-        "trigger_condition": row[3],
+        "trigger_condition": trigger_condition,
         "enabled": row[4]
     }
 

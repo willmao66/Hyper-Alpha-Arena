@@ -34,6 +34,7 @@ MIGRATIONS = [
     "add_signal_pool_to_strategy.py",
     "add_logic_to_signal_pools.py",
     "fix_enabled_column_type.py",
+    "convert_signal_jsonb_to_text.py",
 ]
 
 

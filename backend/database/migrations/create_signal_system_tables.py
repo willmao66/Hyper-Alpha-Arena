@@ -25,7 +25,7 @@ def migrate():
                 id SERIAL PRIMARY KEY,
                 signal_name VARCHAR(100) NOT NULL,
                 description TEXT,
-                trigger_condition JSONB NOT NULL,
+                trigger_condition TEXT NOT NULL,
                 enabled BOOLEAN DEFAULT true,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -46,8 +46,8 @@ def migrate():
             CREATE TABLE IF NOT EXISTS signal_pools (
                 id SERIAL PRIMARY KEY,
                 pool_name VARCHAR(100) NOT NULL,
-                signal_ids JSONB NOT NULL DEFAULT '[]',
-                symbols JSONB NOT NULL DEFAULT '[]',
+                signal_ids TEXT NOT NULL DEFAULT '[]',
+                symbols TEXT NOT NULL DEFAULT '[]',
                 enabled BOOLEAN DEFAULT true,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -85,7 +85,7 @@ def migrate():
                 signal_id INTEGER REFERENCES signal_definitions(id) ON DELETE CASCADE,
                 pool_id INTEGER REFERENCES signal_pools(id) ON DELETE CASCADE,
                 symbol VARCHAR(20) NOT NULL,
-                trigger_value JSONB,
+                trigger_value TEXT,
                 triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))
