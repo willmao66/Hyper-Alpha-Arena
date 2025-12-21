@@ -35,6 +35,7 @@ MIGRATIONS = [
     "add_logic_to_signal_pools.py",
     "fix_enabled_column_type.py",
     "convert_signal_jsonb_to_text.py",
+    "create_market_regime_configs.py",
 ]
 
 

@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Plus, Trash2, Edit, Activity, Eye, Sparkles } from 'lucide-react'
 import SignalPreviewChart from './SignalPreviewChart'
 import AiSignalChatModal from './AiSignalChatModal'
+import MarketRegimeConfig from './MarketRegimeConfig'
 import PacmanLoader from '../ui/pacman-loader'
 
 // Types
@@ -890,6 +891,7 @@ export default function SignalManager() {
             <TabsTrigger value="signals" className="min-w-[100px]">Signals</TabsTrigger>
             <TabsTrigger value="pools" className="min-w-[120px]">Signal Pools</TabsTrigger>
             <TabsTrigger value="logs" className="min-w-[120px]">Trigger Logs</TabsTrigger>
+            <TabsTrigger value="regime" className="min-w-[130px]">Market Regime</TabsTrigger>
           </TabsList>
           <p className="text-xs text-amber-600 font-medium flex items-center gap-1">
             <span>⚠️</span>
@@ -1105,6 +1107,10 @@ export default function SignalManager() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="regime" className="space-y-4">
+          <MarketRegimeConfig />
         </TabsContent>
       </Tabs>
 

@@ -108,6 +108,37 @@ Format: `{SYMBOL_INDICATOR_PERIOD}` (Supported periods: 1m, 3m, 5m, 15m, 30m, 1h
 - `{BTC_DEPTH_15m}` - Order Book Depth Ratio (Bid/Ask), shows support/resistance strength
 - `{BTC_IMBALANCE_15m}` - Order Book Imbalance (-1 to 1), indicates directional pressure
 
+### Market Regime Classification Variables
+Format: `{SYMBOL_market_regime_PERIOD}` or `{market_regime_PERIOD}` (Supported periods: 1m, 5m, 15m, 1h)
+
+Market Regime provides AI-ready classification of current market conditions by combining multiple flow indicators.
+
+**Available Variables:**
+- `{market_regime_description}` - Indicator definitions and regime type explanations (include once for AI context)
+- `{market_regime}` / `{market_regime_5m}` - All symbols summary (default 5m)
+- `{market_regime_1m}`, `{market_regime_15m}`, `{market_regime_1h}` - All symbols at different timeframes
+- `{BTC_market_regime}` / `{BTC_market_regime_5m}` - Single symbol (default 5m)
+- `{BTC_market_regime_1m}`, `{BTC_market_regime_15m}`, `{BTC_market_regime_1h}` - Single symbol at different timeframes
+
+**Regime Types:**
+- `breakout` - Strong directional move with volume confirmation
+- `absorption` - Large orders absorbed without price impact (potential reversal)
+- `stop_hunt` - Wick beyond range then reversal (liquidity grab)
+- `exhaustion` - Extreme RSI with diverging CVD (trend weakening)
+- `trap` - Price breaks level but CVD/OI diverge (false breakout)
+- `continuation` - Trend continuation with aligned indicators
+- `noise` - No clear pattern, low conviction
+
+**Output Format:**
+```
+[BTC/5m] stop_hunt (bullish) conf=0.44 | cvd_ratio=0.286, oi_delta=0.01%, taker=1.80, rsi=50.7
+```
+
+**When to Use:**
+- Use `{market_regime_description}` once at the beginning so AI understands indicator meanings
+- Use regime variables to quickly assess market conditions without manual indicator analysis
+- Combine with raw flow indicators for deeper analysis when needed
+
 ### Position & Account Variables
 - `{positions_detail}` - Detailed information about all current open positions
 - `{recent_trades_summary}` - Summary of recently closed trades (helps avoid flip-flop behavior)
@@ -588,6 +619,7 @@ Does this match your expectations? Or would you like to adjust any of these assu
 - **Volume-Based**: VWAP for institutional levels, OBV for trend confirmation
 - **Order Flow Strategies**: CVD for buying/selling pressure, TAKER for aggressive participants, OI_DELTA for position changes
 - **Sentiment Strategies**: FUNDING for long/short imbalance, DEPTH/IMBALANCE for order book pressure
+- **Market Regime Strategies**: Use `{market_regime_description}` + `{market_regime_5m}` or `{market_regime_1h}` for pre-classified market conditions. Ideal for strategies that adapt behavior based on regime type (e.g., trend-follow in breakout, fade in exhaustion)
 - **Multi-factor**: Combine 3-4 indicators from different categories (e.g., EMA + RSI + CVD + FUNDING)
 
 ## Remember

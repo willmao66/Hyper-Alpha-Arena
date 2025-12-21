@@ -249,6 +249,74 @@ To add market flow analysis to your prompt:
 
 ---
 
+## Market Regime Classification Variables (Advanced)
+
+Market Regime variables provide AI-ready classification of current market conditions, combining multiple flow indicators into actionable regime types.
+
+### Available Variables
+
+| Variable | Description |
+|----------|-------------|
+| `{market_regime_description}` | Indicator calculation methodology and regime type definitions (include once for AI context) |
+| `{market_regime}` | All symbols summary (default 5m timeframe) |
+| `{market_regime_1m}` | All symbols summary (1-minute timeframe) |
+| `{market_regime_5m}` | All symbols summary (5-minute timeframe) |
+| `{market_regime_15m}` | All symbols summary (15-minute timeframe) |
+| `{market_regime_1h}` | All symbols summary (1-hour timeframe) |
+| `{BTC_market_regime}` | BTC regime only (default 5m) |
+| `{BTC_market_regime_1m}` | BTC regime (1-minute) |
+| `{BTC_market_regime_5m}` | BTC regime (5-minute) |
+| `{BTC_market_regime_15m}` | BTC regime (15-minute) |
+| `{BTC_market_regime_1h}` | BTC regime (1-hour) |
+
+Similar patterns available for ETH, SOL, and other supported symbols.
+
+### Regime Types
+
+| Regime | Description |
+|--------|-------------|
+| `breakout` | Strong directional move with volume confirmation |
+| `absorption` | Large orders absorbed without price impact (potential reversal) |
+| `stop_hunt` | Wick beyond range then reversal (liquidity grab) |
+| `exhaustion` | Extreme RSI with diverging CVD (trend weakening) |
+| `trap` | Price breaks level but CVD/OI diverge (false breakout) |
+| `continuation` | Trend continuation with aligned indicators |
+| `noise` | No clear pattern, low conviction |
+
+### Output Format
+
+```
+[BTC/5m] stop_hunt (bullish) conf=0.44 | cvd_ratio=0.286, oi_delta=0.01%, taker=1.80, rsi=50.7
+```
+
+- `[SYMBOL/TIMEFRAME]` - Symbol and timeframe context
+- `regime (direction)` - Classified regime type and direction (bullish/bearish/neutral)
+- `conf=X.XX` - Confidence score (0-1)
+- Indicator values: cvd_ratio, oi_delta, taker ratio, RSI
+
+### Indicator Definitions
+
+- **cvd_ratio**: CVD / (Taker Buy + Taker Sell). Positive = net buying pressure
+- **oi_delta**: Open Interest change percentage over the period
+- **taker**: Taker Buy/Sell ratio. >1 = aggressive buying, <1 = aggressive selling
+- **rsi**: RSI(14) momentum indicator. >70 overbought, <30 oversold
+
+### Example Usage
+
+```
+=== MARKET REGIME ANALYSIS ===
+{market_regime_description}
+
+Current Market Regimes:
+{market_regime_5m}
+
+Hourly Context:
+{BTC_market_regime_1h}
+{ETH_market_regime_1h}
+```
+
+---
+
 ## Legacy Variables (Backward Compatibility)
 
 | Variable | Description | Recommended Alternative |

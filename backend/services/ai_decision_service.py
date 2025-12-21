@@ -933,6 +933,73 @@ def _build_prompt_context(
 
         trigger_context_text = "\n".join(lines)
 
+    # ============================================================================
+    # Market Regime Classification Variables
+    # ============================================================================
+    # Variables provided:
+    # - {market_regime} - summary of all symbols (default 5m timeframe)
+    # - {market_regime_description} - indicator calculation methodology
+    # - {BTC_market_regime}, {ETH_market_regime} - per-symbol (default 5m)
+    # - {BTC_market_regime_1m}, {BTC_market_regime_5m}, {BTC_market_regime_15m}, {BTC_market_regime_1h}
+    # - {market_regime_1m}, {market_regime_5m}, {market_regime_15m}, {market_regime_1h}
+    market_regime_context = {}
+
+    # Indicator calculation description for AI understanding
+    market_regime_context["market_regime_description"] = """Market Regime Indicator Definitions:
+- cvd_ratio: CVD / (Taker Buy + Taker Sell). Positive = net buying pressure, negative = net selling
+- oi_delta: Open Interest change percentage over the period
+- taker: Taker Buy/Sell ratio. >1 = aggressive buying, <1 = aggressive selling
+- rsi: RSI(14) momentum indicator. >70 overbought, <30 oversold
+- price_atr: (Close - Open) / ATR. Measures price movement relative to volatility
+
+Regime Types:
+- breakout: Strong directional move with volume confirmation
+- absorption: Large orders absorbed without price impact (potential reversal)
+- stop_hunt: Wick beyond range then reversal (liquidity grab)
+- exhaustion: Extreme RSI with diverging CVD (trend weakening)
+- trap: Price breaks level but CVD/OI diverge (false breakout)
+- continuation: Trend continuation with aligned indicators
+- noise: No clear pattern, low conviction"""
+
+    if db:
+        try:
+            from services.market_regime_service import get_market_regime
+            supported_timeframes = ["1m", "5m", "15m", "1h"]
+
+            def format_regime_text(symbol, tf, result):
+                """Format regime result with symbol and timeframe context"""
+                regime = result['regime']
+                direction = result['direction']
+                conf = result['confidence']
+                ind = result.get('indicators', {})
+                if not ind:
+                    return f"[{symbol}/{tf}] {regime} ({direction}) conf={conf:.2f} | insufficient data"
+                return (
+                    f"[{symbol}/{tf}] {regime} ({direction}) conf={conf:.2f} | "
+                    f"cvd_ratio={ind.get('cvd_z', 0):.3f}, oi_delta={ind.get('oi_z', 0):.2f}%, "
+                    f"taker={ind.get('taker_ratio', 1):.2f}, rsi={ind.get('rsi', 50):.1f}"
+                )
+
+            for tf in supported_timeframes:
+                tf_regime_lines = []
+                for symbol in ordered_symbols:
+                    regime_result = get_market_regime(db, symbol, tf)
+                    regime_text = format_regime_text(symbol, tf, regime_result)
+                    market_regime_context[f"{symbol}_market_regime_{tf}"] = regime_text
+                    tf_regime_lines.append(f"- {regime_text}")
+                market_regime_context[f"market_regime_{tf}"] = "\n".join(tf_regime_lines) if tf_regime_lines else "N/A"
+
+            # Default variables (5m) for backward compatibility
+            for symbol in ordered_symbols:
+                market_regime_context[f"{symbol}_market_regime"] = market_regime_context.get(f"{symbol}_market_regime_5m", "N/A")
+            market_regime_context["market_regime"] = market_regime_context.get("market_regime_5m", "N/A")
+
+        except Exception as e:
+            logger.warning(f"Failed to get market regime data: {e}")
+            market_regime_context["market_regime"] = "N/A"
+    else:
+        market_regime_context["market_regime"] = "N/A"
+
     return {
         # Legacy variables (for Default prompt and backward compatibility)
         "account_state": account_state,
@@ -980,6 +1047,8 @@ def _build_prompt_context(
         "trigger_context": trigger_context_text,
         # K-line and technical indicator variables (dynamically generated)
         **kline_context,  # Merge K-line/indicator variables like {BTC_klines_15m}, {BTC_MACD_15m}, etc.
+        # Market Regime classification variables (multi-timeframe)
+        **market_regime_context,  # Merge {market_regime}, {BTC_market_regime_5m}, etc.
     }
 
 
@@ -1211,6 +1280,8 @@ def call_ai_for_decision(
             template_text=template.template_text,
             trigger_context=trigger_context,
         )
+
+    # Market Regime variables are now generated inside _build_prompt_context
 
     try:
         prompt = template.template_text.format_map(SafeDict(context))

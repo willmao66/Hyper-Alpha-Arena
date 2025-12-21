@@ -813,6 +813,41 @@ class TraderTriggerConfig(Base):
                         onupdate=func.current_timestamp())
 
 
+class MarketRegimeConfig(Base):
+    """Configuration for Market Regime classification thresholds"""
+    __tablename__ = "market_regime_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    is_default = Column(Boolean, nullable=True, default=False)
+    rolling_window = Column(Integer, nullable=True, default=48)
+    # Breakout thresholds
+    breakout_cvd_z = Column(Float, nullable=True, default=1.5)
+    breakout_oi_z = Column(Float, nullable=True, default=1.0)
+    breakout_price_atr = Column(Float, nullable=True, default=0.5)
+    breakout_taker_high = Column(Float, nullable=True, default=1.8)
+    breakout_taker_low = Column(Float, nullable=True, default=0.55)
+    # Absorption thresholds
+    absorption_cvd_z = Column(Float, nullable=True, default=1.5)
+    absorption_price_atr = Column(Float, nullable=True, default=0.3)
+    # Trap thresholds
+    trap_cvd_z = Column(Float, nullable=True, default=1.0)
+    trap_oi_z = Column(Float, nullable=True, default=-1.0)
+    # Exhaustion thresholds
+    exhaustion_cvd_z = Column(Float, nullable=True, default=1.0)
+    exhaustion_rsi_high = Column(Float, nullable=True, default=70.0)
+    exhaustion_rsi_low = Column(Float, nullable=True, default=30.0)
+    # Stop Hunt thresholds
+    stop_hunt_range_atr = Column(Float, nullable=True, default=1.0)
+    stop_hunt_close_atr = Column(Float, nullable=True, default=0.3)
+    # Noise thresholds
+    noise_cvd_z = Column(Float, nullable=True, default=0.5)
+    # Timestamps
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(),
+                        onupdate=func.current_timestamp())
+
+
 # ============================================================================
 # CRYPTO market trading configuration constants
 # ============================================================================
