@@ -897,12 +897,32 @@ def get_trade_replay(
     entry_time = None
     exit_time = None
 
+    # For TP/SL triggered trades, get actual trigger time from HyperliquidTrade
+    tp_sl_trigger_time = None
+    tp_sl_exit_type = None
+
     if is_entry and trade.realized_pnl:
         # This is an entry with PnL (TP/SL triggered) - entry and exit are same record
         entry_decision = trade
         exit_decision = trade
         entry_time = trade.decision_time
-        exit_time = trade.pnl_updated_at or trade.decision_time
+
+        # Get actual TP/SL trigger time from HyperliquidTrade
+        tp_sl_order_id = trade.tp_order_id or trade.sl_order_id
+        if tp_sl_order_id:
+            try:
+                snapshot_db = SnapshotSessionLocal()
+                hl_trade = snapshot_db.query(HyperliquidTrade).filter(
+                    HyperliquidTrade.order_id == str(tp_sl_order_id)
+                ).first()
+                if hl_trade and hl_trade.trade_time:
+                    tp_sl_trigger_time = hl_trade.trade_time
+                    tp_sl_exit_type = "TP" if float(trade.realized_pnl) > 0 else "SL"
+                snapshot_db.close()
+            except Exception as e:
+                logger.warning(f"Failed to get TP/SL trigger time: {e}")
+
+        exit_time = tp_sl_trigger_time or trade.pnl_updated_at or trade.decision_time
     elif is_entry:
         # Entry without PnL - need to find exit
         entry_decision = trade
@@ -948,6 +968,24 @@ def get_trade_replay(
                 "target_portion": float(d.target_portion) if d.target_portion else 0,
                 "realized_pnl": float(d.realized_pnl) if d.realized_pnl else None,
             })
+
+        # Add TP/SL triggered close to decision chain (when no AI Close decision exists)
+        # This handles cases where position was closed by TP/SL order, not by AI Close decision
+        if is_entry and trade.realized_pnl and (trade.tp_order_id or trade.sl_order_id):
+            has_close_decision = any(d["operation"] == "close" for d in decisions_chain)
+            if not has_close_decision:
+                # Determine exit type based on PnL
+                exit_type = tp_sl_exit_type or ("TP" if float(trade.realized_pnl) > 0 else "SL")
+                # Use actual trigger time if available, otherwise use pnl_updated_at
+                close_time = tp_sl_trigger_time or trade.pnl_updated_at or trade.decision_time
+                decisions_chain.append({
+                    "id": -1,  # Virtual ID for TP/SL triggered close
+                    "operation": "close",
+                    "decision_time": close_time.isoformat() if close_time else None,
+                    "reason": f"{exit_type} triggered",
+                    "target_portion": 1.0,
+                    "realized_pnl": float(trade.realized_pnl),
+                })
 
     # Calculate summary
     entry_price = None
@@ -1056,12 +1094,30 @@ def get_trade_replay_kline(
     exit_decision = None
     entry_time = None
     exit_time = None
+    tp_sl_trigger_time = None
+    tp_sl_exit_type = None
 
     if is_entry and trade.realized_pnl:
         entry_decision = trade
         exit_decision = trade
         entry_time = trade.decision_time
-        exit_time = trade.pnl_updated_at or trade.decision_time
+
+        # Get actual TP/SL trigger time from HyperliquidTrade
+        tp_sl_order_id = trade.tp_order_id or trade.sl_order_id
+        if tp_sl_order_id:
+            try:
+                snapshot_db = SnapshotSessionLocal()
+                hl_trade = snapshot_db.query(HyperliquidTrade).filter(
+                    HyperliquidTrade.order_id == str(tp_sl_order_id)
+                ).first()
+                if hl_trade and hl_trade.trade_time:
+                    tp_sl_trigger_time = hl_trade.trade_time
+                    tp_sl_exit_type = "TP" if float(trade.realized_pnl) > 0 else "SL"
+                snapshot_db.close()
+            except Exception as e:
+                logger.warning(f"Failed to get TP/SL trigger time for kline: {e}")
+
+        exit_time = tp_sl_trigger_time or trade.pnl_updated_at or trade.decision_time
     elif is_entry:
         entry_decision = trade
         entry_time = trade.decision_time
@@ -1188,15 +1244,18 @@ def get_trade_replay_kline(
             "exit_price": exit_prices["exit_price"] or exit_prices["entry_price"],  # min_price for close, max_price fallback
         })
     elif exit_decision and exit_decision.id == entry_decision.id and trade.realized_pnl:
-        # TP/SL triggered - add exit marker at pnl_updated_at time
+        # TP/SL triggered - add exit marker at actual trigger time
         entry_prices = _parse_decision_prices(entry_decision)
+        actual_exit_time = tp_sl_trigger_time or trade.pnl_updated_at or trade.decision_time
+        # Determine exit type: use detected type, or infer from PnL
+        actual_exit_type = tp_sl_exit_type or ("TP" if float(trade.realized_pnl) > 0 else "SL")
         markers.append({
             "type": "exit",
-            "time": (trade.pnl_updated_at or trade.decision_time).isoformat(),
-            "timestamp": int((trade.pnl_updated_at or trade.decision_time).timestamp()),
+            "time": actual_exit_time.isoformat(),
+            "timestamp": int(actual_exit_time.timestamp()),
             "operation": "close",
-            "reason": "TP/SL triggered",
-            "exit_type": get_exit_type(trade),
+            "reason": f"{actual_exit_type} triggered",
+            "exit_type": actual_exit_type,
             "realized_pnl": float(trade.realized_pnl),
             "symbol": trade.symbol,
             "exit_price": entry_prices["tp_price"] if float(trade.realized_pnl) > 0 else entry_prices["sl_price"],
