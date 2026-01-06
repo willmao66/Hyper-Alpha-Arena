@@ -277,7 +277,8 @@ class AccountStrategyConfig(Base):
     trigger_interval = Column(Integer, nullable=False, default=150)  # Trigger interval (seconds)
     # Note: Foreign key constraint exists at DB level (via migration), but not in ORM
     # because signal_pools table is managed via raw SQL, not SQLAlchemy models
-    signal_pool_id = Column(Integer, nullable=True)
+    signal_pool_id = Column(Integer, nullable=True)  # Deprecated: use signal_pool_ids instead
+    signal_pool_ids = Column(Text, nullable=True)  # JSON array of signal pool IDs, e.g. "[1, 2, 3]"
     enabled = Column(String(10), nullable=False, default="true")
     scheduled_trigger_enabled = Column(Boolean, nullable=False, default=True)  # Enable/disable scheduled trigger
     last_trigger_at = Column(TIMESTAMP, nullable=True)
@@ -864,7 +865,8 @@ class TraderTriggerConfig(Base):
     trader_id = Column(String(36), primary_key=True)  # UUID as string
     scheduled_enabled = Column(Boolean, nullable=True, default=True)
     scheduled_interval = Column(Integer, nullable=True, default=30)
-    signal_pool_id = Column(Integer, nullable=True)
+    signal_pool_id = Column(Integer, nullable=True)  # Deprecated: use signal_pool_ids instead
+    signal_pool_ids = Column(Text, nullable=True)  # JSON array of signal pool IDs, e.g. "[1, 2, 3]"
     last_trigger_time = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(),

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional, List
+import json
 from sqlalchemy.orm import Session
 
 from database.models import AccountStrategyConfig
@@ -17,6 +18,24 @@ def list_strategies(db: Session) -> List[AccountStrategyConfig]:
     return db.query(AccountStrategyConfig).all()
 
 
+def parse_signal_pool_ids(strategy: AccountStrategyConfig) -> List[int]:
+    """Parse signal_pool_ids from strategy, with fallback to signal_pool_id for compatibility."""
+    # Try new field first
+    if strategy.signal_pool_ids:
+        try:
+            ids = strategy.signal_pool_ids
+            if isinstance(ids, str):
+                ids = json.loads(ids)
+            if isinstance(ids, list):
+                return [int(i) for i in ids if i is not None]
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+    # Fallback to old field
+    if strategy.signal_pool_id is not None:
+        return [strategy.signal_pool_id]
+    return []
+
+
 def upsert_strategy(
     db: Session,
     account_id: int,
@@ -27,9 +46,10 @@ def upsert_strategy(
     scheduled_trigger_enabled: bool = True,
     price_threshold: Optional[float] = None,
     trigger_interval: Optional[int] = None,
-    signal_pool_id: Optional[int] = None,
+    signal_pool_id: Optional[int] = None,  # Deprecated: kept for backward compatibility
+    signal_pool_ids: Optional[List[int]] = None,  # New: list of pool IDs
 ) -> AccountStrategyConfig:
-    print(f"upsert_strategy called with: account_id={account_id}, interval_seconds={interval_seconds}, trigger_interval={trigger_interval}, signal_pool_id={signal_pool_id}, scheduled_trigger_enabled={scheduled_trigger_enabled}")
+    print(f"upsert_strategy called with: account_id={account_id}, signal_pool_ids={signal_pool_ids}, signal_pool_id={signal_pool_id}")
     strategy = get_strategy_by_account(db, account_id)
     if strategy is None:
         strategy = AccountStrategyConfig(account_id=account_id)
@@ -42,8 +62,21 @@ def upsert_strategy(
     strategy.scheduled_trigger_enabled = scheduled_trigger_enabled
     if price_threshold is not None:
         strategy.price_threshold = price_threshold
-    # signal_pool_id can be None (unbind) or an integer (bind to pool)
-    strategy.signal_pool_id = signal_pool_id
+
+    # Handle signal pool binding - prefer signal_pool_ids over signal_pool_id
+    if signal_pool_ids is not None:
+        # New format: store as JSON array
+        strategy.signal_pool_ids = json.dumps(signal_pool_ids) if signal_pool_ids else None
+        # Also update old field for backward compatibility (use first ID or None)
+        strategy.signal_pool_id = signal_pool_ids[0] if signal_pool_ids else None
+    elif signal_pool_id is not None:
+        # Old format: convert to new format
+        strategy.signal_pool_ids = json.dumps([signal_pool_id])
+        strategy.signal_pool_id = signal_pool_id
+    else:
+        # Unbind all
+        strategy.signal_pool_ids = None
+        strategy.signal_pool_id = None
 
     db.commit()
     db.refresh(strategy)

@@ -46,6 +46,8 @@ def _normalize_bool(value, default=True) -> bool:
 
 def _serialize_strategy(account: Account, strategy, db: Session = None) -> StrategyConfig:
     """Convert database strategy config to API schema."""
+    from repositories.strategy_repo import parse_signal_pool_ids
+
     last_trigger = strategy.last_trigger_at
     if last_trigger:
         if last_trigger.tzinfo is None:
@@ -55,16 +57,22 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
     else:
         last_iso = None
 
-    # Get signal pool name if bound
-    signal_pool_name = None
-    if strategy.signal_pool_id and db:
+    # Get signal pool IDs (new format with fallback)
+    pool_ids = parse_signal_pool_ids(strategy)
+
+    # Get signal pool names if bound
+    signal_pool_name = None  # Deprecated: for backward compatibility
+    signal_pool_names = []
+    if pool_ids and db:
         from sqlalchemy import text
         result = db.execute(
-            text("SELECT pool_name FROM signal_pools WHERE id = :id"),
-            {"id": strategy.signal_pool_id}
-        ).fetchone()
-        if result:
-            signal_pool_name = result[0]
+            text("SELECT id, pool_name FROM signal_pools WHERE id = ANY(:ids)"),
+            {"ids": pool_ids}
+        ).fetchall()
+        pool_name_map = {row[0]: row[1] for row in result}
+        signal_pool_names = [pool_name_map.get(pid) for pid in pool_ids if pool_name_map.get(pid)]
+        # Backward compatibility: use first pool name
+        signal_pool_name = signal_pool_names[0] if signal_pool_names else None
 
     return StrategyConfig(
         trigger_mode="unified",
@@ -74,8 +82,10 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
         last_trigger_at=last_iso,
         price_threshold=strategy.price_threshold or 1.0,
-        signal_pool_id=strategy.signal_pool_id,
-        signal_pool_name=signal_pool_name,
+        signal_pool_id=pool_ids[0] if pool_ids else None,  # Deprecated
+        signal_pool_ids=pool_ids if pool_ids else None,
+        signal_pool_name=signal_pool_name,  # Deprecated
+        signal_pool_names=signal_pool_names if signal_pool_names else None,
     )
 
 
@@ -319,7 +329,8 @@ async def update_account_strategy(
         trigger_interval=trigger_interval,
         enabled=payload.enabled,
         scheduled_trigger_enabled=payload.scheduled_trigger_enabled,
-        signal_pool_id=payload.signal_pool_id,
+        signal_pool_id=payload.signal_pool_id,  # Deprecated: for backward compatibility
+        signal_pool_ids=payload.signal_pool_ids,  # New: list of pool IDs
     )
 
     # Reload strategies after update

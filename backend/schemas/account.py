@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class AccountCreate(BaseModel):
@@ -53,7 +53,8 @@ class StrategyConfigBase(BaseModel):
     enabled: bool = True
     scheduled_trigger_enabled: bool = True  # Enable/disable scheduled trigger
     price_threshold: Optional[float] = None  # Deprecated, kept for compatibility
-    signal_pool_id: Optional[int] = None  # Signal pool binding for signal-based triggering
+    signal_pool_id: Optional[int] = None  # Deprecated: use signal_pool_ids instead
+    signal_pool_ids: Optional[List[int]] = None  # Multiple signal pools binding (OR relationship)
 
 
 class StrategyConfigUpdate(StrategyConfigBase):
@@ -64,4 +65,5 @@ class StrategyConfigUpdate(StrategyConfigBase):
 class StrategyConfig(StrategyConfigBase):
     """Strategy configuration response"""
     last_trigger_at: Optional[str] = None
-    signal_pool_name: Optional[str] = None  # Signal pool name for display
+    signal_pool_name: Optional[str] = None  # Deprecated: use signal_pool_names instead
+    signal_pool_names: Optional[List[str]] = None  # Signal pool names for display

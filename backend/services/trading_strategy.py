@@ -46,12 +46,17 @@ class StrategyState:
     account_id: int
     price_threshold: float  # Deprecated, kept for compatibility
     trigger_interval: int   # Trigger interval (seconds) - scheduled trigger fallback
-    signal_pool_id: Optional[int]  # Signal pool binding for signal-based triggering
+    signal_pool_ids: List[int]  # Signal pool bindings for signal-based triggering (OR relationship)
     enabled: bool
     scheduled_trigger_enabled: bool  # Enable/disable scheduled trigger
     last_trigger_at: Optional[datetime]
     running: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
+
+    # Backward compatibility property
+    @property
+    def signal_pool_id(self) -> Optional[int]:
+        return self.signal_pool_ids[0] if self.signal_pool_ids else None
 
     def should_trigger_scheduled(self, event_time: datetime) -> bool:
         """Check if strategy should trigger based on scheduled time interval (fallback)"""
@@ -141,6 +146,8 @@ class StrategyManager:
 
     def _load_strategies(self):
         """Load strategies from database"""
+        from repositories.strategy_repo import parse_signal_pool_ids
+
         try:
             # PostgreSQL handles concurrent access natively
             db = SessionLocal()
@@ -153,11 +160,12 @@ class StrategyManager:
 
                 self.strategies.clear()
                 for strategy, account in rows:
+                    pool_ids = parse_signal_pool_ids(strategy)
                     state = StrategyState(
                         account_id=strategy.account_id,
                         price_threshold=strategy.price_threshold,
                         trigger_interval=strategy.trigger_interval,
-                        signal_pool_id=strategy.signal_pool_id,
+                        signal_pool_ids=pool_ids,
                         enabled=strategy.enabled == "true",
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
@@ -168,7 +176,7 @@ class StrategyManager:
                     print(
                         f"[DEBUG] Loaded strategy for account {strategy.account_id} ({account.name}): "
                         f"interval={strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min), "
-                        f"signal_pool_id={strategy.signal_pool_id}, enabled={strategy.enabled}, "
+                        f"signal_pool_ids={pool_ids}, enabled={strategy.enabled}, "
                         f"scheduled_trigger={strategy.scheduled_trigger_enabled}, "
                         f"last_trigger={state.last_trigger_at}"
                     )
@@ -340,11 +348,11 @@ class HyperliquidStrategyManager(StrategyManager):
         print(f"[HyperliquidStrategy] Signal pool triggered: {pool_name} (pool_id={pool_id}) on {symbol}")
         print(f"[HyperliquidStrategy] Checking {len(self.strategies)} strategies for pool_id={pool_id}")
 
-        # Find all strategies bound to this signal pool
+        # Find all strategies bound to this signal pool (check if pool_id in signal_pool_ids)
         found_match = False
         for account_id, state in self.strategies.items():
-            print(f"[HyperliquidStrategy] Account {account_id}: signal_pool_id={state.signal_pool_id}, enabled={state.enabled}")
-            if state.signal_pool_id == pool_id:
+            print(f"[HyperliquidStrategy] Account {account_id}: signal_pool_ids={state.signal_pool_ids}, enabled={state.enabled}")
+            if pool_id in state.signal_pool_ids:
                 found_match = True
                 # Try to mark as triggered (handles running state check)
                 if state.mark_triggered_by_signal(event_time):
@@ -372,6 +380,8 @@ class HyperliquidStrategyManager(StrategyManager):
 
     def _load_strategies(self):
         """Load only Hyperliquid-enabled strategies from database"""
+        from repositories.strategy_repo import parse_signal_pool_ids
+
         try:
             db = SessionLocal()
             try:
@@ -383,11 +393,12 @@ class HyperliquidStrategyManager(StrategyManager):
 
                 self.strategies.clear()
                 for strategy, account in rows:
+                    pool_ids = parse_signal_pool_ids(strategy)
                     state = StrategyState(
                         account_id=strategy.account_id,
                         price_threshold=strategy.price_threshold,
                         trigger_interval=strategy.trigger_interval,
-                        signal_pool_id=strategy.signal_pool_id,
+                        signal_pool_ids=pool_ids,
                         enabled=strategy.enabled == "true",
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
@@ -397,7 +408,7 @@ class HyperliquidStrategyManager(StrategyManager):
                     print(
                         f"[HyperliquidStrategy DEBUG] Loaded strategy for account {strategy.account_id} ({account.name}): "
                         f"interval={strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min), "
-                        f"signal_pool_id={strategy.signal_pool_id}, enabled={strategy.enabled}, "
+                        f"signal_pool_ids={pool_ids}, enabled={strategy.enabled}, "
                         f"scheduled_trigger={strategy.scheduled_trigger_enabled}, "
                         f"last_trigger={state.last_trigger_at}"
                     )

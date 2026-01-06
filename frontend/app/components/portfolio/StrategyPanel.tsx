@@ -19,8 +19,10 @@ interface StrategyConfig {
   enabled: boolean
   scheduled_trigger_enabled: boolean
   last_trigger_at?: string | null
-  signal_pool_id?: number | null
-  signal_pool_name?: string | null
+  signal_pool_id?: number | null  // Deprecated: for backward compatibility
+  signal_pool_ids?: number[] | null  // New: multiple signal pools
+  signal_pool_name?: string | null  // Deprecated
+  signal_pool_names?: string[] | null  // New: multiple pool names
 }
 
 interface SignalPool {
@@ -71,7 +73,7 @@ export default function StrategyPanel({
   const [enabled, setEnabled] = useState<boolean>(true)
   const [scheduledTriggerEnabled, setScheduledTriggerEnabled] = useState<boolean>(true)
   const [lastTriggerAt, setLastTriggerAt] = useState<string | null>(null)
-  const [signalPoolId, setSignalPoolId] = useState<number | null>(null)
+  const [signalPoolIds, setSignalPoolIds] = useState<number[]>([])
   const [signalPools, setSignalPools] = useState<SignalPool[]>([])
 
   // Global settings
@@ -112,7 +114,9 @@ export default function StrategyPanel({
         setEnabled(strategy.enabled)
         setScheduledTriggerEnabled(strategy.scheduled_trigger_enabled ?? true)
         setLastTriggerAt(strategy.last_trigger_at ?? null)
-        setSignalPoolId(strategy.signal_pool_id ?? null)
+        // Use new signal_pool_ids field, fallback to old signal_pool_id for compatibility
+        const poolIds = strategy.signal_pool_ids ?? (strategy.signal_pool_id ? [strategy.signal_pool_id] : [])
+        setSignalPoolIds(poolIds)
       }
 
       if (signalsResponse.ok) {
@@ -242,7 +246,7 @@ export default function StrategyPanel({
         scheduled_trigger_enabled: scheduledTriggerEnabled,
         trigger_mode: "unified",
         tick_batch_size: 1,
-        signal_pool_id: signalPoolId,
+        signal_pool_ids: signalPoolIds.length > 0 ? signalPoolIds : null,
       }
       console.log('Frontend saving payload:', payload)
       const response = await fetch(`/api/account/${accountId}/strategy`, {
@@ -261,7 +265,9 @@ export default function StrategyPanel({
       setEnabled(result.enabled)
       setScheduledTriggerEnabled(result.scheduled_trigger_enabled ?? true)
       setLastTriggerAt(result.last_trigger_at ?? null)
-      setSignalPoolId(result.signal_pool_id ?? null)
+      // Use new signal_pool_ids field
+      const poolIds = result.signal_pool_ids ?? (result.signal_pool_id ? [result.signal_pool_id] : [])
+      setSignalPoolIds(poolIds)
 
       setSuccess('Trader configuration saved successfully.')
     } catch (err) {
@@ -270,7 +276,7 @@ export default function StrategyPanel({
     } finally {
       setSaving(false)
     }
-  }, [accountId, priceThreshold, triggerInterval, enabled, scheduledTriggerEnabled, signalPoolId, resetMessages])
+  }, [accountId, priceThreshold, triggerInterval, enabled, scheduledTriggerEnabled, signalPoolIds, resetMessages])
 
   const handleSaveGlobal = useCallback(async () => {
     resetMessages()
@@ -374,31 +380,45 @@ export default function StrategyPanel({
               </CardHeader>
               <CardContent className="space-y-4">
                 <section className="space-y-2">
-                  <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('strategy.signalPool', 'Signal Pool')}</div>
-                  <Select
-                    value={signalPoolId?.toString() ?? 'none'}
-                    onValueChange={(value) => {
-                      setSignalPoolId(value === 'none' ? null : parseInt(value))
-                      resetMessages()
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder={t('strategy.selectSignalPool', 'Select signal pool (optional)')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">{t('strategy.noSignalPool', 'No signal pool (scheduled only)')}</SelectItem>
-                      {signalPools.map((pool) => (
-                        <SelectItem key={pool.id} value={pool.id.toString()}>
-                          {pool.pool_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('strategy.signalPools', 'Signal Pools')}</div>
+                  <div className="border rounded-md p-3 space-y-2 max-h-48 overflow-y-auto">
+                    {signalPools.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">{t('strategy.noSignalPoolsAvailable', 'No signal pools available. Create one in the Signals tab.')}</p>
+                    ) : (
+                      signalPools.map((pool) => {
+                        const isSelected = signalPoolIds.includes(pool.id)
+                        return (
+                          <label key={pool.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1 rounded">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {
+                                setSignalPoolIds(prev =>
+                                  isSelected
+                                    ? prev.filter(id => id !== pool.id)
+                                    : [...prev, pool.id]
+                                )
+                                resetMessages()
+                              }}
+                              className="h-4 w-4"
+                            />
+                            <span className="text-sm">{pool.pool_name}</span>
+                            <span className="text-xs text-muted-foreground">({pool.logic || 'OR'})</span>
+                          </label>
+                        )
+                      })
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    {signalPoolId
-                      ? t('strategy.triggerWhenMet', 'Trigger when signal pool conditions are met')
+                    {signalPoolIds.length > 0
+                      ? t('strategy.triggerWhenAnyMet', 'Trigger when ANY selected pool conditions are met (OR relationship)')
                       : t('strategy.scheduledOnly', 'Only use scheduled interval trigger')}
                   </p>
+                  {signalPoolIds.length > 1 && (
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                      {t('strategy.multiPoolWarning', 'Note: If multiple pools trigger simultaneously, only the first will execute (others are ignored while running).')}
+                    </p>
+                  )}
                 </section>
 
                 <section className="space-y-2">
@@ -437,7 +457,7 @@ export default function StrategyPanel({
                 </section>
 
                 {/* Warning when no trigger method is active */}
-                {!scheduledTriggerEnabled && !signalPoolId && (
+                {!scheduledTriggerEnabled && signalPoolIds.length === 0 && (
                   <div className="rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3">
                     <p className="text-sm text-yellow-800 dark:text-yellow-200">
                       {t('strategy.noTriggerWarning', 'Warning: This AI Trader has no active trigger method. It will not execute any trades until you enable scheduled trigger or bind a signal pool.')}
