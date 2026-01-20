@@ -22,6 +22,11 @@ from services.ai_decision_service import (
     _extract_text_from_message,
     get_max_tokens
 )
+from services.ai_shared_tools import (
+    SHARED_SIGNAL_TOOLS,
+    execute_get_signal_pools,
+    execute_run_signal_backtest
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +174,7 @@ PROMPT_TOOLS = [
             }
         }
     }
-]
+] + SHARED_SIGNAL_TOOLS  # Add shared signal pool tools
 
 
 def _convert_tools_to_anthropic(openai_tools: List[Dict]) -> List[Dict]:
@@ -466,7 +471,7 @@ def _execute_preview_prompt(args: Dict[str, Any], request_id: str) -> str:
 # Tool Execution Functions
 # ============================================================================
 
-def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str) -> str:
+def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str, db: Session = None) -> str:
     """Execute a tool and return the result as a string."""
     logger.info(f"[AI Prompt Gen {request_id}] Executing tool: {tool_name}")
 
@@ -512,6 +517,21 @@ def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str) -> str:
                 "summary": summary,
                 "message": "Prompt is ready to apply. User can click 'Apply' to use this prompt."
             })
+
+        elif tool_name == "get_signal_pools":
+            if db is None:
+                return json.dumps({"error": "Database session not available"})
+            return execute_get_signal_pools(db)
+
+        elif tool_name == "run_signal_backtest":
+            if db is None:
+                return json.dumps({"error": "Database session not available"})
+            pool_id = args.get("pool_id")
+            if pool_id is None:
+                return json.dumps({"error": "pool_id is required"})
+            symbol = args.get("symbol", "BTC")
+            hours = args.get("hours", 24)
+            return execute_run_signal_backtest(db, pool_id, symbol, hours)
 
         else:
             return json.dumps({"error": f"Unknown tool: {tool_name}"})
@@ -744,7 +764,7 @@ def generate_prompt_with_ai_stream(
 
                         yield f"data: {json.dumps({'type': 'tool_call', 'name': tool_name, 'args': tool_args})}\n\n"
 
-                        result = execute_tool(tool_name, tool_args, request_id)
+                        result = execute_tool(tool_name, tool_args, request_id, db)
                         tool_calls_log.append({
                             "name": tool_name,
                             "args": tool_args,
@@ -799,7 +819,7 @@ def generate_prompt_with_ai_stream(
 
                         yield f"data: {json.dumps({'type': 'tool_call', 'name': tool_name, 'args': tool_args})}\n\n"
 
-                        result = execute_tool(tool_name, tool_args, request_id)
+                        result = execute_tool(tool_name, tool_args, request_id, db)
                         tool_calls_log.append({
                             "name": tool_name,
                             "args": tool_args,

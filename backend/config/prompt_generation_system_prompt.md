@@ -156,6 +156,64 @@ Market Regime provides AI-ready classification of current market conditions by c
 - `{news_section}` - Latest cryptocurrency news
 - `{trigger_context}` - **IMPORTANT**: Trigger context information showing what triggered this AI decision (signal pool or scheduled interval), including signal details when triggered by signals
 
+### Signal Pool System (IMPORTANT)
+
+Signal Pools are the trigger mechanism for AI Trader decisions. Understanding them is crucial for writing effective prompts.
+
+**What is a Signal Pool?**
+- A Signal Pool is a collection of signal conditions that trigger AI decisions
+- When any (OR logic) or all (AND logic) signals in a pool fire, the AI Trader is triggered
+- Each signal monitors a specific market metric with a threshold condition
+
+**Signal Pool Structure:**
+```
+Signal Pool: "Flow Surge Monitor"
+├── Logic: OR (any signal triggers)
+├── Symbols: [BTC, ETH]
+└── Signals:
+    ├── CVD Spike: cvd > 15,000,000 (15M USD)
+    └── Taker Imbalance: taker_ratio > 3.5
+```
+
+**Available Signal Metrics:**
+
+| Metric | Description | Typical Thresholds |
+|--------|-------------|-------------------|
+| `cvd` | Cumulative Volume Delta (Taker Buy - Sell in USD) | ±5M to ±50M |
+| `oi_delta` | Open Interest Change % | ±0.5% to ±3% |
+| `oi` | Open Interest Change (USD) | ±10M to ±100M |
+| `taker_ratio` | Taker Buy/Sell Ratio | <0.5 (bearish) or >2.0 (bullish) |
+| `volume` | Trading Volume (USD) | >10M to >50M |
+| `funding_rate` | Funding Rate % | <-0.01% or >0.01% |
+
+**How to Use Signal Information in Prompts:**
+
+1. **Reference trigger_context**: Always include `{trigger_context}` to let AI know what triggered the decision
+2. **Match strategy to signals**: If signal pool monitors CVD, the prompt strategy should explain how to interpret CVD values
+3. **Handle both trigger types**: Prompts should handle both signal triggers and scheduled triggers
+
+**Example: Writing a prompt that uses signal pool data:**
+```
+=== TRIGGER CONTEXT ===
+{trigger_context}
+
+=== STRATEGY ===
+**Signal Trigger Handling:**
+- If trigger_type is "signal", analyze the triggered_signals:
+  - CVD signal: Positive CVD > 15M indicates strong buying pressure, consider long
+  - Taker ratio > 3.5: Aggressive buyers dominating, bullish signal
+- If trigger_type is "scheduled", perform routine position check
+
+**Entry Logic:**
+- Only enter on signal triggers with regime confirmation
+- Use trigger_market_regime to verify market conditions at trigger time
+```
+
+**Best Practices:**
+- Use `get_signal_pools` tool to see user's current signal pool configuration
+- Align prompt strategy with the signals being monitored
+- If no signal pool exists, suggest appropriate configurations based on the strategy
+
 ### Order Execution Variables
 These variables control how orders are executed on Hyperliquid:
 

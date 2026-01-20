@@ -19,6 +19,11 @@ from sqlalchemy.orm import Session
 from database.models import AiProgramConversation, AiProgramMessage, TradingProgram, Account
 from services.ai_decision_service import build_chat_completion_endpoints, detect_api_format, _extract_text_from_message, get_max_tokens
 from services.system_logger import system_logger
+from services.ai_shared_tools import (
+    SHARED_SIGNAL_TOOLS,
+    execute_get_signal_pools,
+    execute_run_signal_backtest
+)
 
 logger = logging.getLogger(__name__)
 
@@ -623,7 +628,7 @@ PROGRAM_TOOLS = [
             }
         }
     }
-]
+] + SHARED_SIGNAL_TOOLS  # Add shared signal pool tools
 
 
 def _convert_tools_to_anthropic(openai_tools: List[Dict]) -> List[Dict]:
@@ -1016,6 +1021,17 @@ def _execute_tool(
                 "description": description,
                 "message": "Code ready to save. User confirmation required."
             })
+
+        elif tool_name == "get_signal_pools":
+            return execute_get_signal_pools(db)
+
+        elif tool_name == "run_signal_backtest":
+            pool_id = arguments.get("pool_id")
+            if pool_id is None:
+                return json.dumps({"error": "pool_id is required"})
+            symbol = arguments.get("symbol", "BTC")
+            hours = arguments.get("hours", 24)
+            return execute_run_signal_backtest(db, pool_id, symbol, hours)
 
         else:
             return f"Unknown tool: {tool_name}"
