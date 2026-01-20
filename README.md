@@ -2,7 +2,7 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
-> **First open-source platform with market flow signal monitoring**. Precisely monitors institutional order flow, open interest changes, and funding rate extremes. Detects market structural changes in real-time and activates AI trader for decision analysis. AI-assisted strategy and signal configuration—no coding required.
+> **Dual-engine AI trading platform with market flow signal monitoring**. Monitors institutional order flow, OI changes, and funding rate extremes—triggers automated trading when market structure shifts. Two trading modes: AI Trader for strategies needing market understanding (news, sentiment), or Program Trader for fixed-rule strategies (technical indicators). AI-assisted configuration throughout—no coding required to start.
 >
 > **Essential tool for Hyperliquid traders**. One-click Docker deployment, active Telegram community, frequent updates. Supports testnet paper trading & mainnet real trading. **English & 中文 supported.**
 
@@ -53,7 +53,14 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 
 ## Features
 
-**Market Flow Signal Monitoring** - No need to watch charts 24/7. Automatically triggers when big money moves. Monitors order flow imbalance, open interest surges, funding rate extremes—activates AI analysis only when market structure changes.
+### Two Trading Modes
+
+| Mode | Best For | How It Works |
+|------|----------|--------------|
+| **AI Trader** | Strategies needing market understanding (news, sentiment, complex judgment) | Describe strategy in natural language, AI analyzes and decides in real-time |
+| **Program Trader** | Fixed-rule strategies (technical indicators, price levels) | Define rules in Python code, millisecond execution, backtestable |
+
+**Market Flow Signal Monitoring** - No need to watch charts 24/7. Automatically triggers when big money moves. Monitors order flow imbalance, open interest surges, funding rate extremes—activates trading only when market structure changes.
 
 **AI-Assisted Configuration** - Can't write strategy prompts? Don't know how to set signal conditions? Conversational AI generators help you configure from scratch, no coding required.
 
@@ -64,6 +71,8 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 **Deep Hyperliquid Integration** - Seamless testnet/mainnet switching, native 1-50x leverage support, built-in margin monitoring and liquidation price warnings.
 
 **Multi-Model LLM Support** - Compatible with OpenAI API models (GPT-5, Claude, Deepseek, etc.). Multi-wallet architecture with independent testnet/mainnet configurations.
+
+**Program Trader** - Define trading rules with Python code. AI assistant helps write and debug code through conversation. Validate syntax, preview execution, and backtest before going live.
 
 ## Screenshots
 
