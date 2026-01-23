@@ -81,6 +81,9 @@ class BacktestTradeRecord:
     pnl_percent: float = 0.0
     fee: float = 0.0
 
+    # Equity after this trade (for TP/SL tracking)
+    equity_after: float = 0.0
+
     # Context
     reason: str = ""                       # Strategy reason
     pool_name: Optional[str] = None
@@ -106,7 +109,8 @@ class TriggerExecutionResult:
     # Account state
     equity_before: float
     equity_after: float
-    unrealized_pnl: float
+    equity_after_tp_sl: float = 0.0        # Equity after TP/SL but before strategy execution
+    unrealized_pnl: float = 0.0
 
     # Data queries during execution
     data_queries: List[Dict[str, Any]] = field(default_factory=list)

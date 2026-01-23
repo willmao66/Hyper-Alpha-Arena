@@ -405,4 +405,45 @@ class HistoricalDataProvider:
         self._log_query("get_market_data", {"symbol": symbol}, result)
         return result
 
+    def get_klines_between(
+        self,
+        symbol: str,
+        start_time_ms: int,
+        end_time_ms: int,
+        period: str = "5m"
+    ) -> List[Dict[str, Any]]:
+        """
+        Get K-lines between two timestamps for TP/SL checking.
+
+        Returns raw dict format with high/low for checking price extremes.
+
+        Args:
+            symbol: Trading symbol
+            start_time_ms: Start timestamp (exclusive, after this time)
+            end_time_ms: End timestamp (inclusive, up to this time)
+            period: K-line period (default 5m for balance of accuracy and performance)
+
+        Returns:
+            List of kline dicts with timestamp, high, low, close
+        """
+        cache_key = f"{symbol}_{period}"
+
+        # Load cache if not exists
+        if cache_key not in self._kline_cache:
+            self._load_klines_to_cache(symbol, period)
+
+        all_klines = self._kline_cache.get(cache_key, [])
+
+        # Convert to seconds for comparison
+        start_sec = start_time_ms // 1000
+        end_sec = end_time_ms // 1000
+
+        # Filter klines in range (start exclusive, end inclusive)
+        result = [
+            k for k in all_klines
+            if start_sec < k["timestamp"] <= end_sec
+        ]
+
+        return result
+
 

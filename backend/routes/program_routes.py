@@ -1798,12 +1798,9 @@ async def _run_backtest_with_progress(engine, config, signal_triggers, db, backt
         trigger = exec_result.trigger
         all_triggers.append(trigger)
 
-        # Record TP/SL trades (each TP/SL gets its own equity_curve point)
-        tp_sl_equity = exec_result.equity_before
+        # Record TP/SL trades (each trade has its own equity_after calculated immediately after execution)
         for tp_sl_trade in exec_result.tp_sl_trades:
             trades.append(tp_sl_trade)
-            # Calculate equity after this TP/SL
-            tp_sl_equity = tp_sl_equity + tp_sl_trade.pnl - tp_sl_trade.fee
             tp_sl_time = datetime.fromtimestamp(tp_sl_trade.exit_timestamp / 1000, tz=timezone.utc)
             tp_sl_log = BacktestTriggerLog(
                 backtest_id=backtest_id,
@@ -1824,7 +1821,7 @@ async def _run_backtest_with_progress(engine, config, signal_triggers, db, backt
                 unrealized_pnl=0,
                 realized_pnl=tp_sl_trade.pnl,
                 equity_before=exec_result.equity_before,
-                equity_after=tp_sl_equity,
+                equity_after=tp_sl_trade.equity_after,  # Use trade's own equity_after
                 decision_input=json.dumps({
                     "trigger": tp_sl_trade.exit_reason.upper(),
                     "entry_price": tp_sl_trade.entry_price,
@@ -1837,7 +1834,7 @@ async def _run_backtest_with_progress(engine, config, signal_triggers, db, backt
             # Add equity_curve point for TP/SL trigger
             equity_curve.append({
                 "timestamp": tp_sl_trade.exit_timestamp,
-                "equity": tp_sl_equity,
+                "equity": tp_sl_trade.equity_after,  # Use trade's own equity_after
                 "balance": account.balance,
             })
 

@@ -45,13 +45,14 @@ class VirtualPosition:
 
 @dataclass
 class VirtualOrder:
-    """Virtual pending order (TP/SL)."""
+    """Virtual pending order (TP/SL) - each order is independent like Hyperliquid."""
     order_id: int
     symbol: str
     side: str                              # "buy" or "sell"
     order_type: str                        # "take_profit", "stop_loss"
     trigger_price: float
-    size: float
+    size: float                            # Size this order controls (independent)
+    entry_price: float = 0.0               # Entry price when this order was created
     reduce_only: bool = True
     created_at: int = 0
 
@@ -247,9 +248,10 @@ class VirtualAccount:
         order_type: str,
         trigger_price: float,
         size: float,
+        entry_price: float = 0.0,
         timestamp: int = 0,
     ) -> VirtualOrder:
-        """Add a pending order (TP/SL)."""
+        """Add a pending order (TP/SL) - each order is independent."""
         self._order_id_counter += 1
         order = VirtualOrder(
             order_id=self._order_id_counter,
@@ -258,6 +260,7 @@ class VirtualAccount:
             order_type=order_type,
             trigger_price=trigger_price,
             size=size,
+            entry_price=entry_price,
             created_at=timestamp,
         )
         self.pending_orders.append(order)
@@ -266,6 +269,66 @@ class VirtualAccount:
     def remove_pending_order(self, order_id: int):
         """Remove a pending order by ID."""
         self.pending_orders = [o for o in self.pending_orders if o.order_id != order_id]
+
+    def partial_close_position(
+        self,
+        symbol: str,
+        size: float,
+        exit_price: float,
+        fee: float = 0.0,
+        entry_price: float = 0.0,
+    ) -> Optional[float]:
+        """
+        Partially close a position and return realized PnL for the closed portion.
+
+        Args:
+            symbol: Trading symbol
+            size: Size to close (must be <= position size)
+            exit_price: Exit price
+            fee: Trading fee
+            entry_price: Entry price for this portion (for accurate PnL calculation)
+
+        Returns:
+            Realized PnL for the closed portion, or None if no position
+        """
+        if symbol not in self.positions:
+            return None
+
+        pos = self.positions[symbol]
+
+        # Ensure we don't close more than we have
+        close_size = min(size, pos.size)
+        if close_size <= 0:
+            return None
+
+        # Calculate PnL for this portion using the specific entry price
+        actual_entry = entry_price if entry_price > 0 else pos.entry_price
+        if pos.side == "long":
+            realized_pnl = (exit_price - actual_entry) * close_size
+        else:
+            realized_pnl = (actual_entry - exit_price) * close_size
+
+        # Update cumulative tracking
+        self.realized_pnl_total += realized_pnl
+        self.total_fees += fee
+
+        # Calculate margin to return (proportional to size closed)
+        margin_to_return = (close_size / pos.size) * pos.margin_used
+
+        # Update position
+        remaining_size = pos.size - close_size
+        if remaining_size <= 0.0001:  # Effectively zero, close entire position
+            self.balance += pos.margin_used
+            del self.positions[symbol]
+            # Remove all pending orders for this symbol
+            self.pending_orders = [o for o in self.pending_orders if o.symbol != symbol]
+        else:
+            # Update position with remaining size
+            pos.margin_used -= margin_to_return
+            pos.size = remaining_size
+            self.balance += margin_to_return
+
+        return realized_pnl
 
     def get_state_snapshot(self) -> Dict[str, Any]:
         """Get current account state as dict."""

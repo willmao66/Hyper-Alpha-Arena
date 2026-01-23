@@ -366,7 +366,38 @@ class ProgramBacktestEngine:
 
         last_trigger_time = config.start_time_ms
 
-        def execute_single_trigger(trigger: TriggerEvent) -> TriggerExecutionResult:
+        def check_tp_sl_between_triggers(
+            last_time_ms: int,
+            current_time_ms: int,
+        ) -> List[BacktestTradeRecord]:
+            """Check TP/SL using kline high/low between two trigger points."""
+            all_tp_sl_trades = []
+
+            # Get klines between triggers for each symbol with positions
+            for symbol in config.symbols:
+                pos = account.get_position(symbol)
+                if not pos:
+                    continue
+
+                # Get 5m klines between triggers
+                klines = data_provider.get_klines_between(
+                    symbol, last_time_ms, current_time_ms, "5m"
+                )
+
+                if klines:
+                    trades = simulator.check_tp_sl_with_klines(
+                        account, klines, pos.side, data_provider
+                    )
+                    all_tp_sl_trades.extend(trades)
+
+            # Sort by exit timestamp
+            all_tp_sl_trades.sort(key=lambda t: t.exit_timestamp or 0)
+            return all_tp_sl_trades
+
+        def execute_single_trigger(
+            trigger: TriggerEvent,
+            prev_trigger_time: int,
+        ) -> TriggerExecutionResult:
             """Execute a single trigger and return result."""
             equity_before = account.equity
 
@@ -386,15 +417,17 @@ class ProgramBacktestEngine:
                     tp_sl_trades=[],
                     equity_before=equity_before,
                     equity_after=equity_before,
+                    equity_after_tp_sl=equity_before,
                     unrealized_pnl=0,
                     data_queries=[],
                 )
 
-            # Check TP/SL triggers first
-            tp_sl_trades = simulator.check_tp_sl_triggers(account, prices, trigger.timestamp)
+            # Check TP/SL using kline high/low between triggers (more accurate)
+            tp_sl_trades = check_tp_sl_between_triggers(prev_trigger_time, trigger.timestamp)
 
-            # Update equity after TP/SL
+            # Update equity after TP/SL and record it
             account.update_equity(prices)
+            equity_after_tp_sl = account.equity
 
             # Determine trigger symbol
             trigger_symbol = trigger.symbol if trigger.symbol else config.symbols[0]
@@ -439,6 +472,7 @@ class ProgramBacktestEngine:
                 tp_sl_trades=tp_sl_trades,
                 equity_before=equity_before,
                 equity_after=account.equity,
+                equity_after_tp_sl=equity_after_tp_sl,
                 unrealized_pnl=account.unrealized_pnl_total,
                 data_queries=data_provider.get_query_log(),
             )
@@ -454,13 +488,13 @@ class ProgramBacktestEngine:
                         trigger_type="scheduled",
                         symbol="",
                     )
-                    exec_result = execute_single_trigger(scheduled_trigger)
+                    exec_result = execute_single_trigger(scheduled_trigger, last_trigger_time)
                     last_trigger_time = scheduled_trigger.timestamp
                     yield exec_result
                     next_scheduled_time = last_trigger_time + scheduled_interval_ms
 
             # Process signal trigger (resets scheduled timer)
-            exec_result = execute_single_trigger(signal_trigger)
+            exec_result = execute_single_trigger(signal_trigger, last_trigger_time)
             last_trigger_time = signal_trigger.timestamp
             yield exec_result
 
@@ -473,7 +507,7 @@ class ProgramBacktestEngine:
                     trigger_type="scheduled",
                     symbol="",
                 )
-                exec_result = execute_single_trigger(scheduled_trigger)
+                exec_result = execute_single_trigger(scheduled_trigger, last_trigger_time)
                 last_trigger_time = scheduled_trigger.timestamp
                 yield exec_result
                 next_scheduled_time = last_trigger_time + scheduled_interval_ms
