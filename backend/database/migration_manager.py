@@ -53,6 +53,7 @@ MIGRATIONS = [
     "add_ai_prompt_message_fields.py",
     "add_backtest_tables.py",
     "add_backtest_extended_fields.py",
+    "add_regime_body_ratio_cvd_divisor.py",
 ]
 
 

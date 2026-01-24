@@ -65,6 +65,7 @@ class RegimeConfigResponse(BaseModel):
     breakout_price_atr: float
     breakout_taker_high: float
     breakout_taker_low: float
+    breakout_body_ratio: float
     absorption_cvd_z: float
     absorption_price_atr: float
     trap_cvd_z: float
@@ -75,6 +76,7 @@ class RegimeConfigResponse(BaseModel):
     stop_hunt_range_atr: float
     stop_hunt_close_atr: float
     noise_cvd_z: float
+    continuation_cvd_divisor: float
 
 
 class RegimeConfigUpdateRequest(BaseModel):
@@ -85,6 +87,7 @@ class RegimeConfigUpdateRequest(BaseModel):
     breakout_price_atr: Optional[float] = None
     breakout_taker_high: Optional[float] = None
     breakout_taker_low: Optional[float] = None
+    breakout_body_ratio: Optional[float] = None
     absorption_cvd_z: Optional[float] = None
     absorption_price_atr: Optional[float] = None
     trap_cvd_z: Optional[float] = None
@@ -95,6 +98,7 @@ class RegimeConfigUpdateRequest(BaseModel):
     stop_hunt_range_atr: Optional[float] = None
     stop_hunt_close_atr: Optional[float] = None
     noise_cvd_z: Optional[float] = None
+    continuation_cvd_divisor: Optional[float] = None
 
 
 @router.get("/{symbol}", response_model=MarketRegimeResponse)
@@ -172,6 +176,7 @@ async def list_regime_configs(db: Session = Depends(get_db)):
                 breakout_price_atr=c.breakout_price_atr or 0.5,
                 breakout_taker_high=c.breakout_taker_high or 1.8,
                 breakout_taker_low=c.breakout_taker_low or 0.55,
+                breakout_body_ratio=c.breakout_body_ratio or 0.4,
                 absorption_cvd_z=c.absorption_cvd_z or 1.5,
                 absorption_price_atr=c.absorption_price_atr or 0.3,
                 trap_cvd_z=c.trap_cvd_z or 1.0,
@@ -181,7 +186,8 @@ async def list_regime_configs(db: Session = Depends(get_db)):
                 exhaustion_rsi_low=c.exhaustion_rsi_low or 30.0,
                 stop_hunt_range_atr=c.stop_hunt_range_atr or 1.0,
                 stop_hunt_close_atr=c.stop_hunt_close_atr or 0.3,
-                noise_cvd_z=c.noise_cvd_z or 0.5
+                noise_cvd_z=c.noise_cvd_z or 0.5,
+                continuation_cvd_divisor=c.continuation_cvd_divisor or 3.0
             )
             for c in configs
         ]
@@ -224,6 +230,7 @@ async def update_regime_config(
             breakout_price_atr=config.breakout_price_atr or 0.5,
             breakout_taker_high=config.breakout_taker_high or 1.8,
             breakout_taker_low=config.breakout_taker_low or 0.55,
+            breakout_body_ratio=config.breakout_body_ratio or 0.4,
             absorption_cvd_z=config.absorption_cvd_z or 1.5,
             absorption_price_atr=config.absorption_price_atr or 0.3,
             trap_cvd_z=config.trap_cvd_z or 1.0,
@@ -233,7 +240,8 @@ async def update_regime_config(
             exhaustion_rsi_low=config.exhaustion_rsi_low or 30.0,
             stop_hunt_range_atr=config.stop_hunt_range_atr or 1.0,
             stop_hunt_close_atr=config.stop_hunt_close_atr or 0.3,
-            noise_cvd_z=config.noise_cvd_z or 0.5
+            noise_cvd_z=config.noise_cvd_z or 0.5,
+            continuation_cvd_divisor=config.continuation_cvd_divisor or 3.0
         )
     except HTTPException:
         raise

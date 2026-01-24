@@ -962,6 +962,10 @@ class MarketRegimeConfig(Base):
     stop_hunt_close_atr = Column(Float, nullable=True, default=0.3)
     # Noise thresholds
     noise_cvd_z = Column(Float, nullable=True, default=0.5)
+    # Breakout body ratio (hardcoded 0.4 before, now configurable)
+    breakout_body_ratio = Column(Float, nullable=True, default=0.4)
+    # Continuation CVD divisor (cvd_weak = cvd_strong / divisor, default 3)
+    continuation_cvd_divisor = Column(Float, nullable=True, default=3.0)
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(),

@@ -400,7 +400,8 @@ def classify_regime(
     """
     # Thresholds from config
     cvd_strong = config.breakout_cvd_z * 0.1  # ~0.15 for strong flow
-    cvd_weak = cvd_strong / 3  # ~0.05 for weak flow
+    cvd_divisor = config.continuation_cvd_divisor or 3.0
+    cvd_weak = cvd_strong / cvd_divisor  # ~0.05 for weak flow
     price_breakout = config.breakout_price_atr + 0.2  # ~0.5 for breakout
     price_move = config.absorption_price_atr  # ~0.3 for movement
     oi_increase = config.breakout_oi_z  # OI increase threshold
@@ -426,7 +427,8 @@ def classify_regime(
     is_oi_increase = oi_delta > oi_increase
     # Body ratio: if price spiked but reversed (long shadow), it's not a true breakout
     body_ratio = abs(price_atr) / price_range_atr if price_range_atr > 0 else 1.0
-    is_solid_move = body_ratio > 0.4  # Body must be >40% of range
+    body_ratio_threshold = config.breakout_body_ratio or 0.4
+    is_solid_move = body_ratio > body_ratio_threshold  # Body must be > threshold of range
 
     if is_cvd_strong and is_price_breakout and cvd_price_aligned and is_solid_move and (is_taker_extreme or is_oi_increase):
         direction = "Bullish" if cvd_ratio > 0 else "Bearish"

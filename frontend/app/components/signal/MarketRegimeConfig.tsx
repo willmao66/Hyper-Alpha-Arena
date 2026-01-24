@@ -18,6 +18,7 @@ interface RegimeConfig {
   breakout_price_atr: number
   breakout_taker_high: number
   breakout_taker_low: number
+  breakout_body_ratio: number
   absorption_cvd_z: number
   absorption_price_atr: number
   trap_cvd_z: number
@@ -28,6 +29,7 @@ interface RegimeConfig {
   stop_hunt_range_atr: number
   stop_hunt_close_atr: number
   noise_cvd_z: number
+  continuation_cvd_divisor: number
 }
 
 // Default values matching database defaults (updated 2024-12)
@@ -38,6 +40,7 @@ const DEFAULT_CONFIG: Omit<RegimeConfig, 'id' | 'name' | 'is_default'> = {
   breakout_price_atr: 0.3,   // Price movement threshold
   breakout_taker_high: 33.0, // Taker ratio high (~25% extreme, log threshold 3.5)
   breakout_taker_low: 0.03,  // Taker ratio low (~25% extreme, log threshold -3.5)
+  breakout_body_ratio: 0.4,  // Body/Range ratio threshold for Breakout
   absorption_cvd_z: 1.5,
   absorption_price_atr: 0.3,
   trap_cvd_z: 1.0,
@@ -48,6 +51,7 @@ const DEFAULT_CONFIG: Omit<RegimeConfig, 'id' | 'name' | 'is_default'> = {
   stop_hunt_range_atr: 1.0,
   stop_hunt_close_atr: 0.3,
   noise_cvd_z: 0.5,
+  continuation_cvd_divisor: 3.0, // cvd_weak = cvd_strong / divisor
 }
 
 // Regime icons
@@ -198,6 +202,8 @@ function FormulaReference() {
       <div><span className="font-mono">CVD Ratio</span> = CVD / Total Notional</div>
       <div><span className="font-mono">OI Delta</span> = Open Interest Change %</div>
       <div><span className="font-mono">Price Move</span> = (Close - Open) / ATR</div>
+      <div><span className="font-mono">Body Ratio</span> = |Price Move| / Price Range</div>
+      <div><span className="font-mono">CVD Weak</span> = CVD Strong / Divisor</div>
       <div><span className="font-mono">Taker Ratio</span> = Buy Notional / Sell Notional</div>
       <div><span className="font-mono">RSI</span> = RSI14 indicator</div>
     </div>
@@ -288,13 +294,13 @@ export default function MarketRegimeConfig() {
             {/* 2. Breakout */}
             <DecisionNode title={t('regime.breakout', '2. Breakout (突破)')} color="border-green-500" desc={t('regime.trendInitiation', 'Trend initiation (趋势启动)')} icon={<IconSignal5 className="w-5 h-5 flex-shrink-0" />}>
               <All />
-              <Param label="CVD Ratio >" value={config.breakout_cvd_z} def={1.5} range="1~3" onChange={v => u('breakout_cvd_z', v)} />
+              <Param label="CVD Ratio >" value={config.breakout_cvd_z} def={1.5} range="0.5~5" onChange={v => u('breakout_cvd_z', v)} />
               <span className="text-muted-foreground text-xs">(×0.1)</span>
               <And />
-              <Param label="Price Move >" value={config.breakout_price_atr} def={0.3} range="0.2~0.5" onChange={v => u('breakout_price_atr', v)} />
+              <Param label="Price Move >" value={config.breakout_price_atr} def={0.3} range="0.1~2" onChange={v => u('breakout_price_atr', v)} />
               <span className="text-muted-foreground text-xs">(+0.2)</span>
               <And />
-              <span className="text-foreground">Body Ratio &gt; 0.4</span>
+              <Param label="Body Ratio >" value={config.breakout_body_ratio} def={0.4} range="0.2~0.8" onChange={v => u('breakout_body_ratio', v)} />
               <And />
               <span className="text-foreground">CVD-Price aligned</span>
               <And />
@@ -302,7 +308,7 @@ export default function MarketRegimeConfig() {
               <span className="text-foreground">Taker extreme</span>
               <span className="text-muted-foreground text-xs">(log ±3.5)</span>
               <Or />
-              <Param label="OI Delta >" value={config.breakout_oi_z} def={0.1} range="0.05~0.5" onChange={v => u('breakout_oi_z', v)} step={0.05} />
+              <Param label="OI Delta >" value={config.breakout_oi_z} def={0.1} range="0.01~2" onChange={v => u('breakout_oi_z', v)} step={0.05} />
             </DecisionNode>
 
             {/* 3. Exhaustion */}
@@ -341,7 +347,9 @@ export default function MarketRegimeConfig() {
             <DecisionNode title={t('regime.continuation', '6. Continuation (延续)')} color="border-blue-500" desc={t('regime.trendContinues', 'Trend continues (趋势延续)')} icon={<IconSignal4 className="w-5 h-5 flex-shrink-0" />}>
               <All />
               <span className="text-foreground">CVD weak</span>
-              <span className="text-muted-foreground text-xs">(&gt;0.05)</span>
+              <span className="text-muted-foreground text-xs">(CVD Strong ÷</span>
+              <Param label="" value={config.continuation_cvd_divisor} def={3} range="1~10" onChange={v => u('continuation_cvd_divisor', v)} step={0.5} />
+              <span className="text-muted-foreground text-xs">)</span>
               <And />
               <span className="text-foreground">Price Move &gt; {config.absorption_price_atr}</span>
               <And />
