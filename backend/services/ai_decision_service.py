@@ -1010,7 +1010,7 @@ def _build_prompt_context(
                         lines.append(f"    current_value: {value_display}")
         elif trigger_type == "scheduled":
             interval = trigger_context.get("trigger_interval", "N/A")
-            lines.append(f"trigger_interval: {interval} minutes")
+            lines.append(f"trigger_interval: {interval} seconds")
 
         trigger_context_text = "\n".join(lines)
 

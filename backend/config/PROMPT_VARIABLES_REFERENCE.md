@@ -31,7 +31,7 @@ When triggered by **scheduled interval**:
 ```
 === TRIGGER CONTEXT ===
 trigger_type: scheduled
-trigger_interval: 150 minutes
+trigger_interval: 150 seconds
 ```
 
 **Why include this?** The AI can make more informed decisions when it knows:

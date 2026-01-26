@@ -31,7 +31,7 @@ triggered_signals:
 ```
 === TRIGGER CONTEXT ===
 trigger_type: scheduled
-trigger_interval: 150 minutes
+trigger_interval: 150 seconds
 ```
 
 **为什么要包含这个？** AI在知道以下信息时可以做出更明智的决策：
