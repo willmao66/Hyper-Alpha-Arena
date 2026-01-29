@@ -161,10 +161,9 @@ class ExchangeDataPersistence:
             if existing:
                 existing.best_bid = orderbook.best_bid
                 existing.best_ask = orderbook.best_ask
-                existing.bid_depth_sum = orderbook.bid_depth_sum
-                existing.ask_depth_sum = orderbook.ask_depth_sum
+                existing.bid_depth_10 = orderbook.bid_depth_sum
+                existing.ask_depth_10 = orderbook.ask_depth_sum
                 existing.spread = orderbook.spread
-                existing.spread_bps = orderbook.spread_bps
             else:
                 record = MarketOrderbookSnapshots(
                     exchange=orderbook.exchange,
@@ -172,10 +171,9 @@ class ExchangeDataPersistence:
                     timestamp=orderbook.timestamp,
                     best_bid=orderbook.best_bid,
                     best_ask=orderbook.best_ask,
-                    bid_depth_sum=orderbook.bid_depth_sum,
-                    ask_depth_sum=orderbook.ask_depth_sum,
+                    bid_depth_10=orderbook.bid_depth_sum,
+                    ask_depth_10=orderbook.ask_depth_sum,
                     spread=orderbook.spread,
-                    spread_bps=orderbook.spread_bps,
                 )
                 self.db.add(record)
 
