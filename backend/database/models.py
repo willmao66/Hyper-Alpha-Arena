@@ -874,6 +874,26 @@ class MarketAssetMetrics(Base):
     )
 
 
+class MarketSentimentMetrics(Base):
+    """Market sentiment metrics for long/short ratio analysis (Binance-specific data)"""
+    __tablename__ = "market_sentiment_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    timestamp = Column(BigInteger, nullable=False, index=True)  # milliseconds
+    long_ratio = Column(DECIMAL(10, 6), nullable=True)  # e.g., 0.65 = 65% long
+    short_ratio = Column(DECIMAL(10, 6), nullable=True)  # e.g., 0.35 = 35% short
+    long_short_ratio = Column(DECIMAL(10, 6), nullable=True)  # e.g., 1.86 = longs/shorts
+    data_type = Column(String(30), nullable=False, default="top_position")  # top_position, top_account, global
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+    __table_args__ = (
+        UniqueConstraint('exchange', 'symbol', 'timestamp', 'data_type',
+                         name='market_sentiment_metrics_unique_key'),
+    )
+
+
 # ============================================================================
 # Signal System Tables (for signal-based trading triggers)
 # ============================================================================

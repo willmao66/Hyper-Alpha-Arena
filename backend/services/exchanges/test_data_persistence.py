@@ -142,11 +142,61 @@ def test_orderbook_persistence():
         db.close()
 
 
+def test_sentiment_persistence():
+    """Test fetching and saving sentiment data."""
+    print("\n=== Testing Sentiment Persistence ===")
+
+    adapter = BinanceAdapter()
+    db = SessionLocal()
+
+    try:
+        from database.models import MarketSentimentMetrics
+        persistence = ExchangeDataPersistence(db)
+
+        # Test single sentiment
+        print("1. Fetching BTC sentiment (top position ratio)...")
+        sentiment = adapter.fetch_sentiment("BTC")
+        print(f"   Long ratio={sentiment.long_ratio}, Short ratio={sentiment.short_ratio}")
+
+        print("2. Saving to database...")
+        result = persistence.save_sentiment(sentiment)
+        print(f"   Result: {result}")
+
+        # Test batch sentiment history
+        print("3. Fetching BTC sentiment history...")
+        sentiment_list = adapter.fetch_sentiment_history("BTC", limit=5)
+        print(f"   Fetched {len(sentiment_list)} sentiment records")
+
+        print("4. Saving batch to database...")
+        result2 = persistence.save_sentiment_batch(sentiment_list)
+        print(f"   Result: {result2}")
+
+        # Verify
+        print("5. Verifying data in database...")
+        count = db.query(MarketSentimentMetrics).filter(
+            MarketSentimentMetrics.exchange == "binance",
+            MarketSentimentMetrics.symbol == "BTC",
+        ).count()
+        print(f"   Found {count} BTC sentiment records from Binance")
+
+        print("Sentiment persistence test PASSED!")
+        return True
+
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     all_passed = True
     all_passed &= test_kline_persistence()
     all_passed &= test_asset_metrics_persistence()
     all_passed &= test_orderbook_persistence()
+    all_passed &= test_sentiment_persistence()
 
     print("\n" + "=" * 50)
     if all_passed:

@@ -54,6 +54,7 @@ MIGRATIONS = [
     "add_backtest_tables.py",
     "add_backtest_extended_fields.py",
     "add_regime_body_ratio_cvd_divisor.py",
+    "create_market_sentiment_metrics_table.py",
 ]
 
 

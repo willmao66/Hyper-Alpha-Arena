@@ -123,6 +123,13 @@ def initialize_services():
         )
         logger.info("Market flow data cleanup task started (6-hour interval, 30-day retention)")
 
+        # Start Binance data collector (REST API polling)
+        from services.exchanges.binance_collector import binance_collector
+        print("Starting Binance data collector...")
+        binance_collector.start(symbols=["BTC", "ETH"])
+        print("Binance data collector started")
+        logger.info("Binance data collector started (klines/OI/funding/sentiment)")
+
         logger.info("All services initialized successfully")
 
     except Exception as e:
@@ -149,6 +156,10 @@ def shutdown_services():
         # Stop market flow collector
         from services.market_flow_collector import market_flow_collector
         market_flow_collector.stop()
+
+        # Stop Binance data collector
+        from services.exchanges.binance_collector import binance_collector
+        binance_collector.stop()
 
         stop_scheduler()
         logger.info("All services have been shut down")

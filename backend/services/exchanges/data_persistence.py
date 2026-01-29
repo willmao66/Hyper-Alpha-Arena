@@ -16,6 +16,7 @@ from database.models import (
     MarketTradesAggregated,
     MarketOrderbookSnapshots,
     MarketAssetMetrics,
+    MarketSentimentMetrics,
 )
 from services.exchanges.base_adapter import (
     UnifiedKline,
@@ -295,6 +296,80 @@ class ExchangeDataPersistence:
                     timestamp=funding.timestamp,
                     funding_rate=funding.funding_rate,
                     mark_price=funding.mark_price,
+                )
+                self.db.add(record)
+                inserted += 1
+
+        self.db.commit()
+        return {"inserted": inserted, "updated": updated}
+
+    def save_sentiment(
+        self,
+        sentiment: UnifiedSentiment,
+        data_type: str = "top_position",
+    ) -> bool:
+        """Save sentiment data to market_sentiment_metrics table."""
+        try:
+            existing = self.db.query(MarketSentimentMetrics).filter(
+                MarketSentimentMetrics.exchange == sentiment.exchange,
+                MarketSentimentMetrics.symbol == sentiment.symbol,
+                MarketSentimentMetrics.timestamp == sentiment.timestamp,
+                MarketSentimentMetrics.data_type == data_type,
+            ).first()
+
+            if existing:
+                existing.long_ratio = sentiment.long_ratio
+                existing.short_ratio = sentiment.short_ratio
+                existing.long_short_ratio = sentiment.long_short_ratio
+            else:
+                record = MarketSentimentMetrics(
+                    exchange=sentiment.exchange,
+                    symbol=sentiment.symbol,
+                    timestamp=sentiment.timestamp,
+                    long_ratio=sentiment.long_ratio,
+                    short_ratio=sentiment.short_ratio,
+                    long_short_ratio=sentiment.long_short_ratio,
+                    data_type=data_type,
+                )
+                self.db.add(record)
+
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save sentiment: {e}")
+            self.db.rollback()
+            return False
+
+    def save_sentiment_batch(
+        self,
+        sentiment_list: List[UnifiedSentiment],
+        data_type: str = "top_position",
+    ) -> dict:
+        """Save batch of sentiment records."""
+        inserted = 0
+        updated = 0
+        for sentiment in sentiment_list:
+            existing = self.db.query(MarketSentimentMetrics).filter(
+                MarketSentimentMetrics.exchange == sentiment.exchange,
+                MarketSentimentMetrics.symbol == sentiment.symbol,
+                MarketSentimentMetrics.timestamp == sentiment.timestamp,
+                MarketSentimentMetrics.data_type == data_type,
+            ).first()
+
+            if existing:
+                existing.long_ratio = sentiment.long_ratio
+                existing.short_ratio = sentiment.short_ratio
+                existing.long_short_ratio = sentiment.long_short_ratio
+                updated += 1
+            else:
+                record = MarketSentimentMetrics(
+                    exchange=sentiment.exchange,
+                    symbol=sentiment.symbol,
+                    timestamp=sentiment.timestamp,
+                    long_ratio=sentiment.long_ratio,
+                    short_ratio=sentiment.short_ratio,
+                    long_short_ratio=sentiment.long_short_ratio,
+                    data_type=data_type,
                 )
                 self.db.add(record)
                 inserted += 1

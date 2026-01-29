@@ -14,10 +14,13 @@ from .base_adapter import BaseExchangeAdapter
 from .symbol_mapper import SymbolMapper
 from .binance_adapter import BinanceAdapter
 from .data_persistence import ExchangeDataPersistence
+from .binance_collector import BinanceCollector, binance_collector
 
 __all__ = [
     "BaseExchangeAdapter",
     "SymbolMapper",
     "BinanceAdapter",
     "ExchangeDataPersistence",
+    "BinanceCollector",
+    "binance_collector",
 ]
