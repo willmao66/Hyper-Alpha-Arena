@@ -12,5 +12,12 @@ Supported exchanges:
 
 from .base_adapter import BaseExchangeAdapter
 from .symbol_mapper import SymbolMapper
+from .binance_adapter import BinanceAdapter
+from .data_persistence import ExchangeDataPersistence
 
-__all__ = ["BaseExchangeAdapter", "SymbolMapper"]
+__all__ = [
+    "BaseExchangeAdapter",
+    "SymbolMapper",
+    "BinanceAdapter",
+    "ExchangeDataPersistence",
+]
