@@ -823,15 +823,17 @@ market_flow_collector = MarketFlowCollector()
 DATA_RETENTION_DAYS = 365
 
 
-def get_retention_days() -> int:
-    """Get retention days from SystemConfig, fallback to default"""
+def get_retention_days(exchange: str = "hyperliquid") -> int:
+    """Get retention days from SystemConfig for specific exchange, fallback to default"""
     try:
         from database.connection import SessionLocal
         from database.models import SystemConfig
+
+        key = f"{exchange}_retention_days"
         db = SessionLocal()
         try:
             config = db.query(SystemConfig).filter(
-                SystemConfig.key == "market_flow_retention_days"
+                SystemConfig.key == key
             ).first()
             if config and config.value:
                 return int(config.value)
@@ -845,6 +847,7 @@ def get_retention_days() -> int:
 def cleanup_old_market_flow_data():
     """
     Delete market flow data older than configured retention days.
+    Cleans up data for each exchange based on their individual retention settings.
     This function is designed to be called by a scheduled task.
     """
     import time
@@ -853,44 +856,96 @@ def cleanup_old_market_flow_data():
         MarketTradesAggregated,
         MarketOrderbookSnapshots,
         MarketAssetMetrics,
+        MarketSentimentMetrics,
     )
-
-    retention_days = get_retention_days()
-    cutoff_ms = int((time.time() - retention_days * 86400) * 1000)
 
     db = SessionLocal()
     try:
-        # Delete old trades
-        trades_deleted = (
+        total_deleted = 0
+
+        # Clean up Hyperliquid data
+        hl_retention = get_retention_days("hyperliquid")
+        hl_cutoff_ms = int((time.time() - hl_retention * 86400) * 1000)
+
+        hl_trades = (
             db.query(MarketTradesAggregated)
-            .filter(MarketTradesAggregated.timestamp < cutoff_ms)
+            .filter(
+                MarketTradesAggregated.exchange == "hyperliquid",
+                MarketTradesAggregated.timestamp < hl_cutoff_ms
+            )
             .delete(synchronize_session=False)
         )
-
-        # Delete old orderbook snapshots
-        orderbook_deleted = (
+        hl_orderbook = (
             db.query(MarketOrderbookSnapshots)
-            .filter(MarketOrderbookSnapshots.timestamp < cutoff_ms)
+            .filter(
+                MarketOrderbookSnapshots.exchange == "hyperliquid",
+                MarketOrderbookSnapshots.timestamp < hl_cutoff_ms
+            )
             .delete(synchronize_session=False)
         )
-
-        # Delete old asset metrics
-        metrics_deleted = (
+        hl_metrics = (
             db.query(MarketAssetMetrics)
-            .filter(MarketAssetMetrics.timestamp < cutoff_ms)
+            .filter(
+                MarketAssetMetrics.exchange == "hyperliquid",
+                MarketAssetMetrics.timestamp < hl_cutoff_ms
+            )
             .delete(synchronize_session=False)
         )
+        hl_total = hl_trades + hl_orderbook + hl_metrics
+        if hl_total > 0:
+            logger.info(
+                f"Hyperliquid cleanup: {hl_trades} trades, {hl_orderbook} orderbook, "
+                f"{hl_metrics} metrics (older than {hl_retention} days)"
+            )
+        total_deleted += hl_total
+
+        # Clean up Binance data
+        bn_retention = get_retention_days("binance")
+        bn_cutoff_ms = int((time.time() - bn_retention * 86400) * 1000)
+
+        bn_trades = (
+            db.query(MarketTradesAggregated)
+            .filter(
+                MarketTradesAggregated.exchange == "binance",
+                MarketTradesAggregated.timestamp < bn_cutoff_ms
+            )
+            .delete(synchronize_session=False)
+        )
+        bn_orderbook = (
+            db.query(MarketOrderbookSnapshots)
+            .filter(
+                MarketOrderbookSnapshots.exchange == "binance",
+                MarketOrderbookSnapshots.timestamp < bn_cutoff_ms
+            )
+            .delete(synchronize_session=False)
+        )
+        bn_metrics = (
+            db.query(MarketAssetMetrics)
+            .filter(
+                MarketAssetMetrics.exchange == "binance",
+                MarketAssetMetrics.timestamp < bn_cutoff_ms
+            )
+            .delete(synchronize_session=False)
+        )
+        bn_sentiment = (
+            db.query(MarketSentimentMetrics)
+            .filter(
+                MarketSentimentMetrics.exchange == "binance",
+                MarketSentimentMetrics.timestamp < bn_cutoff_ms
+            )
+            .delete(synchronize_session=False)
+        )
+        bn_total = bn_trades + bn_orderbook + bn_metrics + bn_sentiment
+        if bn_total > 0:
+            logger.info(
+                f"Binance cleanup: {bn_trades} trades, {bn_orderbook} orderbook, "
+                f"{bn_metrics} metrics, {bn_sentiment} sentiment (older than {bn_retention} days)"
+            )
+        total_deleted += bn_total
 
         db.commit()
 
-        total_deleted = trades_deleted + orderbook_deleted + metrics_deleted
-        if total_deleted > 0:
-            logger.info(
-                f"Market flow data cleanup: deleted {trades_deleted} trades, "
-                f"{orderbook_deleted} orderbook snapshots, {metrics_deleted} asset metrics "
-                f"(older than {retention_days} days)"
-            )
-        else:
+        if total_deleted == 0:
             logger.debug("Market flow data cleanup: no old records to delete")
 
     except Exception as e:

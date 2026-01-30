@@ -11,8 +11,10 @@ import {
 } from '@/lib/api'
 import type { HyperliquidSymbolMeta } from '@/lib/api'
 import DataCoverageHeatmap from './DataCoverageHeatmap'
+import ExchangeIcon from '@/components/exchange/ExchangeIcon'
 
 interface StorageStats {
+  exchange: string
   total_size_mb: number
   tables: Record<string, number>
   retention_days: number
@@ -36,10 +38,14 @@ export default function SettingsPage() {
   const [watchlistError, setWatchlistError] = useState<string | null>(null)
   const [watchlistSuccess, setWatchlistSuccess] = useState<string | null>(null)
 
-  // Storage stats state
-  const [storageStats, setStorageStats] = useState<StorageStats | null>(null)
+  // Storage stats state - now per exchange
+  const [exchangeTab, setExchangeTab] = useState<'hyperliquid' | 'binance'>('hyperliquid')
+  const [storageStats, setStorageStats] = useState<Record<string, StorageStats>>({})
   const [storageLoading, setStorageLoading] = useState(false)
-  const [retentionDays, setRetentionDays] = useState<string>('365')
+  const [retentionDays, setRetentionDays] = useState<Record<string, string>>({
+    hyperliquid: '365',
+    binance: '365',
+  })
   const [retentionSaving, setRetentionSaving] = useState(false)
   const [retentionError, setRetentionError] = useState<string | null>(null)
   const [retentionSuccess, setRetentionSuccess] = useState<string | null>(null)
@@ -66,14 +72,14 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const fetchStorageStats = useCallback(async () => {
+  const fetchStorageStats = useCallback(async (exchange: string) => {
     setStorageLoading(true)
     try {
-      const res = await fetch('/api/system/storage-stats')
+      const res = await fetch(`/api/system/storage-stats?exchange=${exchange}`)
       if (res.ok) {
         const data: StorageStats = await res.json()
-        setStorageStats(data)
-        setRetentionDays(data.retention_days.toString())
+        setStorageStats((prev) => ({ ...prev, [exchange]: data }))
+        setRetentionDays((prev) => ({ ...prev, [exchange]: data.retention_days.toString() }))
       }
     } catch (err) {
       console.error('Failed to fetch storage stats:', err)
@@ -89,10 +95,10 @@ export default function SettingsPage() {
 
   // Load storage stats only when Exchange Data tab is active
   useEffect(() => {
-    if (activeTab === 'exchange-data' && !storageStats) {
-      fetchStorageStats()
+    if (activeTab === 'exchange-data' && !storageStats[exchangeTab]) {
+      fetchStorageStats(exchangeTab)
     }
-  }, [activeTab, storageStats, fetchStorageStats])
+  }, [activeTab, exchangeTab, storageStats, fetchStorageStats])
 
   const toggleWatchlistSymbol = (symbol: string) => {
     const symbolUpper = symbol.toUpperCase()
@@ -125,7 +131,7 @@ export default function SettingsPage() {
   }
 
   const handleSaveRetention = async () => {
-    const days = parseInt(retentionDays, 10)
+    const days = parseInt(retentionDays[exchangeTab], 10)
     if (isNaN(days) || days < 7 || days > 730) {
       setRetentionError(t('settings.retentionRange', 'Must be between 7 and 730 days'))
       return
@@ -137,12 +143,16 @@ export default function SettingsPage() {
       const res = await fetch('/api/system/retention-days', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days }),
+        body: JSON.stringify({ days, exchange: exchangeTab }),
       })
       if (!res.ok) throw new Error('Failed to update')
       setRetentionSuccess(t('settings.retentionSaved', 'Retention updated'))
-      if (storageStats) {
-        setStorageStats({ ...storageStats, retention_days: days })
+      const currentStats = storageStats[exchangeTab]
+      if (currentStats) {
+        setStorageStats((prev) => ({
+          ...prev,
+          [exchangeTab]: { ...currentStats, retention_days: days },
+        }))
       }
     } catch (err) {
       setRetentionError(err instanceof Error ? err.message : 'Failed to save')
@@ -151,9 +161,13 @@ export default function SettingsPage() {
     }
   }
 
+  // Get current exchange stats
+  const currentStats = storageStats[exchangeTab]
+  const currentRetention = retentionDays[exchangeTab] || '365'
+
   // Calculate max storage estimate using watchlist symbol count
-  const maxStorageEstimate = storageStats
-    ? (watchlistSymbols.length * parseInt(retentionDays, 10) * storageStats.estimated_per_symbol_per_day_mb).toFixed(1)
+  const maxStorageEstimate = currentStats
+    ? (watchlistSymbols.length * parseInt(currentRetention, 10) * currentStats.estimated_per_symbol_per_day_mb).toFixed(1)
     : '—'
 
   return (
@@ -240,28 +254,54 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto min-h-0 space-y-6">
+              {/* Exchange Sub-tabs */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setExchangeTab('hyperliquid')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    exchangeTab === 'hyperliquid'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+                  }`}
+                >
+                  <ExchangeIcon exchangeId="hyperliquid" size={20} />
+                  Hyperliquid
+                </button>
+                <button
+                  onClick={() => setExchangeTab('binance')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    exchangeTab === 'binance'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+                  }`}
+                >
+                  <ExchangeIcon exchangeId="binance" size={20} />
+                  Binance
+                </button>
+              </div>
+
               {storageLoading ? (
                 <div className="text-muted-foreground">{t('common.loading', 'Loading...')}</div>
-              ) : storageStats ? (
+              ) : currentStats ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
                       <div className="text-sm text-muted-foreground">
                         {t('settings.currentStorage', 'Current Storage')}
                       </div>
-                      <div className="text-xl font-semibold">{storageStats.total_size_mb} MB</div>
+                      <div className="text-xl font-semibold">{currentStats.total_size_mb} MB</div>
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">
                         {t('settings.collectedSymbols', 'Collected Symbols')}
                       </div>
-                      <div className="text-xl font-semibold">{storageStats.symbol_count}</div>
+                      <div className="text-xl font-semibold">{currentStats.symbol_count}</div>
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">
                         {t('settings.retentionDays', 'Retention Days')}
                       </div>
-                      <div className="text-xl font-semibold">{storageStats.retention_days}</div>
+                      <div className="text-xl font-semibold">{currentStats.retention_days}</div>
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">
@@ -279,8 +319,8 @@ export default function SettingsPage() {
                     <div className="flex items-center gap-2">
                       <Input
                         type="number"
-                        value={retentionDays}
-                        onChange={(e) => setRetentionDays(e.target.value)}
+                        value={currentRetention}
+                        onChange={(e) => setRetentionDays((prev) => ({ ...prev, [exchangeTab]: e.target.value }))}
                         className="w-24"
                         min={7}
                         max={730}
@@ -304,7 +344,7 @@ export default function SettingsPage() {
               {/* Data Coverage Heatmap - inside same Card */}
               <div className="pt-4 border-t">
                 <div className="text-sm font-medium mb-3">{t('settings.dataCoverage', 'Data Coverage')}</div>
-                <DataCoverageHeatmap />
+                <DataCoverageHeatmap exchange={exchangeTab} />
               </div>
             </CardContent>
           </Card>

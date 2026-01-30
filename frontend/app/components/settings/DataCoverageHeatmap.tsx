@@ -10,9 +10,14 @@ interface SymbolCoverage {
   symbol: string
   days: number
   coverage: CoverageItem[]
+  exchange: string
 }
 
-export default function DataCoverageHeatmap() {
+interface DataCoverageHeatmapProps {
+  exchange?: string
+}
+
+export default function DataCoverageHeatmap({ exchange = 'hyperliquid' }: DataCoverageHeatmapProps) {
   const { t } = useTranslation()
   const [symbols, setSymbols] = useState<string[]>([])
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
@@ -21,15 +26,18 @@ export default function DataCoverageHeatmap() {
   const [coverageLoading, setCoverageLoading] = useState(false)
   const [days, setDays] = useState(365)
 
-  // Fetch available symbols on mount (only once)
+  // Fetch available symbols when exchange changes
   useEffect(() => {
     const fetchSymbols = async () => {
+      setSymbolsLoading(true)
+      setSelectedSymbol(null)
+      setCoverage([])
       try {
-        const res = await fetch(`/api/system/data-coverage?days=365`)
+        const res = await fetch(`/api/system/data-coverage?days=365&exchange=${exchange}`)
         if (res.ok) {
           const data = await res.json()
           setSymbols(data.symbols || [])
-          if (data.symbols?.length > 0 && !selectedSymbol) {
+          if (data.symbols?.length > 0) {
             setSelectedSymbol(data.symbols[0])
           }
         }
@@ -40,7 +48,7 @@ export default function DataCoverageHeatmap() {
       }
     }
     fetchSymbols()
-  }, [])
+  }, [exchange])
 
   // Fetch coverage when symbol changes
   useEffect(() => {
@@ -50,7 +58,7 @@ export default function DataCoverageHeatmap() {
       try {
         // Get browser timezone offset (in minutes, negative for east of UTC)
         const tzOffset = new Date().getTimezoneOffset()
-        const res = await fetch(`/api/system/data-coverage?days=${days}&symbol=${selectedSymbol}&tz_offset=${tzOffset}`)
+        const res = await fetch(`/api/system/data-coverage?days=${days}&symbol=${selectedSymbol}&tz_offset=${tzOffset}&exchange=${exchange}`)
         if (res.ok) {
           const data: SymbolCoverage = await res.json()
           setCoverage(data.coverage || [])
@@ -62,7 +70,7 @@ export default function DataCoverageHeatmap() {
       }
     }
     fetchCoverage()
-  }, [selectedSymbol, days])
+  }, [selectedSymbol, days, exchange])
 
   const getCellColor = (pct: number) => {
     if (pct === 0) return 'bg-[#dbdbdb]'
