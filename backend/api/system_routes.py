@@ -152,46 +152,60 @@ def get_data_coverage(
     symbol: str = None,
     tz_offset: int = 0,
     exchange: str = "hyperliquid",
+    data_type: str = "market_flow",
     db: Session = Depends(get_db)
 ):
-    """Get data coverage heatmap for market flow data.
+    """Get data coverage heatmap for market data.
     If symbol is provided, returns coverage for that symbol only.
     If symbol is not provided, returns list of available symbols.
     tz_offset: timezone offset in minutes (e.g., -480 for UTC+8)
     exchange: hyperliquid or binance
+    data_type: market_flow or klines
     """
     try:
         import time
-        end_ms = int(time.time() * 1000)
-        start_ms = end_ms - (days * 24 * 60 * 60 * 1000)
+        now_ts = int(time.time())
+
+        # Determine table and timestamp handling based on data_type
+        # crypto_klines uses seconds, market_trades_aggregated uses milliseconds
+        if data_type == "klines":
+            table_name = "crypto_klines"
+            symbol_filter = "period = '1m'"
+            start_ts = now_ts - (days * 24 * 60 * 60)  # seconds
+            ts_divisor = 1  # already in seconds
+        else:
+            table_name = "market_trades_aggregated"
+            symbol_filter = "1=1"
+            start_ts = now_ts * 1000 - (days * 24 * 60 * 60 * 1000)  # milliseconds
+            ts_divisor = 1000  # convert to seconds for to_timestamp
 
         # If no symbol specified, return available symbols list
         if not symbol:
-            symbols_query = text("""
-                SELECT DISTINCT symbol FROM market_trades_aggregated
-                WHERE timestamp >= :start_ms AND exchange = :exchange
+            symbols_query = text(f"""
+                SELECT DISTINCT symbol FROM {table_name}
+                WHERE timestamp >= :start_ts AND exchange = :exchange AND {symbol_filter}
                 ORDER BY symbol
             """)
-            result = db.execute(symbols_query, {"start_ms": start_ms, "exchange": exchange})
+            result = db.execute(symbols_query, {"start_ts": start_ts, "exchange": exchange})
             symbols = [row[0] for row in result.fetchall()]
-            return {"symbols": symbols, "exchange": exchange}
+            return {"symbols": symbols, "exchange": exchange, "data_type": data_type}
 
         # Convert tz_offset from minutes to interval string
         offset_minutes = -tz_offset
         offset_interval = f"{offset_minutes} minutes"
 
         # Query hourly coverage
-        coverage_query = text("""
+        coverage_query = text(f"""
             SELECT
-                to_char(to_timestamp(timestamp / 1000) + interval :tz_interval, 'YYYY-MM-DD') as date,
-                COUNT(DISTINCT to_char(to_timestamp(timestamp / 1000) + interval :tz_interval, 'HH24')) as hours_with_data
-            FROM market_trades_aggregated
-            WHERE timestamp >= :start_ms AND symbol = :symbol AND exchange = :exchange
-            GROUP BY to_char(to_timestamp(timestamp / 1000) + interval :tz_interval, 'YYYY-MM-DD')
+                to_char(to_timestamp(timestamp / {ts_divisor}) + interval :tz_interval, 'YYYY-MM-DD') as date,
+                COUNT(DISTINCT to_char(to_timestamp(timestamp / {ts_divisor}) + interval :tz_interval, 'HH24')) as hours_with_data
+            FROM {table_name}
+            WHERE timestamp >= :start_ts AND symbol = :symbol AND exchange = :exchange AND {symbol_filter}
+            GROUP BY to_char(to_timestamp(timestamp / {ts_divisor}) + interval :tz_interval, 'YYYY-MM-DD')
             ORDER BY date
         """)
         result = db.execute(coverage_query, {
-            "start_ms": start_ms,
+            "start_ts": start_ts,
             "symbol": symbol.upper(),
             "tz_interval": offset_interval,
             "exchange": exchange
@@ -226,7 +240,8 @@ def get_data_coverage(
             "symbol": symbol.upper(),
             "days": days,
             "coverage": coverage,
-            "exchange": exchange
+            "exchange": exchange,
+            "data_type": data_type
         }
     except Exception as e:
         logger.error(f"Failed to get data coverage: {e}")
@@ -271,3 +286,71 @@ def get_collection_days(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Failed to get collection days: {e}")
         return {"days": 0}
+
+
+# ==================== Binance Backfill ====================
+
+@router.post("/binance/backfill")
+async def start_binance_backfill(db: Session = Depends(get_db)):
+    """Start Binance historical data backfill task.
+    Uses current watchlist symbols.
+    Backfills: K-lines (1500), OI (30d), Funding (365d), Sentiment (30d).
+    """
+    from database.models import BinanceBackfillTask
+    from services.hyperliquid_symbol_service import get_selected_symbols
+    from services.exchanges.binance_backfill import binance_backfill_service
+    import asyncio
+
+    # Check if already running
+    running_task = db.query(BinanceBackfillTask).filter(
+        BinanceBackfillTask.status.in_(["pending", "running"])
+    ).first()
+    if running_task:
+        raise HTTPException(status_code=400, detail="A backfill task is already running")
+
+    # Get watchlist symbols
+    symbols = get_selected_symbols()
+    if not symbols:
+        symbols = ["BTC"]
+
+    # Create task
+    task = BinanceBackfillTask(
+        symbols=",".join(symbols),
+        status="pending",
+        progress=0
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    # Start backfill in background
+    asyncio.create_task(binance_backfill_service.start_backfill(task.id))
+
+    return {
+        "task_id": task.id,
+        "symbols": symbols,
+        "status": "started"
+    }
+
+
+@router.get("/binance/backfill/status")
+def get_binance_backfill_status(db: Session = Depends(get_db)):
+    """Get current Binance backfill task status."""
+    from database.models import BinanceBackfillTask
+
+    # Get most recent task
+    task = db.query(BinanceBackfillTask).order_by(
+        BinanceBackfillTask.created_at.desc()
+    ).first()
+
+    if not task:
+        return {"status": "none", "progress": 0}
+
+    return {
+        "task_id": task.id,
+        "symbols": task.symbols.split(",") if task.symbols else [],
+        "status": task.status,
+        "progress": task.progress,
+        "error_message": task.error_message,
+        "created_at": task.created_at.isoformat() if task.created_at else None
+    }

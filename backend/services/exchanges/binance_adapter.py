@@ -229,12 +229,15 @@ class BinanceAdapter(BaseExchangeAdapter):
         symbol: str,
         limit: int = 100,
         start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> List[UnifiedFunding]:
         """Fetch historical funding rates (Binance supports full history)."""
         exchange_symbol = self._to_exchange_symbol(symbol)
         params = {"symbol": exchange_symbol, "limit": min(limit, 1000)}
         if start_time:
             params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
 
         raw_data = self._request("/fapi/v1/fundingRate", params)
         return [
@@ -254,6 +257,7 @@ class BinanceAdapter(BaseExchangeAdapter):
         interval: str = "5m",
         limit: int = 100,
         start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> List[UnifiedOpenInterest]:
         """Fetch historical OI (Binance supports 30 days)."""
         exchange_symbol = self._to_exchange_symbol(symbol)
@@ -264,6 +268,8 @@ class BinanceAdapter(BaseExchangeAdapter):
         }
         if start_time:
             params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
 
         raw_data = self._request("/futures/data/openInterestHist", params)
         return [
@@ -283,6 +289,7 @@ class BinanceAdapter(BaseExchangeAdapter):
         interval: str = "5m",
         limit: int = 100,
         start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> List[UnifiedSentiment]:
         """Fetch historical long/short ratio (Binance supports 30 days)."""
         exchange_symbol = self._to_exchange_symbol(symbol)
@@ -293,6 +300,8 @@ class BinanceAdapter(BaseExchangeAdapter):
         }
         if start_time:
             params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
 
         try:
             raw_data = self._request("/futures/data/topLongShortPositionRatio", params)

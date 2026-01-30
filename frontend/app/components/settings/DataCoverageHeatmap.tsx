@@ -11,13 +11,20 @@ interface SymbolCoverage {
   days: number
   coverage: CoverageItem[]
   exchange: string
+  data_type: string
 }
 
 interface DataCoverageHeatmapProps {
   exchange?: string
+  dataType?: 'market_flow' | 'klines'
+  title?: string
 }
 
-export default function DataCoverageHeatmap({ exchange = 'hyperliquid' }: DataCoverageHeatmapProps) {
+export default function DataCoverageHeatmap({
+  exchange = 'hyperliquid',
+  dataType = 'market_flow',
+  title,
+}: DataCoverageHeatmapProps) {
   const { t } = useTranslation()
   const [symbols, setSymbols] = useState<string[]>([])
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
@@ -26,14 +33,16 @@ export default function DataCoverageHeatmap({ exchange = 'hyperliquid' }: DataCo
   const [coverageLoading, setCoverageLoading] = useState(false)
   const [days, setDays] = useState(365)
 
-  // Fetch available symbols when exchange changes
+  // Fetch available symbols when exchange or dataType changes
   useEffect(() => {
     const fetchSymbols = async () => {
       setSymbolsLoading(true)
       setSelectedSymbol(null)
       setCoverage([])
       try {
-        const res = await fetch(`/api/system/data-coverage?days=365&exchange=${exchange}`)
+        const res = await fetch(
+          `/api/system/data-coverage?days=365&exchange=${exchange}&data_type=${dataType}`
+        )
         if (res.ok) {
           const data = await res.json()
           setSymbols(data.symbols || [])
@@ -48,7 +57,7 @@ export default function DataCoverageHeatmap({ exchange = 'hyperliquid' }: DataCo
       }
     }
     fetchSymbols()
-  }, [exchange])
+  }, [exchange, dataType])
 
   // Fetch coverage when symbol changes
   useEffect(() => {
@@ -56,9 +65,10 @@ export default function DataCoverageHeatmap({ exchange = 'hyperliquid' }: DataCo
     const fetchCoverage = async () => {
       setCoverageLoading(true)
       try {
-        // Get browser timezone offset (in minutes, negative for east of UTC)
         const tzOffset = new Date().getTimezoneOffset()
-        const res = await fetch(`/api/system/data-coverage?days=${days}&symbol=${selectedSymbol}&tz_offset=${tzOffset}&exchange=${exchange}`)
+        const res = await fetch(
+          `/api/system/data-coverage?days=${days}&symbol=${selectedSymbol}&tz_offset=${tzOffset}&exchange=${exchange}&data_type=${dataType}`
+        )
         if (res.ok) {
           const data: SymbolCoverage = await res.json()
           setCoverage(data.coverage || [])
@@ -70,7 +80,7 @@ export default function DataCoverageHeatmap({ exchange = 'hyperliquid' }: DataCo
       }
     }
     fetchCoverage()
-  }, [selectedSymbol, days, exchange])
+  }, [selectedSymbol, days, exchange, dataType])
 
   const getCellColor = (pct: number) => {
     if (pct === 0) return 'bg-[#dbdbdb]'
@@ -93,7 +103,8 @@ export default function DataCoverageHeatmap({ exchange = 'hyperliquid' }: DataCo
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {title && <div className="text-sm font-medium">{title}</div>}
       {/* Symbol tabs + Days selector + Legend */}
       <div className="flex items-center gap-2 flex-wrap justify-between">
         <div className="flex items-center gap-2 flex-wrap">
