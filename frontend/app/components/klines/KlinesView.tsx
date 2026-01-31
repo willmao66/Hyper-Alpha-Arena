@@ -91,18 +91,15 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
 
   // 获取市场数据
   useEffect(() => {
-    console.log('[MarketData] useEffect triggered, exchange:', selectedExchange)
     const fetchData = async () => {
       try {
         const symbolsParam = watchlistSymbols.join(',')
         if (!symbolsParam) return
 
-        console.log('[MarketData] Fetching with exchange:', selectedExchange)
         const response = await fetch(`/api/market/prices?symbols=${symbolsParam}&market=${selectedExchange}`)
         if (!response.ok) return
 
         const data = await response.json()
-        console.log('[MarketData] API response:', data)
         const formattedData = data.map((item: any) => ({
           symbol: item.symbol,
           price: item.price || 0,
@@ -113,7 +110,6 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
           open_interest: item.open_interest || 0,
           funding_rate: item.funding_rate || 0
         }))
-        console.log('[MarketData] Setting marketData:', formattedData)
         setMarketData(formattedData)
       } catch (error) {
         console.error('Failed to fetch market data:', error)
