@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -49,15 +49,17 @@ export default function SettingsPage() {
   const [retentionError, setRetentionError] = useState<string | null>(null)
   const [retentionSuccess, setRetentionSuccess] = useState<string | null>(null)
 
-  // Binance backfill state
-  const [backfillStatus, setBackfillStatus] = useState<{
+  // Backfill state - per exchange
+  const [backfillStatus, setBackfillStatus] = useState<Record<string, {
     status: string
     progress: number
     task_id?: number
     symbols?: string[]
     error_message?: string
-  } | null>(null)
-  const [backfillStarting, setBackfillStarting] = useState(false)
+  }>>({})
+  const [backfillStarting, setBackfillStarting] = useState<Record<string, boolean>>({})
+  // Track if we just completed a backfill (for one-time success message)
+  const [backfillJustCompleted, setBackfillJustCompleted] = useState<Record<string, boolean>>({})
 
   // Determine current exchange from active tab
   const currentExchange = activeTab === 'hyperliquid-data' ? 'hyperliquid' : activeTab === 'binance-data' ? 'binance' : null
@@ -112,38 +114,69 @@ export default function SettingsPage() {
     }
   }, [currentExchange, storageStats, fetchStorageStats])
 
-  // Fetch Binance backfill status when Binance tab is active
-  const fetchBackfillStatus = useCallback(async () => {
+  // Fetch backfill status for an exchange
+  const fetchBackfillStatus = useCallback(async (exchange: string) => {
     try {
-      const res = await fetch('/api/system/binance/backfill/status')
+      const res = await fetch(`/api/system/${exchange}/backfill/status`)
       if (res.ok) {
         const data = await res.json()
-        setBackfillStatus(data)
+        setBackfillStatus(prev => {
+          const prevStatus = prev[exchange]?.status
+          // Track completion for one-time message
+          if ((prevStatus === 'running' || prevStatus === 'pending') && data.status === 'completed') {
+            setBackfillJustCompleted(p => ({ ...p, [exchange]: true }))
+          }
+          return { ...prev, [exchange]: data }
+        })
       }
     } catch (err) {
-      console.error('Failed to fetch backfill status:', err)
+      console.error(`Failed to fetch ${exchange} backfill status:`, err)
     }
   }, [])
 
-  useEffect(() => {
-    if (activeTab === 'binance-data') {
-      fetchBackfillStatus()
-      // Poll while running
-      const interval = setInterval(() => {
-        if (backfillStatus?.status === 'running' || backfillStatus?.status === 'pending') {
-          fetchBackfillStatus()
-        }
-      }, 3000)
-      return () => clearInterval(interval)
-    }
-  }, [activeTab, backfillStatus?.status, fetchBackfillStatus])
+  // Use ref to track if polling should continue
+  const pollingRef = useRef<Record<string, boolean>>({})
 
-  const handleStartBackfill = async () => {
-    setBackfillStarting(true)
+  useEffect(() => {
+    if (currentExchange) {
+      // Initial fetch
+      fetchBackfillStatus(currentExchange)
+      pollingRef.current[currentExchange] = true
+
+      // Poll while running - use functional update to get latest status
+      const interval = setInterval(async () => {
+        const res = await fetch(`/api/system/${currentExchange}/backfill/status`)
+        if (res.ok) {
+          const data = await res.json()
+          setBackfillStatus(prev => {
+            const prevStatus = prev[currentExchange]?.status
+            // Track completion for one-time message
+            if ((prevStatus === 'running' || prevStatus === 'pending') && data.status === 'completed') {
+              setBackfillJustCompleted(p => ({ ...p, [currentExchange]: true }))
+            }
+            return { ...prev, [currentExchange]: data }
+          })
+          // Stop polling if completed or failed
+          if (data.status !== 'running' && data.status !== 'pending') {
+            pollingRef.current[currentExchange] = false
+          }
+        }
+      }, 2000)
+
+      return () => {
+        clearInterval(interval)
+        pollingRef.current[currentExchange] = false
+      }
+    }
+  }, [activeTab, currentExchange, fetchBackfillStatus])
+
+  const handleStartBackfill = async (exchange: string) => {
+    setBackfillStarting(prev => ({ ...prev, [exchange]: true }))
+    setBackfillJustCompleted(prev => ({ ...prev, [exchange]: false }))
     try {
-      const res = await fetch('/api/system/binance/backfill', { method: 'POST' })
+      const res = await fetch(`/api/system/${exchange}/backfill`, { method: 'POST' })
       if (res.ok) {
-        await fetchBackfillStatus()
+        await fetchBackfillStatus(exchange)
       } else {
         const data = await res.json()
         alert(data.detail || 'Failed to start backfill')
@@ -151,7 +184,7 @@ export default function SettingsPage() {
     } catch (err) {
       console.error('Failed to start backfill:', err)
     } finally {
-      setBackfillStarting(false)
+      setBackfillStarting(prev => ({ ...prev, [exchange]: false }))
     }
   }
 
@@ -367,6 +400,52 @@ export default function SettingsPage() {
                       {t('settings.retentionHint', 'Data older than this will be automatically cleaned up (7-730 days)')}
                     </div>
                   </div>
+                  {/* Hyperliquid Backfill Section */}
+                  <div className="pt-4 border-t">
+                    <div className="text-sm font-medium mb-2">
+                      {t('settings.backfillHistory', 'Backfill Historical Data')}
+                    </div>
+                    <div className="text-xs text-muted-foreground mb-3">
+                      {t('settings.hyperliquidBackfillDesc', 'K-lines (~5000 records, ~3.5 days per symbol)')}
+                    </div>
+                    {backfillStatus['hyperliquid']?.status === 'running' || backfillStatus['hyperliquid']?.status === 'pending' ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary transition-all duration-300"
+                              style={{ width: `${backfillStatus['hyperliquid']?.progress || 0}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-medium">{backfillStatus['hyperliquid']?.progress || 0}%</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {t('settings.backfillRunning', 'Backfilling')} {backfillStatus['hyperliquid']?.symbols?.join(', ')}...
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Button
+                          onClick={() => handleStartBackfill('hyperliquid')}
+                          disabled={backfillStarting['hyperliquid']}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {backfillStarting['hyperliquid'] ? t('common.loading', 'Loading...') : t('settings.startBackfill', 'Start Backfill')}
+                        </Button>
+                        {backfillJustCompleted['hyperliquid'] && (
+                          <div className="text-xs text-green-500">
+                            {t('settings.backfillCompleted', 'Last backfill completed successfully')}
+                          </div>
+                        )}
+                        {backfillStatus['hyperliquid']?.status === 'failed' && backfillStatus['hyperliquid']?.task_id && (
+                          <div className="text-xs text-red-500">
+                            {t('settings.backfillFailed', 'Last backfill failed')}: {backfillStatus['hyperliquid']?.error_message}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="text-muted-foreground">{t('settings.noData', 'No data available')}</div>
@@ -460,39 +539,39 @@ export default function SettingsPage() {
                     <div className="text-xs text-muted-foreground mb-3">
                       {t('settings.backfillDesc', 'K-lines (25h), OI (30d), Funding Rate (365d), Long/Short Ratio (30d)')}
                     </div>
-                    {backfillStatus?.status === 'running' || backfillStatus?.status === 'pending' ? (
+                    {backfillStatus['binance']?.status === 'running' || backfillStatus['binance']?.status === 'pending' ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
                           <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                             <div
                               className="h-full bg-primary transition-all duration-300"
-                              style={{ width: `${backfillStatus.progress}%` }}
+                              style={{ width: `${backfillStatus['binance']?.progress || 0}%` }}
                             />
                           </div>
-                          <span className="text-sm font-medium">{backfillStatus.progress}%</span>
+                          <span className="text-sm font-medium">{backfillStatus['binance']?.progress || 0}%</span>
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {t('settings.backfillRunning', 'Backfilling')} {backfillStatus.symbols?.join(', ')}...
+                          {t('settings.backfillRunning', 'Backfilling')} {backfillStatus['binance']?.symbols?.join(', ')}...
                         </div>
                       </div>
                     ) : (
                       <div className="space-y-2">
                         <Button
-                          onClick={handleStartBackfill}
-                          disabled={backfillStarting}
+                          onClick={() => handleStartBackfill('binance')}
+                          disabled={backfillStarting['binance']}
                           size="sm"
                           variant="outline"
                         >
-                          {backfillStarting ? t('common.loading', 'Loading...') : t('settings.startBackfill', 'Start Backfill')}
+                          {backfillStarting['binance'] ? t('common.loading', 'Loading...') : t('settings.startBackfill', 'Start Backfill')}
                         </Button>
-                        {backfillStatus?.status === 'completed' && backfillStatus?.task_id && (
+                        {backfillJustCompleted['binance'] && (
                           <div className="text-xs text-green-500">
                             {t('settings.backfillCompleted', 'Last backfill completed successfully')}
                           </div>
                         )}
-                        {backfillStatus?.status === 'failed' && backfillStatus?.task_id && (
+                        {backfillStatus['binance']?.status === 'failed' && backfillStatus['binance']?.task_id && (
                           <div className="text-xs text-red-500">
-                            {t('settings.backfillFailed', 'Last backfill failed')}: {backfillStatus.error_message}
+                            {t('settings.backfillFailed', 'Last backfill failed')}: {backfillStatus['binance']?.error_message}
                           </div>
                         )}
                       </div>

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Default collection intervals (seconds)
 KLINE_INTERVAL_SECONDS = 60  # 1 minute
-OI_INTERVAL_SECONDS = 300  # 5 minutes
+OI_INTERVAL_SECONDS = 60  # 1 minute (using real-time API for finer granularity)
 FUNDING_INTERVAL_SECONDS = 3600  # 1 hour (funding settles every 8h)
 SENTIMENT_INTERVAL_SECONDS = 300  # 5 minutes
 ORDERBOOK_INTERVAL_SECONDS = 15  # 15 seconds
@@ -69,7 +69,9 @@ class BinanceCollector:
             return
 
         if symbols is None:
-            symbols = ["BTC", "ETH"]
+            # Use watchlist, fallback to BTC only
+            from services.hyperliquid_symbol_service import get_selected_symbols
+            symbols = get_selected_symbols() or ["BTC"]
 
         self.symbols = symbols
         self.scheduler = BackgroundScheduler()
@@ -193,18 +195,19 @@ class BinanceCollector:
             db.close()
 
     def _collect_oi(self):
-        """Collect Open Interest data for all symbols"""
+        """Collect Open Interest data for all symbols using real-time API"""
         db = SessionLocal()
         try:
             persistence = ExchangeDataPersistence(db)
             for symbol in self.symbols:
                 try:
-                    oi_list = self.adapter.fetch_open_interest_history(
-                        symbol, "5m", limit=3
-                    )
-                    if oi_list:
-                        result = persistence.save_open_interest_batch(oi_list)
+                    # Use real-time API for 1-minute granularity
+                    oi = self.adapter.fetch_open_interest(symbol)
+                    if oi:
+                        result = persistence.save_open_interest(oi)
                         logger.debug(f"OI {symbol}: {result}")
+                except Exception as e:
+                    logger.error(f"Failed to collect OI for {symbol}: {e}")
                 except Exception as e:
                     logger.error(f"Failed to collect OI for {symbol}: {e}")
         finally:

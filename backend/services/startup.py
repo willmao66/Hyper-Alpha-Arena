@@ -123,12 +123,14 @@ def initialize_services():
         )
         logger.info("Market flow data cleanup task started (6-hour interval, 30-day retention)")
 
-        # Start Binance data collector (REST API polling)
+        # Start Binance data collector (REST API polling) - uses same Watchlist as Hyperliquid
         from services.exchanges.binance_collector import binance_collector
-        print("Starting Binance data collector...")
-        binance_collector.start(symbols=["BTC", "ETH"])
+        from services.hyperliquid_symbol_service import get_selected_symbols
+        watchlist_symbols = get_selected_symbols()
+        print(f"Starting Binance data collector with watchlist symbols: {watchlist_symbols}")
+        binance_collector.start(symbols=watchlist_symbols if watchlist_symbols else ["BTC"])
         print("Binance data collector started")
-        logger.info("Binance data collector started (klines/OI/funding/sentiment)")
+        logger.info(f"Binance data collector started with symbols: {watchlist_symbols}")
 
         logger.info("All services initialized successfully")
 

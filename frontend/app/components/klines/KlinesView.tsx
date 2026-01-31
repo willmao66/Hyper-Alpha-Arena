@@ -23,24 +23,14 @@ interface MarketData {
   funding_rate: number
 }
 
-interface BackfillTask {
-  task_id: number
-  symbol: string
-  status: string
-  progress: number
-  total_records: number
-  collected_records: number
-}
-
 export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
   const { t } = useTranslation()
-  const collectionDays = useCollectionDays()
+  const [selectedExchange, setSelectedExchange] = useState<'hyperliquid' | 'binance'>('hyperliquid')
+  const collectionDays = useCollectionDays(selectedExchange)
   const [selectedSymbol, setSelectedSymbol] = useState<string>('BTC')
   const [selectedPeriod, setSelectedPeriod] = useState<string>('1m')
   const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([])
   const [marketData, setMarketData] = useState<MarketData[]>([])
-  const [currentTask, setCurrentTask] = useState<BackfillTask | null>(null)
-  const [loading, setLoading] = useState(false)
   const [isPageVisible, setIsPageVisible] = useState(true)
   const [chartType, setChartType] = useState<'candlestick' | 'line' | 'area'>('candlestick')
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>([])
@@ -51,7 +41,38 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
   const [selectedFlowIndicators, setSelectedFlowIndicators] = useState<string[]>([])
 
   const marketDataIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const taskCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Flow indicator availability based on exchange and period
+  const getFlowIndicatorAvailability = (exchange: string, period: string) => {
+    // Period to minutes mapping
+    const periodMinutes: Record<string, number> = {
+      '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30,
+      '1h': 60, '2h': 120, '4h': 240, '8h': 480, '12h': 720,
+      '1d': 1440, '3d': 4320, '1w': 10080, '1M': 43200
+    }
+    const minutes = periodMinutes[period] || 1
+
+    if (exchange === 'binance') {
+      return {
+        cvd: true,
+        taker_volume: true,
+        // OI: Binance historical API only supports 5m+, real-time collection started recently
+        oi: minutes >= 5,
+        oi_delta: minutes >= 5,
+        // Funding: Binance settles every 8h, only meaningful for 8h+ periods
+        funding: minutes >= 480,
+        depth_ratio: true,
+        order_imbalance: true
+      }
+    }
+    // Hyperliquid: all indicators available at all periods
+    return {
+      cvd: true, taker_volume: true, oi: true, oi_delta: true,
+      funding: true, depth_ratio: true, order_imbalance: true
+    }
+  }
+
+  const flowAvailability = getFlowIndicatorAvailability(selectedExchange, selectedPeriod)
 
   // 页面可见性监听
   useEffect(() => {
@@ -63,17 +84,45 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
-  // 获取 watchlist 和初始任务检查
+  // 获取 watchlist
   useEffect(() => {
     fetchWatchlist()
-    checkCurrentTask() // 初始检查一次是否有任务
   }, [])
 
   // 获取市场数据
   useEffect(() => {
+    console.log('[MarketData] useEffect triggered, exchange:', selectedExchange)
+    const fetchData = async () => {
+      try {
+        const symbolsParam = watchlistSymbols.join(',')
+        if (!symbolsParam) return
+
+        console.log('[MarketData] Fetching with exchange:', selectedExchange)
+        const response = await fetch(`/api/market/prices?symbols=${symbolsParam}&market=${selectedExchange}`)
+        if (!response.ok) return
+
+        const data = await response.json()
+        console.log('[MarketData] API response:', data)
+        const formattedData = data.map((item: any) => ({
+          symbol: item.symbol,
+          price: item.price || 0,
+          oracle_price: item.oracle_price || 0,
+          change24h: item.change24h || 0,
+          volume24h: item.volume24h || 0,
+          percentage24h: item.percentage24h || 0,
+          open_interest: item.open_interest || 0,
+          funding_rate: item.funding_rate || 0
+        }))
+        console.log('[MarketData] Setting marketData:', formattedData)
+        setMarketData(formattedData)
+      } catch (error) {
+        console.error('Failed to fetch market data:', error)
+      }
+    }
+
     if (watchlistSymbols.length > 0 && isPageVisible) {
-      fetchMarketData()
-      marketDataIntervalRef.current = setInterval(fetchMarketData, 60000) // 改为60秒
+      fetchData()
+      marketDataIntervalRef.current = setInterval(fetchData, 60000)
     }
 
     return () => {
@@ -82,30 +131,13 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
         marketDataIntervalRef.current = null
       }
     }
-  }, [watchlistSymbols, isPageVisible])
+  }, [watchlistSymbols, isPageVisible, selectedExchange])
 
-  // 轮询当前任务状态 - 只在有活动任务时轮询
-  useEffect(() => {
-    if (isPageVisible && currentTask) {
-      taskCheckIntervalRef.current = setInterval(checkCurrentTask, 5000) // 有任务时5秒检查一次
-    }
-
-    return () => {
-      if (taskCheckIntervalRef.current) {
-        clearInterval(taskCheckIntervalRef.current)
-        taskCheckIntervalRef.current = null
-      }
-    }
-  }, [isPageVisible, currentTask])
-
-  // 组件卸载时清理所有定时器
+  // 组件卸载时清理定时器
   useEffect(() => {
     return () => {
       if (marketDataIntervalRef.current) {
         clearInterval(marketDataIntervalRef.current)
-      }
-      if (taskCheckIntervalRef.current) {
-        clearInterval(taskCheckIntervalRef.current)
       }
     }
   }, [])
@@ -124,91 +156,6 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
     }
   }
 
-  const fetchMarketData = async () => {
-    try {
-      const symbolsParam = watchlistSymbols.join(',')
-      if (!symbolsParam) return
-
-      const response = await fetch(`/api/market/prices?symbols=${symbolsParam}`)
-      if (!response.ok) return
-
-      const data = await response.json()
-      const formattedData = data.map((item: any) => ({
-        symbol: item.symbol,
-        price: item.price || 0,
-        oracle_price: item.oracle_price || 0,
-        change24h: item.change24h || 0,
-        volume24h: item.volume24h || 0,
-        percentage24h: item.percentage24h || 0,
-        open_interest: item.open_interest || 0,
-        funding_rate: item.funding_rate || 0
-      }))
-      setMarketData(formattedData)
-    } catch (error) {
-      console.error('Failed to fetch market data:', error)
-    }
-  }
-
-  const checkCurrentTask = async () => {
-    try {
-      const response = await fetch('/api/klines/backfill-tasks')
-      const data = await response.json()
-      const tasks = data.tasks || []
-
-      // 找到正在运行或等待的任务
-      const activeTask = tasks.find((t: BackfillTask) =>
-        t.status === 'running' || t.status === 'pending'
-      )
-
-      if (activeTask) {
-        setCurrentTask(activeTask)
-      } else {
-        // 检查是否有刚完成的任务需要删除
-        const completedTask = tasks.find((t: BackfillTask) => t.status === 'completed')
-        if (completedTask && currentTask?.task_id === completedTask.task_id) {
-          // 删除已完成的任务
-          await fetch(`/api/klines/backfill-tasks/${completedTask.task_id}`, {
-            method: 'DELETE'
-          }).catch(() => {}) // 忽略删除错误
-        }
-        setCurrentTask(null)
-      }
-    } catch (error) {
-      console.error('Failed to check task status:', error)
-    }
-  }
-
-  const handleBackfill = async () => {
-    if (!selectedSymbol || loading || currentTask) return
-
-    setLoading(true)
-    try {
-      const endTime = new Date()
-      const startTime = new Date()
-      startTime.setDate(startTime.getDate() - 30)
-
-      const response = await fetch('/api/klines/backfill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbols: [selectedSymbol],
-          start_time: startTime.toISOString(),
-          end_time: endTime.toISOString(),
-          period: '1m'
-        })
-      })
-
-      if (response.ok) {
-        // 立即检查任务状态
-        setTimeout(checkCurrentTask, 500)
-      }
-    } catch (error) {
-      console.error('Failed to start backfill:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const getSymbolMarketData = (symbol: string) => {
     return marketData.find(data => data.symbol === symbol)
   }
@@ -222,58 +169,39 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
     return value.toLocaleString()
   }
 
-  // 渲染按钮或进度条
-  const renderBackfillButton = () => {
-    if (currentTask) {
-      const progress = currentTask.progress || 0
-      const collected = currentTask.collected_records || 0
-      const total = currentTask.total_records || 0
-
-      return (
-        <div className="w-full space-y-1">
-          <div className="relative w-full h-8 bg-muted rounded-md overflow-hidden">
-            {/* 进度条背景 */}
-            <div
-              className="absolute inset-y-0 left-0 bg-primary/80 transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-            {/* 进度文字 */}
-            <div className="absolute inset-0 flex items-center justify-center text-xs font-medium">
-              <span className={progress > 50 ? 'text-primary-foreground' : 'text-foreground'}>
-                {currentTask.symbol} ({collected}/{total}) {progress}%
-              </span>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground text-center">
-            {t('kline.backfillInProgress', 'Backfilling in progress...')}
-          </p>
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-2">
-        <Button
-          onClick={handleBackfill}
-          disabled={loading}
-          className="w-full"
-          size="sm"
-        >
-          {loading ? t('kline.starting', 'Starting...') : t('kline.backfillHistorical', 'Backfill Historical Data')}
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          {t('kline.backfillLast30Days', 'Backfill last 30 days of K-line data')}
-        </p>
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col md:flex-row h-full w-full gap-4 overflow-hidden pb-16 md:pb-0">
       {/* 左侧 70%：选择区 + 市场数据 + 指标 + K线图 */}
       <div className="flex flex-col flex-1 md:flex-[7] min-w-0 space-y-4 overflow-hidden">
         {/* Mobile: Simplified selector bar */}
         <div className="md:hidden flex items-center gap-2 px-2 py-2 bg-background border-b">
+          {/* Mobile Exchange Selector */}
+          <div className="flex items-center gap-0.5 p-0.5 rounded border-2 border-amber-500/70 bg-amber-500/5">
+            <button
+              onClick={() => setSelectedExchange('hyperliquid')}
+              className={`p-1.5 rounded transition-all ${
+                selectedExchange === 'hyperliquid'
+                  ? 'bg-primary text-primary-foreground'
+                  : ''
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 144 144" fill="none">
+                <path d="M144 71.6991C144 119.306 114.866 134.582 99.5156 120.98C86.8804 109.889 83.1211 86.4521 64.116 84.0456C39.9942 81.0113 37.9057 113.133 22.0334 113.133C3.5504 113.133 0 86.2428 0 72.4315C0 58.3063 3.96809 39.0542 19.736 39.0542C38.1146 39.0542 39.1588 66.5722 62.132 65.1073C85.0007 63.5379 85.4184 34.8689 100.247 22.6271C113.195 12.0593 144 23.4641 144 71.6991Z" fill={selectedExchange === 'hyperliquid' ? 'currentColor' : '#50E3C2'}/>
+              </svg>
+            </button>
+            <button
+              onClick={() => setSelectedExchange('binance')}
+              className={`p-1.5 rounded transition-all ${
+                selectedExchange === 'binance'
+                  ? 'bg-primary text-primary-foreground'
+                  : ''
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 1024 1024">
+                <path d="M643.541333 566.613333l77.269334 77.226667-209.152 209.152-209.109334-209.152 77.269334-77.226667 131.84 132.522667 131.84-132.565333z m131.882667-131.925333L853.333333 512l-77.226666 77.226667L698.837333 512l76.586667-77.226667z m-263.722667 0l77.226667 76.586667-77.269333 77.269333L434.432 512l77.226667-77.226667z m-263.765333 0L324.565333 512l-76.586666 76.586667L170.666667 511.957333l77.226666-77.226666z m263.765333-263.765333l209.152 208.469333-77.312 77.226667-131.84-131.84-131.84 132.522666-77.312-77.226666 209.152-209.152z" fill={selectedExchange === 'binance' ? 'currentColor' : '#F0B90B'}/>
+              </svg>
+            </button>
+          </div>
           <Select value={selectedSymbol} onValueChange={setSelectedSymbol}>
             <SelectTrigger className="flex-1 h-9">
               <SelectValue placeholder={t('kline.selectSymbol', 'Select Symbol')} />
@@ -301,6 +229,37 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
           {/* Symbol and Period Selection */}
           <Card className="lg:col-span-2">
             <CardContent className="pt-4 space-y-3">
+              {/* Exchange Selector - Gold border for visibility */}
+              <div className="flex items-center gap-1 p-1 rounded-md border-2 border-amber-500/70 bg-amber-500/5">
+                <button
+                  onClick={() => setSelectedExchange('hyperliquid')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded transition-all ${
+                    selectedExchange === 'hyperliquid'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-muted'
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 144 144" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M144 71.6991C144 119.306 114.866 134.582 99.5156 120.98C86.8804 109.889 83.1211 86.4521 64.116 84.0456C39.9942 81.0113 37.9057 113.133 22.0334 113.133C3.5504 113.133 0 86.2428 0 72.4315C0 58.3063 3.96809 39.0542 19.736 39.0542C38.1146 39.0542 39.1588 66.5722 62.132 65.1073C85.0007 63.5379 85.4184 34.8689 100.247 22.6271C113.195 12.0593 144 23.4641 144 71.6991Z" fill={selectedExchange === 'hyperliquid' ? 'currentColor' : '#50E3C2'}/>
+                  </svg>
+                  Hyperliquid
+                </button>
+                <button
+                  onClick={() => setSelectedExchange('binance')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded transition-all ${
+                    selectedExchange === 'binance'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-muted'
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M643.541333 566.613333l77.269334 77.226667-209.152 209.152-209.109334-209.152 77.269334-77.226667 131.84 132.522667 131.84-132.565333z m131.882667-131.925333L853.333333 512l-77.226666 77.226667L698.837333 512l76.586667-77.226667z m-263.722667 0l77.226667 76.586667-77.269333 77.269333L434.432 512l77.226667-77.226667z m-263.765333 0L324.565333 512l-76.586666 76.586667L170.666667 511.957333l77.226666-77.226666z m263.765333-263.765333l209.152 208.469333-77.312 77.226667-131.84-131.84-131.84 132.522666-77.312-77.226666 209.152-209.152z" fill={selectedExchange === 'binance' ? 'currentColor' : '#F0B90B'}/>
+                  </svg>
+                  Binance
+                </button>
+              </div>
+
+              {/* Symbol and Period */}
               <div className="flex items-center gap-2">
                 <Select value={selectedSymbol} onValueChange={setSelectedSymbol}>
                   <SelectTrigger className="flex-1">
@@ -338,20 +297,26 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
                 </Select>
               </div>
 
-              {/* K-line environment warning - always visible */}
+              {/* K-line environment warning - exchange specific */}
               <div className="pt-2 border-t">
                 <p className="text-xs text-amber-600 font-medium flex items-center gap-1">
                   <span>⚠️</span>
-                  <span>{t('kline.mainnetWarning', 'K-line analysis is only available for Mainnet environment')}</span>
+                  <span>
+                    {selectedExchange === 'hyperliquid'
+                      ? t('kline.mainnetWarning', 'K-line analysis is only available for Mainnet environment')
+                      : t('kline.binanceWarning', 'K-line analysis is only available for Binance Futures production environment')
+                    }
+                  </span>
                 </p>
                 {collectionDays !== null && collectionDays > 0 && (
                   <p className="text-xs text-muted-foreground mt-1">
-                    {t('common.collectionDaysHint', 'Hyperliquid market flow data collected for {{days}} days', { days: collectionDays })}
+                    {selectedExchange === 'hyperliquid'
+                      ? t('common.collectionDaysHint', 'Hyperliquid market flow data collected for {{days}} days', { days: collectionDays })
+                      : t('common.binanceCollectionDaysHint', 'Binance market flow data collected for {{days}} days', { days: collectionDays })
+                    }
                   </p>
                 )}
               </div>
-
-              {selectedSymbol && renderBackfillButton()}
             </CardContent>
           </Card>
 
@@ -417,21 +382,28 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
                     { key: 'funding', label: 'Funding' },
                     { key: 'depth_ratio', label: 'Depth(log)' },
                     { key: 'order_imbalance', label: 'Imbalance' }
-                  ].map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => setSelectedFlowIndicators(prev =>
-                        prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-                      )}
-                      className={`px-2 py-1 text-xs rounded transition-colors ${
-                        selectedFlowIndicators.includes(key)
-                          ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                          : 'hover:bg-muted border'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                  ].map(({ key, label }) => {
+                    const isAvailable = flowAvailability[key as keyof typeof flowAvailability]
+                    return (
+                      <button
+                        key={key}
+                        disabled={!isAvailable}
+                        title={!isAvailable ? t('kline.indicatorUnavailable', 'Not available for {{exchange}} at {{period}}', { exchange: selectedExchange, period: selectedPeriod }) : undefined}
+                        onClick={() => isAvailable && setSelectedFlowIndicators(prev =>
+                          prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+                        )}
+                        className={`px-2 py-1 text-xs rounded transition-colors ${
+                          !isAvailable
+                            ? 'opacity-40 cursor-not-allowed border border-muted'
+                            : selectedFlowIndicators.includes(key)
+                              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                              : 'hover:bg-muted border'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             </CardContent>
@@ -604,6 +576,7 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
                 <TradingViewChart
                   symbol={selectedSymbol}
                   period={selectedPeriod}
+                  exchange={selectedExchange}
                   chartType={chartType}
                   selectedIndicators={selectedIndicators}
                   selectedFlowIndicators={selectedFlowIndicators}

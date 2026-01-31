@@ -170,7 +170,7 @@ def get_data_coverage(
         # crypto_klines uses seconds, market_trades_aggregated uses milliseconds
         if data_type == "klines":
             table_name = "crypto_klines"
-            symbol_filter = "period = '1m'"
+            symbol_filter = "1=1"  # Include all periods for coverage calculation
             start_ts = now_ts - (days * 24 * 60 * 60)  # seconds
             ts_divisor = 1  # already in seconds
         else:
@@ -268,24 +268,24 @@ def update_retention_days(request: RetentionDaysRequest, db: Session = Depends(g
 
 
 @router.get("/collection-days")
-def get_collection_days(db: Session = Depends(get_db)):
-    """Get total days of market flow data collection.
+def get_collection_days(exchange: str = "hyperliquid", db: Session = Depends(get_db)):
+    """Get total days of market flow data collection for specific exchange.
     Calculated from earliest record timestamp to now.
     """
     try:
         import time
-        query = text("SELECT MIN(timestamp) FROM market_trades_aggregated")
-        result = db.execute(query).scalar()
+        query = text("SELECT MIN(timestamp) FROM market_trades_aggregated WHERE exchange = :exchange")
+        result = db.execute(query, {"exchange": exchange}).scalar()
 
         if not result:
-            return {"days": 0}
+            return {"days": 0, "exchange": exchange}
 
         now_ms = int(time.time() * 1000)
         days = (now_ms - result) / (24 * 60 * 60 * 1000)
-        return {"days": round(days, 1)}
+        return {"days": round(days, 1), "exchange": exchange}
     except Exception as e:
         logger.error(f"Failed to get collection days: {e}")
-        return {"days": 0}
+        return {"days": 0, "exchange": exchange}
 
 
 # ==================== Binance Backfill ====================
@@ -341,6 +341,74 @@ def get_binance_backfill_status(db: Session = Depends(get_db)):
     # Get most recent task
     task = db.query(BinanceBackfillTask).order_by(
         BinanceBackfillTask.created_at.desc()
+    ).first()
+
+    if not task:
+        return {"status": "none", "progress": 0}
+
+    return {
+        "task_id": task.id,
+        "symbols": task.symbols.split(",") if task.symbols else [],
+        "status": task.status,
+        "progress": task.progress,
+        "error_message": task.error_message,
+        "created_at": task.created_at.isoformat() if task.created_at else None
+    }
+
+
+# ==================== Hyperliquid Backfill ====================
+
+@router.post("/hyperliquid/backfill")
+async def start_hyperliquid_backfill(db: Session = Depends(get_db)):
+    """Start Hyperliquid K-line backfill task.
+    Uses current watchlist symbols.
+    Backfills: K-lines (~5000 records, ~3.5 days per symbol).
+    """
+    from database.models import HyperliquidBackfillTask
+    from services.hyperliquid_symbol_service import get_selected_symbols
+    from services.exchanges.hyperliquid_backfill import hyperliquid_backfill_service
+    import asyncio
+
+    # Check if already running
+    running_task = db.query(HyperliquidBackfillTask).filter(
+        HyperliquidBackfillTask.status.in_(["pending", "running"])
+    ).first()
+    if running_task:
+        raise HTTPException(status_code=400, detail="A backfill task is already running")
+
+    # Get watchlist symbols
+    symbols = get_selected_symbols()
+    if not symbols:
+        symbols = ["BTC"]
+
+    # Create task
+    task = HyperliquidBackfillTask(
+        symbols=",".join(symbols),
+        status="pending",
+        progress=0
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    # Start backfill in background
+    asyncio.create_task(hyperliquid_backfill_service.start_backfill(task.id))
+
+    return {
+        "task_id": task.id,
+        "symbols": symbols,
+        "status": "started"
+    }
+
+
+@router.get("/hyperliquid/backfill/status")
+def get_hyperliquid_backfill_status(db: Session = Depends(get_db)):
+    """Get current Hyperliquid backfill task status."""
+    from database.models import HyperliquidBackfillTask
+
+    # Get most recent task
+    task = db.query(HyperliquidBackfillTask).order_by(
+        HyperliquidBackfillTask.created_at.desc()
     ).first()
 
     if not task:

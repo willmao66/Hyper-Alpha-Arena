@@ -603,6 +603,21 @@ class BinanceBackfillTask(Base):
     )
 
 
+class HyperliquidBackfillTask(Base):
+    """Store Hyperliquid K-line backfill task status"""
+    __tablename__ = "hyperliquid_backfill_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbols = Column(String(200), nullable=False)  # Comma-separated symbols
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+
 class KlineAIAnalysisLog(Base):
     """Store K-line AI analysis logs for chart insights"""
     __tablename__ = "kline_ai_analysis_logs"

@@ -16,7 +16,8 @@ from .data_persistence import ExchangeDataPersistence
 logger = logging.getLogger(__name__)
 
 # Backfill limits
-KLINE_BACKFILL_LIMIT = 1500  # ~25 hours of 1m klines
+KLINE_BACKFILL_LIMIT = 1500  # Per period
+KLINE_PERIODS = ['1m', '15m', '1h']  # Multiple periods for better coverage
 OI_BACKFILL_DAYS = 30
 FUNDING_BACKFILL_DAYS = 365
 SENTIMENT_BACKFILL_DAYS = 30
@@ -64,21 +65,24 @@ class BinanceBackfillService:
             db.commit()
 
             symbols = task.symbols.split(",") if task.symbols else ["BTC"]
-            total_steps = len(symbols) * 4  # 4 data types per symbol
+            # Steps: (klines x periods) + OI + Funding + Sentiment per symbol
+            total_steps = len(symbols) * (len(KLINE_PERIODS) + 3)
             current_step = 0
 
             persistence = ExchangeDataPersistence(db)
 
             for symbol in symbols:
-                # 1. Backfill K-lines
-                try:
-                    await self._backfill_klines(symbol, persistence)
-                except Exception as e:
-                    logger.error(f"Kline backfill failed for {symbol}: {e}")
-                current_step += 1
-                task.progress = int(current_step / total_steps * 100)
-                db.commit()
-                await asyncio.sleep(1)
+                # 1. Backfill K-lines for each period
+                for period in KLINE_PERIODS:
+                    try:
+                        await self._backfill_klines(symbol, period, persistence)
+                    except Exception as e:
+                        logger.error(f"Kline backfill failed for {symbol}/{period}: {e}")
+                    current_step += 1
+                    task.progress = int(current_step / total_steps * 100)
+                    db.commit()
+                    # Wait 3 seconds between requests to avoid API rate limiting
+                    await asyncio.sleep(3)
 
                 # 2. Backfill OI (30 days)
                 try:
@@ -88,7 +92,7 @@ class BinanceBackfillService:
                 current_step += 1
                 task.progress = int(current_step / total_steps * 100)
                 db.commit()
-                await asyncio.sleep(1)
+                await asyncio.sleep(3)
 
                 # 3. Backfill Funding Rate (365 days)
                 try:
@@ -98,7 +102,7 @@ class BinanceBackfillService:
                 current_step += 1
                 task.progress = int(current_step / total_steps * 100)
                 db.commit()
-                await asyncio.sleep(1)
+                await asyncio.sleep(3)
 
                 # 4. Backfill Sentiment (30 days)
                 try:
@@ -108,6 +112,7 @@ class BinanceBackfillService:
                 current_step += 1
                 task.progress = int(current_step / total_steps * 100)
                 db.commit()
+                await asyncio.sleep(3)
 
             task.status = "completed"
             task.progress = 100
@@ -126,36 +131,27 @@ class BinanceBackfillService:
         finally:
             db.close()
 
-    async def _backfill_klines(self, symbol: str, persistence: ExchangeDataPersistence):
-        """Backfill K-line data (1500 records)"""
-        logger.info(f"Backfilling klines for {symbol}")
-        klines = self.adapter.fetch_klines(symbol, "1m", limit=KLINE_BACKFILL_LIMIT)
+    async def _backfill_klines(self, symbol: str, period: str, persistence: ExchangeDataPersistence):
+        """Backfill K-line data for a period"""
+        logger.info(f"Backfilling klines for {symbol}/{period}")
+        klines = self.adapter.fetch_klines(symbol, period, limit=KLINE_BACKFILL_LIMIT)
         if klines:
             result = persistence.save_klines(klines)
-            persistence.save_taker_volumes_from_klines(klines)
-            logger.info(f"Klines backfill {symbol}: {result}")
+            if period == '1m':
+                persistence.save_taker_volumes_from_klines(klines)
+            logger.info(f"Klines backfill {symbol}/{period}: {result}")
 
     async def _backfill_oi(self, symbol: str, persistence: ExchangeDataPersistence):
-        """Backfill Open Interest history (30 days)"""
-        logger.info(f"Backfilling OI for {symbol} ({OI_BACKFILL_DAYS} days)")
-        all_oi = []
-        end_time = int(time.time() * 1000)
-        start_time = end_time - (OI_BACKFILL_DAYS * 24 * 60 * 60 * 1000)
+        """
+        Backfill Open Interest history - DISABLED
 
-        current_end = end_time
-        while current_end > start_time:
-            oi_list = self.adapter.fetch_open_interest_history(
-                symbol, "5m", limit=500, end_time=current_end
-            )
-            if not oi_list:
-                break
-            all_oi.extend(oi_list)
-            current_end = min(oi.timestamp for oi in oi_list) - 1
-            await asyncio.sleep(0.5)
+        Binance OI history API only supports 5m granularity, but real-time collection
+        now uses 1m granularity. Mixing 5m historical data with 1m real-time data
+        would cause timestamp misalignment and data pollution.
 
-        if all_oi:
-            result = persistence.save_open_interest_batch(all_oi)
-            logger.info(f"OI backfill {symbol}: {result}, total {len(all_oi)} records")
+        OI data will be accumulated from real-time collection going forward.
+        """
+        logger.info(f"OI backfill SKIPPED for {symbol} - using 1m real-time collection instead of 5m history")
 
     async def _backfill_funding(self, symbol: str, persistence: ExchangeDataPersistence):
         """Backfill Funding Rate history (365 days)"""
