@@ -56,6 +56,7 @@ MIGRATIONS = [
     "add_regime_body_ratio_cvd_divisor.py",
     "create_market_sentiment_metrics_table.py",
     "create_hyperliquid_backfill_tasks.py",
+    "add_exchange_to_signals.py",
 ]
 
 

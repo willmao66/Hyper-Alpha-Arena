@@ -123,6 +123,14 @@ class ExchangeDataPersistence:
             # Convert timestamp from seconds to milliseconds
             timestamp_ms = kline.timestamp * 1000
 
+            # Calculate notional if not provided (fallback: volume * close_price)
+            taker_buy_notional = kline.taker_buy_notional
+            taker_sell_notional = kline.taker_sell_notional
+            if taker_buy_notional is None and kline.close_price:
+                taker_buy_notional = kline.taker_buy_volume * kline.close_price
+            if taker_sell_notional is None and kline.close_price:
+                taker_sell_notional = kline.taker_sell_volume * kline.close_price
+
             existing = self.db.query(MarketTradesAggregated).filter(
                 MarketTradesAggregated.exchange == kline.exchange,
                 MarketTradesAggregated.symbol == kline.symbol,
@@ -133,6 +141,10 @@ class ExchangeDataPersistence:
                 existing.taker_buy_volume = kline.taker_buy_volume
                 existing.taker_sell_volume = kline.taker_sell_volume
                 existing.taker_buy_count = kline.trade_count or 0
+                existing.taker_buy_notional = taker_buy_notional or 0
+                existing.taker_sell_notional = taker_sell_notional or 0
+                existing.high_price = kline.high_price
+                existing.low_price = kline.low_price
                 updated += 1
             else:
                 record = MarketTradesAggregated(
@@ -143,6 +155,10 @@ class ExchangeDataPersistence:
                     taker_sell_volume=kline.taker_sell_volume,
                     taker_buy_count=kline.trade_count or 0,
                     taker_sell_count=0,
+                    taker_buy_notional=taker_buy_notional or 0,
+                    taker_sell_notional=taker_sell_notional or 0,
+                    high_price=kline.high_price,
+                    low_price=kline.low_price,
                 )
                 self.db.add(record)
                 inserted += 1
@@ -162,6 +178,8 @@ class ExchangeDataPersistence:
             if existing:
                 existing.best_bid = orderbook.best_bid
                 existing.best_ask = orderbook.best_ask
+                existing.bid_depth_5 = orderbook.bid_depth_sum
+                existing.ask_depth_5 = orderbook.ask_depth_sum
                 existing.bid_depth_10 = orderbook.bid_depth_sum
                 existing.ask_depth_10 = orderbook.ask_depth_sum
                 existing.spread = orderbook.spread
@@ -172,6 +190,8 @@ class ExchangeDataPersistence:
                     timestamp=orderbook.timestamp,
                     best_bid=orderbook.best_bid,
                     best_ask=orderbook.best_ask,
+                    bid_depth_5=orderbook.bid_depth_sum,
+                    ask_depth_5=orderbook.ask_depth_sum,
                     bid_depth_10=orderbook.bid_depth_sum,
                     ask_depth_10=orderbook.ask_depth_sum,
                     spread=orderbook.spread,

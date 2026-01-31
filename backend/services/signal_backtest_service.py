@@ -68,7 +68,7 @@ class SignalBacktestService:
         # Get signal definition
         result = db.execute(
             text("""
-                SELECT id, signal_name, description, trigger_condition, enabled
+                SELECT id, signal_name, description, trigger_condition, enabled, exchange
                 FROM signal_definitions WHERE id = :id
             """),
             {"id": signal_id}
@@ -78,8 +78,10 @@ class SignalBacktestService:
             logger.warning(f"[Backtest] Signal {signal_id} NOT FOUND in database")
             return {"error": "Signal not found"}
 
+        exchange = row[5] if len(row) > 5 and row[5] else "hyperliquid"
+
         # Debug: log raw row data and types
-        logger.warning(f"[Backtest] DB row: id={row[0]}, name={row[1]}, "
+        logger.warning(f"[Backtest] DB row: id={row[0]}, name={row[1]}, exchange={exchange}, "
                        f"trigger_condition type={type(row[3])}")
 
         # Handle trigger_condition - may be string (SQLite/some drivers) or dict (PostgreSQL JSONB)
@@ -114,7 +116,7 @@ class SignalBacktestService:
 
         # Find triggers within the specified time range
         triggers = self._find_triggers_in_range(
-            db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts
+            db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts, exchange
         )
 
         logger.warning(f"[Backtest] END signal_id={signal_id} success, {len(triggers)} triggers found")
@@ -130,7 +132,8 @@ class SignalBacktestService:
 
     def backtest_temp_signal(
         self, db: Session, symbol: str, trigger_condition: Dict,
-        kline_min_ts: int = None, kline_max_ts: int = None
+        kline_min_ts: int = None, kline_max_ts: int = None,
+        exchange: str = "hyperliquid"
     ) -> Dict[str, Any]:
         """
         Backtest a temporary signal configuration without saving to database.
@@ -142,6 +145,7 @@ class SignalBacktestService:
             trigger_condition: Signal trigger condition dict
             kline_min_ts: Minimum K-line timestamp in milliseconds
             kline_max_ts: Maximum K-line timestamp in milliseconds
+            exchange: Exchange name (hyperliquid or binance)
         """
         # Clear bucket cache for fresh data
         self._bucket_cache = {}
@@ -163,7 +167,7 @@ class SignalBacktestService:
 
         # Find triggers within the specified time range
         triggers = self._find_triggers_in_range(
-            db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts
+            db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts, exchange
         )
 
         return {
@@ -178,7 +182,8 @@ class SignalBacktestService:
 
     def _find_triggers_in_range(
         self, db: Session, signal_def: Dict, symbol: str, time_window: str,
-        kline_min_ts: int = None, kline_max_ts: int = None
+        kline_min_ts: int = None, kline_max_ts: int = None,
+        exchange: str = "hyperliquid"
     ) -> List[Dict]:
         """
         Find trigger points within a time range using 15-second sliding window detection.
@@ -202,20 +207,20 @@ class SignalBacktestService:
         threshold = condition.get("threshold")
 
         logger.warning(f"[Backtest] _find_triggers_in_range: symbol={symbol}, metric={metric}, "
-                       f"operator={operator}, threshold={threshold}, time_window={time_window}")
+                       f"operator={operator}, threshold={threshold}, time_window={time_window}, exchange={exchange}")
 
         # Handle taker_volume composite signal
         if metric == "taker_volume":
             logger.warning(f"[Backtest] Using taker_volume composite signal handler")
             return self._find_taker_triggers_in_range(
-                db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts
+                db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts, exchange
             )
 
         # Handle oi USD change signal (special: calculates USD value change)
         if metric == "oi":
             logger.warning(f"[Backtest] Using oi USD change signal handler")
             return self._find_oi_change_triggers_in_range(
-                db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts
+                db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts, exchange
             )
 
         if not all([metric, operator, threshold is not None]):
@@ -239,7 +244,7 @@ class SignalBacktestService:
 
         # Load raw 15-second granularity data for the time range
         raw_data = self._load_raw_data_for_metric(
-            db, symbol, metric, kline_min_ts, kline_max_ts, interval_ms
+            db, symbol, metric, kline_min_ts, kline_max_ts, interval_ms, exchange
         )
         if not raw_data:
             logger.warning(f"[Backtest] NO DATA returned from _load_raw_data_for_metric "
@@ -286,7 +291,8 @@ class SignalBacktestService:
 
     def _find_oi_change_triggers_in_range(
         self, db: Session, signal_def: Dict, symbol: str, time_window: str,
-        kline_min_ts: int = None, kline_max_ts: int = None
+        kline_min_ts: int = None, kline_max_ts: int = None,
+        exchange: str = "hyperliquid"
     ) -> List[Dict]:
         """
         Find OI USD change signal triggers.
@@ -313,6 +319,7 @@ class SignalBacktestService:
             MarketAssetMetrics.open_interest,
             MarketAssetMetrics.mark_price
         ).filter(
+            MarketAssetMetrics.exchange == exchange,
             MarketAssetMetrics.symbol == symbol.upper(),
             MarketAssetMetrics.timestamp >= start_time_ms,
             MarketAssetMetrics.timestamp <= current_time_ms,
@@ -368,7 +375,8 @@ class SignalBacktestService:
 
     def _find_taker_triggers_in_range(
         self, db: Session, signal_def: Dict, symbol: str, time_window: str,
-        kline_min_ts: int = None, kline_max_ts: int = None
+        kline_min_ts: int = None, kline_max_ts: int = None,
+        exchange: str = "hyperliquid"
     ) -> List[Dict]:
         """
         Find taker_volume composite signal triggers using 15-second sliding window.
@@ -383,7 +391,7 @@ class SignalBacktestService:
 
         # Load raw 15-second granularity data
         raw_data = self._load_raw_data_for_metric(
-            db, symbol, "taker_ratio", kline_min_ts, kline_max_ts, interval_ms
+            db, symbol, "taker_ratio", kline_min_ts, kline_max_ts, interval_ms, exchange
         )
         if not raw_data:
             return []
@@ -562,7 +570,7 @@ class SignalBacktestService:
         return bucket_values.get(bucket_ts)
 
     def _compute_all_bucket_values(
-        self, db: Session, symbol: str, metric: str, interval_ms: int
+        self, db: Session, symbol: str, metric: str, interval_ms: int, exchange: str = "hyperliquid"
     ) -> Dict[int, float]:
         """
         Compute indicator values for all buckets using the same logic as
@@ -582,38 +590,38 @@ class SignalBacktestService:
 
         if metric == "oi_delta":
             return self._compute_oi_delta_buckets(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "cvd":
             return self._compute_cvd_buckets(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "depth_ratio":
             return self._compute_depth_ratio_buckets(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "order_imbalance":
             return self._compute_imbalance_buckets(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "taker_ratio":
             return self._compute_taker_ratio_buckets(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "funding":
             return self._compute_funding_buckets(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "oi":
             return self._compute_oi_buckets(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         else:
             logger.warning(f"Unknown metric for bucket computation: {metric}")
             return {}
 
     def _compute_oi_delta_buckets(
-        self, db, symbol, interval_ms, start_time_ms, current_time_ms
+        self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"
     ) -> Dict[int, float]:
         """Compute OI delta percentage for each bucket (same as signal_analysis)."""
         from services.market_flow_indicators import floor_timestamp
@@ -623,6 +631,7 @@ class SignalBacktestService:
             MarketAssetMetrics.timestamp,
             MarketAssetMetrics.open_interest
         ).filter(
+            MarketAssetMetrics.exchange == exchange,
             MarketAssetMetrics.symbol == symbol.upper(),
             MarketAssetMetrics.timestamp >= start_time_ms,
             MarketAssetMetrics.timestamp <= current_time_ms
@@ -651,7 +660,7 @@ class SignalBacktestService:
         return result
 
     def _compute_cvd_buckets(
-        self, db, symbol, interval_ms, start_time_ms, current_time_ms
+        self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"
     ) -> Dict[int, float]:
         """Compute CVD for each bucket."""
         from services.market_flow_indicators import floor_timestamp
@@ -662,6 +671,7 @@ class SignalBacktestService:
             MarketTradesAggregated.taker_buy_notional,
             MarketTradesAggregated.taker_sell_notional
         ).filter(
+            MarketTradesAggregated.exchange == exchange,
             MarketTradesAggregated.symbol == symbol.upper(),
             MarketTradesAggregated.timestamp >= start_time_ms,
             MarketTradesAggregated.timestamp <= current_time_ms
@@ -685,7 +695,7 @@ class SignalBacktestService:
         return result
 
     def _compute_depth_ratio_buckets(
-        self, db, symbol, interval_ms, start_time_ms, current_time_ms
+        self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"
     ) -> Dict[int, float]:
         """Compute depth ratio (bid/ask) for each bucket."""
         from services.market_flow_indicators import floor_timestamp
@@ -696,6 +706,7 @@ class SignalBacktestService:
             MarketOrderbookSnapshots.bid_depth_5,
             MarketOrderbookSnapshots.ask_depth_5
         ).filter(
+            MarketOrderbookSnapshots.exchange == exchange,
             MarketOrderbookSnapshots.symbol == symbol.upper(),
             MarketOrderbookSnapshots.timestamp >= start_time_ms,
             MarketOrderbookSnapshots.timestamp <= current_time_ms
@@ -718,7 +729,7 @@ class SignalBacktestService:
         return result
 
     def _compute_imbalance_buckets(
-        self, db, symbol, interval_ms, start_time_ms, current_time_ms
+        self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"
     ) -> Dict[int, float]:
         """Compute order imbalance for each bucket."""
         from services.market_flow_indicators import floor_timestamp
@@ -729,6 +740,7 @@ class SignalBacktestService:
             MarketOrderbookSnapshots.bid_depth_5,
             MarketOrderbookSnapshots.ask_depth_5
         ).filter(
+            MarketOrderbookSnapshots.exchange == exchange,
             MarketOrderbookSnapshots.symbol == symbol.upper(),
             MarketOrderbookSnapshots.timestamp >= start_time_ms,
             MarketOrderbookSnapshots.timestamp <= current_time_ms
@@ -752,7 +764,7 @@ class SignalBacktestService:
         return result
 
     def _compute_taker_ratio_buckets(
-        self, db, symbol, interval_ms, start_time_ms, current_time_ms
+        self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"
     ) -> Dict[int, float]:
         """Compute taker buy/sell log ratio for each bucket.
 
@@ -770,6 +782,7 @@ class SignalBacktestService:
             MarketTradesAggregated.taker_buy_notional,
             MarketTradesAggregated.taker_sell_notional
         ).filter(
+            MarketTradesAggregated.exchange == exchange,
             MarketTradesAggregated.symbol == symbol.upper(),
             MarketTradesAggregated.timestamp >= start_time_ms,
             MarketTradesAggregated.timestamp <= current_time_ms
@@ -796,7 +809,7 @@ class SignalBacktestService:
         return result
 
     def _compute_funding_buckets(
-        self, db, symbol, interval_ms, start_time_ms, current_time_ms
+        self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"
     ) -> Dict[int, float]:
         """Compute funding rate change for each bucket. Aligned with K-line display."""
         from services.market_flow_indicators import floor_timestamp
@@ -809,6 +822,7 @@ class SignalBacktestService:
             MarketAssetMetrics.timestamp,
             MarketAssetMetrics.funding_rate
         ).filter(
+            MarketAssetMetrics.exchange == exchange,
             MarketAssetMetrics.symbol == symbol.upper(),
             MarketAssetMetrics.timestamp >= query_start_ms,
             MarketAssetMetrics.timestamp <= current_time_ms,
@@ -839,7 +853,7 @@ class SignalBacktestService:
         return result
 
     def _compute_oi_buckets(
-        self, db, symbol, interval_ms, start_time_ms, current_time_ms
+        self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"
     ) -> Dict[int, float]:
         """Compute OI USD change for each bucket.
 
@@ -857,6 +871,7 @@ class SignalBacktestService:
             MarketAssetMetrics.open_interest,
             MarketAssetMetrics.mark_price
         ).filter(
+            MarketAssetMetrics.exchange == exchange,
             MarketAssetMetrics.symbol == symbol.upper(),
             MarketAssetMetrics.timestamp >= query_start_ms,
             MarketAssetMetrics.timestamp <= current_time_ms,
@@ -1038,7 +1053,7 @@ class SignalBacktestService:
         # Get pool definition
         result = db.execute(
             text("""
-                SELECT id, pool_name, signal_ids, symbols, enabled, logic
+                SELECT id, pool_name, signal_ids, symbols, enabled, logic, exchange
                 FROM signal_pools WHERE id = :id
             """),
             {"id": pool_id}
@@ -1047,6 +1062,8 @@ class SignalBacktestService:
         if not row:
             logger.warning(f"[Backtest] Pool {pool_id} NOT FOUND in database")
             return {"error": "Pool not found"}
+
+        exchange = row[6] if len(row) > 6 and row[6] else "hyperliquid"
 
         # Parse signal_ids and symbols - ORM defines as Text
         raw_signal_ids = row[2]
@@ -1084,10 +1101,10 @@ class SignalBacktestService:
         # For AND logic, use pool-level detection to match real-time behavior
         if logic == "AND":
             return self._backtest_pool_and_logic(
-                db, pool_def, signal_ids, symbol, kline_min_ts, kline_max_ts
+                db, pool_def, signal_ids, symbol, kline_min_ts, kline_max_ts, exchange
             )
 
-        # For OR logic, use individual signal triggers
+        # For OR logic, use individual signal triggers (backtest_signal gets exchange from DB)
         signal_triggers = {}
         signal_names = {}
         time_window = "5m"
@@ -1125,7 +1142,7 @@ class SignalBacktestService:
 
     def _backtest_pool_and_logic(
         self, db: Session, pool_def: Dict, signal_ids: List[int], symbol: str,
-        kline_min_ts: int, kline_max_ts: int
+        kline_min_ts: int, kline_max_ts: int, exchange: str = "hyperliquid"
     ) -> Dict[str, Any]:
         """
         Backtest pool with AND logic using pool-level edge detection.
@@ -1182,7 +1199,7 @@ class SignalBacktestService:
 
                 if mapped_metric not in metrics_data:
                     raw_data = self._load_raw_data_for_metric(
-                        db, symbol, mapped_metric, kline_min_ts, kline_max_ts, interval_ms
+                        db, symbol, mapped_metric, kline_min_ts, kline_max_ts, interval_ms, exchange
                     )
                     metrics_data[mapped_metric] = raw_data
                     # Build timestamps index for O(log n) binary search
@@ -1447,7 +1464,8 @@ class SignalBacktestService:
 
     def _load_raw_data_for_metric(
         self, db: Session, symbol: str, metric: str,
-        kline_min_ts: int, kline_max_ts: int, interval_ms: int
+        kline_min_ts: int, kline_max_ts: int, interval_ms: int,
+        exchange: str = "hyperliquid"
     ) -> List[tuple]:
         """
         Load raw 15-second granularity data for a metric.
@@ -1456,7 +1474,7 @@ class SignalBacktestService:
         from database.models import MarketTradesAggregated, MarketAssetMetrics, MarketOrderbookSnapshots
 
         logger.warning(f"[Backtest] _load_raw_data_for_metric: symbol={symbol}, metric={metric}, "
-                       f"ts_range=[{kline_min_ts}, {kline_max_ts}], interval_ms={interval_ms}")
+                       f"exchange={exchange}, ts_range=[{kline_min_ts}, {kline_max_ts}], interval_ms={interval_ms}")
 
         # Extend range to include lookback period for first check point
         lookback_ms = interval_ms * 10
@@ -1471,7 +1489,10 @@ class SignalBacktestService:
                 MarketTradesAggregated.timestamp,
                 MarketTradesAggregated.taker_buy_notional,
                 MarketTradesAggregated.taker_sell_notional
-            ).filter(MarketTradesAggregated.symbol == symbol.upper())
+            ).filter(
+                MarketTradesAggregated.exchange == exchange,
+                MarketTradesAggregated.symbol == symbol.upper()
+            )
             if start_time:
                 query = query.filter(MarketTradesAggregated.timestamp >= start_time)
             if kline_max_ts:
@@ -1483,7 +1504,10 @@ class SignalBacktestService:
             query = db.query(
                 MarketAssetMetrics.timestamp,
                 MarketAssetMetrics.open_interest
-            ).filter(MarketAssetMetrics.symbol == symbol.upper())
+            ).filter(
+                MarketAssetMetrics.exchange == exchange,
+                MarketAssetMetrics.symbol == symbol.upper()
+            )
             if start_time:
                 query = query.filter(MarketAssetMetrics.timestamp >= start_time)
             if kline_max_ts:
@@ -1496,7 +1520,10 @@ class SignalBacktestService:
                 MarketOrderbookSnapshots.timestamp,
                 MarketOrderbookSnapshots.bid_depth_5,
                 MarketOrderbookSnapshots.ask_depth_5
-            ).filter(MarketOrderbookSnapshots.symbol == symbol.upper())
+            ).filter(
+                MarketOrderbookSnapshots.exchange == exchange,
+                MarketOrderbookSnapshots.symbol == symbol.upper()
+            )
             if start_time:
                 query = query.filter(MarketOrderbookSnapshots.timestamp >= start_time)
             if kline_max_ts:
@@ -1509,7 +1536,10 @@ class SignalBacktestService:
                 MarketTradesAggregated.timestamp,
                 MarketTradesAggregated.high_price,
                 MarketTradesAggregated.low_price
-            ).filter(MarketTradesAggregated.symbol == symbol.upper())
+            ).filter(
+                MarketTradesAggregated.exchange == exchange,
+                MarketTradesAggregated.symbol == symbol.upper()
+            )
             if start_time:
                 query = query.filter(MarketTradesAggregated.timestamp >= start_time)
             if kline_max_ts:
@@ -1522,6 +1552,7 @@ class SignalBacktestService:
                 MarketAssetMetrics.timestamp,
                 MarketAssetMetrics.funding_rate
             ).filter(
+                MarketAssetMetrics.exchange == exchange,
                 MarketAssetMetrics.symbol == symbol.upper(),
                 MarketAssetMetrics.funding_rate.isnot(None)
             )

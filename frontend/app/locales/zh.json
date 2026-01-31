@@ -269,6 +269,8 @@
       "signalNamePlaceholder": "例如：OI激增信号",
       "descriptionLabel": "描述",
       "descriptionPlaceholder": "该信号检测什么市场条件？",
+      "exchangeLabel": "交易所",
+      "exchangeDesc": "选择该信号的数据源交易所",
       "metricLabel": "指标",
       "compositeConfig": "复合信号配置",
       "directionLabel": "方向",

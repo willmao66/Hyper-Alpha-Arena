@@ -347,6 +347,8 @@
       "signalNamePlaceholder": "e.g., OI Surge Signal",
       "descriptionLabel": "Description",
       "descriptionPlaceholder": "What market condition does this signal detect?",
+      "exchangeLabel": "Exchange",
+      "exchangeDesc": "Select the exchange data source for this signal",
       "metricLabel": "Metric",
       "compositeConfig": "Composite Signal Configuration",
       "directionLabel": "Direction",

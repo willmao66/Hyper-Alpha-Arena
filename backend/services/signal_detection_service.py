@@ -198,7 +198,7 @@ class SignalDetectionService:
             try:
                 # Load enabled signal pools
                 result = db.execute(
-                    text("SELECT id, pool_name, signal_ids, symbols, enabled, logic FROM signal_pools WHERE enabled = true")
+                    text("SELECT id, pool_name, signal_ids, symbols, enabled, logic, exchange FROM signal_pools WHERE enabled = true")
                 )
                 self._signal_pools_cache = []
                 for row in result.fetchall():
@@ -221,12 +221,13 @@ class SignalDetectionService:
                         "signal_ids": signal_ids or [],
                         "symbols": symbols or [],
                         "enabled": row[4],
-                        "logic": row[5] or "OR"
+                        "logic": row[5] or "OR",
+                        "exchange": row[6] or "hyperliquid"
                     })
 
                 # Load all enabled signals
                 result = db.execute(
-                    text("SELECT id, signal_name, description, trigger_condition, enabled FROM signal_definitions WHERE enabled = true")
+                    text("SELECT id, signal_name, description, trigger_condition, enabled, exchange FROM signal_definitions WHERE enabled = true")
                 )
                 self._signals_cache = {}
                 for row in result.fetchall():
@@ -242,7 +243,8 @@ class SignalDetectionService:
                         "signal_name": row[1],
                         "description": row[2],
                         "trigger_condition": trigger_cond,
-                        "enabled": row[4]
+                        "enabled": row[4],
+                        "exchange": row[5] or "hyperliquid"
                     }
 
                 self._cache_time = now
@@ -348,13 +350,14 @@ class SignalDetectionService:
         condition = signal_def.get("trigger_condition", {})
         metric = condition.get("metric")
         time_window = condition.get("time_window", "5m")
+        exchange = signal_def.get("exchange", "hyperliquid")
 
         if not metric:
             return None
 
         # Handle taker_volume composite signal
         if metric == "taker_volume":
-            return self._check_taker_condition(signal_id, signal_def, symbol, condition, time_window)
+            return self._check_taker_condition(signal_id, signal_def, symbol, condition, time_window, exchange)
 
         # Standard single-value signal
         operator = condition.get("operator")
@@ -363,7 +366,7 @@ class SignalDetectionService:
         if not all([operator, threshold is not None]):
             return None
 
-        current_value = self._get_metric_value(metric, symbol, market_data, time_window)
+        current_value = self._get_metric_value(metric, symbol, market_data, time_window, exchange)
         if current_value is None:
             return None
 
@@ -379,6 +382,7 @@ class SignalDetectionService:
             "current_value": current_value,
             "condition_met": condition_met,
             "time_window": time_window,
+            "exchange": exchange,
         }
 
     def _check_signal_trigger(
@@ -391,6 +395,7 @@ class SignalDetectionService:
         condition = signal_def.get("trigger_condition", {})
         metric = condition.get("metric")
         time_window = condition.get("time_window", "5m")
+        exchange = signal_def.get("exchange", "hyperliquid")
 
         if not metric:
             return None
@@ -398,7 +403,7 @@ class SignalDetectionService:
         # Handle taker_volume composite signal
         if metric == "taker_volume":
             return self._check_taker_volume_trigger(
-                signal_id, signal_def, symbol, condition, time_window
+                signal_id, signal_def, symbol, condition, time_window, exchange
             )
 
         # Standard single-value signal
@@ -409,7 +414,7 @@ class SignalDetectionService:
             return None
 
         # Get current metric value
-        current_value = self._get_metric_value(metric, symbol, market_data, time_window)
+        current_value = self._get_metric_value(metric, symbol, market_data, time_window, exchange)
         if current_value is None:
             return None
 
@@ -466,7 +471,8 @@ class SignalDetectionService:
         return None
 
     def _get_metric_value(
-        self, metric: str, symbol: str, market_data: Dict[str, Any], time_window: int
+        self, metric: str, symbol: str, market_data: Dict[str, Any], time_window: int,
+        exchange: str = "hyperliquid"
     ) -> Optional[float]:
         """
         Get the current value of a metric from market data or indicators.
@@ -514,7 +520,7 @@ class SignalDetectionService:
 
             db = SessionLocal()
             try:
-                return get_indicator_value(db, symbol, indicator_type, period)
+                return get_indicator_value(db, symbol, indicator_type, period, exchange=exchange)
             finally:
                 db.close()
 
@@ -522,7 +528,7 @@ class SignalDetectionService:
             logger.error(f"Error getting metric {metric} for {symbol}: {e}")
             return None
 
-    def _get_funding_current_rate(self, symbol: str, time_window) -> Optional[float]:
+    def _get_funding_current_rate(self, symbol: str, time_window, exchange: str = "hyperliquid") -> Optional[float]:
         """Get current funding rate in bps for context."""
         try:
             from database.connection import SessionLocal
@@ -538,7 +544,7 @@ class SignalDetectionService:
 
             db = SessionLocal()
             try:
-                data = _get_funding_data(db, symbol, period, interval_ms, current_time_ms)
+                data = _get_funding_data(db, symbol, period, interval_ms, current_time_ms, exchange)
                 return data.get("current") if data else None
             finally:
                 db.close()
@@ -547,7 +553,8 @@ class SignalDetectionService:
             return None
 
     def _check_taker_condition(
-        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str
+        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str,
+        exchange: str = "hyperliquid"
     ) -> Optional[dict]:
         """Check taker_volume condition (without edge detection)."""
         direction = condition.get("direction", "any")
@@ -567,7 +574,7 @@ class SignalDetectionService:
 
         db = SessionLocal()
         try:
-            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms)
+            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange)
         finally:
             db.close()
 
@@ -732,7 +739,8 @@ class SignalDetectionService:
             return "4h"
 
     def _check_taker_volume_trigger(
-        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str
+        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str,
+        exchange: str = "hyperliquid"
     ) -> Optional[dict]:
         """
         Check taker_volume composite signal trigger.
@@ -769,7 +777,7 @@ class SignalDetectionService:
 
         db = SessionLocal()
         try:
-            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms)
+            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange)
         finally:
             db.close()
 

@@ -111,8 +111,10 @@ class BinanceAdapter(BaseExchangeAdapter):
             quote_volume = Decimal(str(item[7]))
             trade_count = int(item[8])
             taker_buy_volume = Decimal(str(item[9]))
+            taker_buy_notional = Decimal(str(item[10]))  # takerBuyQuoteAssetVolume
             # Taker sell = total - taker buy
             taker_sell_volume = volume - taker_buy_volume
+            taker_sell_notional = quote_volume - taker_buy_notional
 
             klines.append(UnifiedKline(
                 exchange="binance",
@@ -127,6 +129,8 @@ class BinanceAdapter(BaseExchangeAdapter):
                 quote_volume=quote_volume,
                 taker_buy_volume=taker_buy_volume,
                 taker_sell_volume=taker_sell_volume,
+                taker_buy_notional=taker_buy_notional,
+                taker_sell_notional=taker_sell_notional,
                 trade_count=trade_count,
             ))
         return klines

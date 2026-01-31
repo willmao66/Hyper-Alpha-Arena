@@ -28,6 +28,7 @@ class SignalDefinitionCreate(BaseModel):
     description: Optional[str] = None
     trigger_condition: Dict[str, Any]
     enabled: bool = True
+    exchange: str = "hyperliquid"
 
 
 class SignalDefinitionUpdate(BaseModel):
@@ -36,6 +37,7 @@ class SignalDefinitionUpdate(BaseModel):
     description: Optional[str] = None
     trigger_condition: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
+    exchange: Optional[str] = None
 
 
 class SignalDefinitionResponse(BaseModel):
@@ -45,6 +47,7 @@ class SignalDefinitionResponse(BaseModel):
     description: Optional[str]
     trigger_condition: Dict[str, Any]
     enabled: bool
+    exchange: str = "hyperliquid"
     created_at: datetime
     updated_at: datetime
 
@@ -60,6 +63,7 @@ class SignalPoolCreate(BaseModel):
     symbols: List[str] = []
     enabled: bool = True
     logic: str = "OR"  # AND or OR logic for signal triggering
+    exchange: str = "hyperliquid"
 
 
 class SignalPoolUpdate(BaseModel):
@@ -69,6 +73,7 @@ class SignalPoolUpdate(BaseModel):
     symbols: Optional[List[str]] = None
     enabled: Optional[bool] = None
     logic: Optional[str] = None  # AND or OR logic
+    exchange: Optional[str] = None
 
 
 class SignalPoolResponse(BaseModel):
@@ -79,6 +84,7 @@ class SignalPoolResponse(BaseModel):
     symbols: List[str]
     enabled: bool
     logic: str = "OR"  # AND or OR logic
+    exchange: str = "hyperliquid"
     created_at: datetime
 
     class Config:

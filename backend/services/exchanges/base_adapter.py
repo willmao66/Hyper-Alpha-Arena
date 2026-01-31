@@ -27,6 +27,8 @@ class UnifiedKline:
     quote_volume: Decimal  # Quote currency volume (USDT/USDC)
     taker_buy_volume: Optional[Decimal] = None  # For CVD calculation
     taker_sell_volume: Optional[Decimal] = None
+    taker_buy_notional: Optional[Decimal] = None  # Taker buy in quote currency (for CVD)
+    taker_sell_notional: Optional[Decimal] = None  # Taker sell in quote currency
     trade_count: Optional[int] = None
 
 

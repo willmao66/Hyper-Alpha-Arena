@@ -937,6 +937,7 @@ class SignalDefinition(Base):
     description = Column(Text, nullable=True)
     trigger_condition = Column(Text, nullable=False)  # JSONB stored as text
     enabled = Column(Boolean, nullable=True, default=True)
+    exchange = Column(String(20), nullable=False, default="hyperliquid")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(),
                         onupdate=func.current_timestamp())
@@ -952,6 +953,7 @@ class SignalPool(Base):
     symbols = Column(Text, nullable=False, default="[]")  # JSONB stored as text
     logic = Column(String(10), nullable=True, default="OR")  # AND/OR logic
     enabled = Column(Boolean, nullable=True, default=True)
+    exchange = Column(String(20), nullable=False, default="hyperliquid")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
 
