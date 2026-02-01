@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
+import remarkGfm from 'remark-gfm'
 import { toast } from 'react-hot-toast'
 import {
   Dialog,
@@ -21,10 +22,35 @@ import {
 import PacmanLoader from '@/components/ui/pacman-loader'
 import { TradingAccount } from '@/lib/api'
 
+// Exchange logos
+const HyperliquidLogo = () => (
+  <svg width="14" height="14" viewBox="0 0 144 144" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M144 71.6991C144 119.306 114.866 134.582 99.5156 120.98C86.8804 109.889 83.1211 86.4521 64.116 84.0456C39.9942 81.0113 37.9057 113.133 22.0334 113.133C3.5504 113.133 0 86.2428 0 72.4315C0 58.3063 3.96809 39.0542 19.736 39.0542C38.1146 39.0542 39.1588 66.5722 62.132 65.1073C85.0007 63.5379 85.4184 34.8689 100.247 22.6271C113.195 12.0593 144 23.4641 144 71.6991Z" fill="#50e3c2"/>
+  </svg>
+)
+
+const BinanceLogo = () => (
+  <svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+    <path d="M643.541333 566.613333l77.269334 77.226667-209.152 209.152-209.109334-209.152 77.269334-77.226667 131.84 132.522667 131.84-132.565333z m131.882667-131.925333L853.333333 512l-77.226666 77.226667L698.837333 512l76.586667-77.226667z m-263.722667 0l77.226667 76.586667-77.269333 77.269333L434.432 512l77.226667-77.226667z m-263.765333 0L324.565333 512l-76.586666 76.586667L170.666667 511.957333l77.226666-77.226666z m263.765333-263.765333l209.152 208.469333-77.312 77.226667-131.84-131.84-131.84 132.522666-77.312-77.226666 209.152-209.152z" fill="#EBBB4E"/>
+  </svg>
+)
+
+const ExchangeBadge = ({ exchange, size = 'sm' }: { exchange: string; size?: 'sm' | 'xs' }) => {
+  const isHyperliquid = exchange === 'hyperliquid'
+  const textSize = size === 'xs' ? 'text-[10px]' : 'text-xs'
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${isHyperliquid ? 'bg-emerald-500/10 text-emerald-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+      {isHyperliquid ? <HyperliquidLogo /> : <BinanceLogo />}
+      <span className={textSize}>{isHyperliquid ? 'Hyperliquid' : 'Binance'}</span>
+    </span>
+  )
+}
+
 interface SignalConfig {
   name: string
   symbol: string
   description?: string
+  exchange?: string  // Exchange: hyperliquid or binance
   _type?: 'signal' | 'pool'  // Type identifier from backend
   // For single signal
   trigger_condition?: {
@@ -514,7 +540,7 @@ function ChatArea({
                   msg.role === 'user' ? 'prose-invert text-white' : 'dark:prose-invert'
                 } [&_details]:bg-muted/50 [&_details]:rounded-lg [&_details]:p-2 [&_details]:mb-3 [&_details]:text-xs [&_summary]:cursor-pointer [&_summary]:font-medium [&_summary]:text-muted-foreground [&_details>div]:mt-2 [&_details>div]:max-h-64 [&_details>div]:overflow-y-auto [&_details>div]:whitespace-pre-wrap [&_details>div]:text-muted-foreground`}>
                   {msg.content ? (
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
                   ) : msg.isStreaming ? (
                     <span className="text-muted-foreground italic">{t('signals.aiGenerator.generating', 'Generating...')}</span>
                   ) : null}
@@ -667,7 +693,10 @@ function SignalCard({
     <div className={`rounded-lg border bg-card p-4 ${!isValid ? 'border-destructive/50' : ''}`}>
       <div className="flex items-start justify-between mb-3">
         <div>
-          <h4 className="font-semibold text-sm">{config.name || t('signals.aiGenerator.unnamedSignal', 'Unnamed Signal')}</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="font-semibold text-sm">{config.name || t('signals.aiGenerator.unnamedSignal', 'Unnamed Signal')}</h4>
+            <ExchangeBadge exchange={config.exchange || 'hyperliquid'} size="sm" />
+          </div>
           <p className="text-xs text-muted-foreground">{config.symbol || t('signals.aiGenerator.noSymbol', 'No symbol')}</p>
         </div>
         {hasValidMetric ? (
@@ -765,7 +794,10 @@ function SignalPoolCard({
     <div className={`rounded-lg border bg-card p-4 ${!isValid ? 'border-destructive/50' : 'border-primary/50'}`}>
       <div className="flex items-start justify-between mb-3">
         <div>
-          <h4 className="font-semibold text-sm">{config.name || t('signals.aiGenerator.unnamedPool', 'Unnamed Pool')}</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="font-semibold text-sm">{config.name || t('signals.aiGenerator.unnamedPool', 'Unnamed Pool')}</h4>
+            <ExchangeBadge exchange={config.exchange || 'hyperliquid'} size="sm" />
+          </div>
           <p className="text-xs text-muted-foreground">{config.symbol || t('signals.aiGenerator.noSymbol', 'No symbol')}</p>
         </div>
         <span className="text-xs bg-primary/20 text-primary px-2 py-1 rounded font-medium">

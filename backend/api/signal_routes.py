@@ -745,6 +745,7 @@ class SignalPoolConfigRequest(BaseModel):
     description: Optional[str] = Field(None, description="Pool description")
     logic: str = Field("AND", description="Combination logic: AND or OR")
     signals: List[dict] = Field(..., description="List of signal configurations")
+    exchange: str = Field("hyperliquid", description="Exchange: hyperliquid or binance")
 
     class Config:
         populate_by_name = True
@@ -813,36 +814,39 @@ def create_pool_from_config(
                         detail=f"Signal {i+1} missing required fields (metric, operator, threshold, time_window)"
                     )
 
-            # Create signal
+            # Create signal with exchange
             result = db.execute(text("""
-                INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled)
-                VALUES (:name, :desc, :condition, :enabled)
-                RETURNING id, signal_name, description, trigger_condition, enabled, created_at
+                INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled, exchange)
+                VALUES (:name, :desc, :condition, :enabled, :exchange)
+                RETURNING id, signal_name, description, trigger_condition, enabled, created_at, exchange
             """), {
                 "name": sig_name,
                 "desc": sig.get("description") or f"Part of {request.name}",
                 "condition": json.dumps(trigger_condition),
-                "enabled": True
+                "enabled": True,
+                "exchange": request.exchange
             })
             row = result.fetchone()
             created_signal_ids.append(row[0])
             created_signals.append({
                 "id": row[0],
                 "signal_name": row[1],
-                "trigger_condition": trigger_condition
+                "trigger_condition": trigger_condition,
+                "exchange": request.exchange
             })
 
-        # Create the pool
+        # Create the pool with exchange
         pool_result = db.execute(text("""
-            INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic)
-            VALUES (:name, :signal_ids, :symbols, :enabled, :logic)
-            RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic
+            INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic, exchange)
+            VALUES (:name, :signal_ids, :symbols, :enabled, :logic, :exchange)
+            RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic, exchange
         """), {
             "name": request.name,
             "signal_ids": json.dumps(created_signal_ids),
             "symbols": json.dumps([request.symbol]),
             "enabled": True,
-            "logic": request.logic
+            "logic": request.logic,
+            "exchange": request.exchange
         })
         pool_row = pool_result.fetchone()
 
@@ -855,7 +859,8 @@ def create_pool_from_config(
                 "pool_name": pool_row[1],
                 "signal_ids": created_signal_ids,
                 "symbols": [request.symbol],
-                "logic": request.logic
+                "logic": request.logic,
+                "exchange": request.exchange
             },
             "signals": created_signals
         }

@@ -170,6 +170,7 @@ async function createPoolFromConfig(config: {
   description?: string
   logic: string
   signals: Array<{ metric: string; operator: string; threshold: number; time_window?: string }>
+  exchange?: string
 }): Promise<{ success: boolean; pool: SignalPool; signals: SignalDefinition[] }> {
   const res = await fetch(`${API_BASE}/create-pool-from-config`, {
     method: 'POST',
@@ -792,6 +793,7 @@ export default function SignalManager() {
         description: config.description || '',
         trigger_condition: config.trigger_condition,
         enabled: true,
+        exchange: config.exchange || 'hyperliquid',
       }
       await createSignal(signalData)
       toast.success(`Signal "${config.name}" created`)
@@ -815,6 +817,7 @@ export default function SignalManager() {
         description: config.description || '',
         logic: config.logic || 'AND',
         signals: config.signals || [],
+        exchange: config.exchange || 'hyperliquid',
       }
       const result = await createPoolFromConfig(poolConfig)
       toast.success(`Signal Pool "${config.name}" created with ${result.signals.length} signals`)
@@ -1783,8 +1786,9 @@ export default function SignalManager() {
       <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
         <DialogContent className="w-[1200px] max-w-[95vw] h-[860px] max-h-[95vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {previewPool ? t('signals.preview.poolPreview', { name: previewPool.pool_name, defaultValue: `Pool Preview: ${previewPool.pool_name}` }) : t('signals.preview.signalPreview', { name: previewSignal?.signal_name, defaultValue: `Signal Preview: ${previewSignal?.signal_name}` })}
+            <DialogTitle className="flex items-center gap-3">
+              <span>{previewPool ? t('signals.preview.poolPreview', { name: previewPool.pool_name, defaultValue: `Pool Preview: ${previewPool.pool_name}` }) : t('signals.preview.signalPreview', { name: previewSignal?.signal_name, defaultValue: `Signal Preview: ${previewSignal?.signal_name}` })}</span>
+              <ExchangeBadge exchange={previewPool?.exchange || previewSignal?.exchange || 'hyperliquid'} />
             </DialogTitle>
             <DialogDescription>
               {previewPool
