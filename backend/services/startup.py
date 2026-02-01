@@ -52,8 +52,18 @@ def initialize_services():
         # Start market data stream
         # NOTE: Paper trading snapshot service disabled - using Hyperliquid snapshots only
         combined_symbols = build_market_stream_symbols()
-        print("Starting market data stream...")
-        start_market_stream(combined_symbols, interval_seconds=1.5)
+
+        # Use GlobalSamplingConfig.sampling_interval for market stream polling
+        # This reduces API calls significantly (from 1.5s to user-configured interval)
+        from database.connection import SessionLocal
+        from database.models import GlobalSamplingConfig
+        with SessionLocal() as db:
+            global_config = db.query(GlobalSamplingConfig).first()
+            # Default 18s, minimum 5s to prevent misconfiguration
+            stream_interval = max(5, global_config.sampling_interval if global_config else 18)
+
+        print(f"Starting market data stream (interval={stream_interval}s)...")
+        start_market_stream(combined_symbols, interval_seconds=stream_interval)
         print("Market data stream started")
         # subscribe_price_updates(handle_price_update)  # DISABLED: Paper trading snapshot
         # print("Asset snapshot handler subscribed")
