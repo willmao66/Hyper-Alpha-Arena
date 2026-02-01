@@ -864,6 +864,7 @@
     "backfillDesc": "K线 (1m/15m/1h), OI (30天), 资金费率 (365天), 多空比 (30天)",
     "hyperliquidBackfillDesc": "K线: 1m (~3.5天), 15m (~52天), 1h (~208天)",
     "startBackfill": "开始回填",
+    "restartBackfill": "重新开始",
     "backfillRunning": "正在回填",
     "backfillCompleted": "上次回填已完成",
     "backfillFailed": "上次回填失败",

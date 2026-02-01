@@ -291,10 +291,16 @@ def get_collection_days(exchange: str = "hyperliquid", db: Session = Depends(get
 # ==================== Binance Backfill ====================
 
 @router.post("/binance/backfill")
-async def start_binance_backfill(db: Session = Depends(get_db)):
+async def start_binance_backfill(
+    force: bool = False,
+    db: Session = Depends(get_db)
+):
     """Start Binance historical data backfill task.
     Uses current watchlist symbols.
     Backfills: K-lines (1500), OI (30d), Funding (365d), Sentiment (30d).
+
+    Args:
+        force: If True, cancel any running/pending tasks and start fresh
     """
     from database.models import BinanceBackfillTask
     from services.hyperliquid_symbol_service import get_selected_symbols
@@ -305,8 +311,16 @@ async def start_binance_backfill(db: Session = Depends(get_db)):
     running_task = db.query(BinanceBackfillTask).filter(
         BinanceBackfillTask.status.in_(["pending", "running"])
     ).first()
+
     if running_task:
-        raise HTTPException(status_code=400, detail="A backfill task is already running")
+        if force:
+            # Cancel all running/pending tasks
+            db.query(BinanceBackfillTask).filter(
+                BinanceBackfillTask.status.in_(["pending", "running"])
+            ).update({"status": "cancelled"})
+            db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="A backfill task is already running")
 
     # Get watchlist symbols
     symbols = get_selected_symbols()

@@ -172,7 +172,7 @@ class BinanceBackfillService:
             await asyncio.sleep(0.5)
 
         if all_funding:
-            result = persistence.save_funding_rates(all_funding)
+            result = persistence.save_funding_rate_batch(all_funding)
             logger.info(f"Funding backfill {symbol}: {result}, total {len(all_funding)} records")
 
     async def _backfill_sentiment(self, symbol: str, persistence: ExchangeDataPersistence):
@@ -194,7 +194,7 @@ class BinanceBackfillService:
             await asyncio.sleep(0.5)
 
         if all_sentiment:
-            result = persistence.save_sentiment_metrics(all_sentiment)
+            result = persistence.save_sentiment_batch(all_sentiment)
             logger.info(f"Sentiment backfill {symbol}: {result}, total {len(all_sentiment)} records")
 
 

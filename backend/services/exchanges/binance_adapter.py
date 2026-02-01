@@ -244,16 +244,23 @@ class BinanceAdapter(BaseExchangeAdapter):
             params["endTime"] = end_time
 
         raw_data = self._request("/fapi/v1/fundingRate", params)
-        return [
-            UnifiedFunding(
+        results = []
+        for item in raw_data:
+            mark_price_str = item.get("markPrice")
+            mark_price = None
+            if mark_price_str and str(mark_price_str).strip():
+                try:
+                    mark_price = Decimal(str(mark_price_str))
+                except Exception:
+                    pass
+            results.append(UnifiedFunding(
                 exchange="binance",
                 symbol=symbol,
                 timestamp=item["fundingTime"],
                 funding_rate=Decimal(str(item["fundingRate"])),
-                mark_price=Decimal(str(item.get("markPrice", "0"))) or None,
-            )
-            for item in raw_data
-        ]
+                mark_price=mark_price,
+            ))
+        return results
 
     def fetch_open_interest_history(
         self,

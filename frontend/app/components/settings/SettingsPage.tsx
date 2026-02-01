@@ -170,11 +170,14 @@ export default function SettingsPage() {
     }
   }, [activeTab, currentExchange, fetchBackfillStatus])
 
-  const handleStartBackfill = async (exchange: string) => {
+  const handleStartBackfill = async (exchange: string, force: boolean = false) => {
     setBackfillStarting(prev => ({ ...prev, [exchange]: true }))
     setBackfillJustCompleted(prev => ({ ...prev, [exchange]: false }))
     try {
-      const res = await fetch(`/api/system/${exchange}/backfill`, { method: 'POST' })
+      const url = force
+        ? `/api/system/${exchange}/backfill?force=true`
+        : `/api/system/${exchange}/backfill`
+      const res = await fetch(url, { method: 'POST' })
       if (res.ok) {
         await fetchBackfillStatus(exchange)
       } else {
@@ -550,8 +553,19 @@ export default function SettingsPage() {
                           </div>
                           <span className="text-sm font-medium">{backfillStatus['binance']?.progress || 0}%</span>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {t('settings.backfillRunning', 'Backfilling')} {backfillStatus['binance']?.symbols?.join(', ')}...
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-muted-foreground">
+                            {t('settings.backfillRunning', 'Backfilling')} {backfillStatus['binance']?.symbols?.join(', ')}...
+                          </div>
+                          <Button
+                            onClick={() => handleStartBackfill('binance', true)}
+                            disabled={backfillStarting['binance']}
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-xs"
+                          >
+                            {t('settings.restartBackfill', 'Restart')}
+                          </Button>
                         </div>
                       </div>
                     ) : (
