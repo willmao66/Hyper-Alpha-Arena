@@ -1398,11 +1398,11 @@ def call_ai_for_decision(
 
     template = prompt_repo.get_prompt_for_account(db, account.id)
     if not template:
-        try:
-            template = prompt_repo.ensure_default_prompt(db)
-        except ValueError as exc:
-            logger.error("Prompt template resolution failed: %s", exc)
-            return None
+        logger.warning(
+            "No prompt binding for account %s (%s), skipping AI decision",
+            account.id, account.name
+        )
+        return None
 
     # Build context with multi-symbol support
     active_symbol_metadata = symbol_metadata or SUPPORTED_SYMBOLS

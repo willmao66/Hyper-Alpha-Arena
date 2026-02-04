@@ -11,7 +11,7 @@ from decimal import Decimal
 import logging
 
 from database.connection import SessionLocal
-from database.models import Account, Position, Trade, CryptoPrice, AccountAssetSnapshot, HyperliquidWallet
+from database.models import Account, Position, Trade, CryptoPrice, AccountAssetSnapshot, HyperliquidWallet, AccountPromptBinding
 from services.asset_curve_calculator import invalidate_asset_curve_cache
 from services.ai_decision_service import build_chat_completion_endpoints, detect_api_format, _extract_text_from_message
 from schemas.account import StrategyConfig, StrategyConfigUpdate
@@ -74,6 +74,16 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
         # Backward compatibility: use first pool name
         signal_pool_name = signal_pool_names[0] if signal_pool_names else None
 
+    # Check if prompt binding exists when triggers are enabled
+    warning = None
+    has_trigger_enabled = strategy.scheduled_trigger_enabled or pool_ids
+    if has_trigger_enabled and db:
+        prompt_binding = db.query(AccountPromptBinding).filter(
+            AccountPromptBinding.account_id == account.id
+        ).first()
+        if not prompt_binding:
+            warning = "No prompt template bound. Scheduled and signal triggers will not execute until a prompt is configured."
+
     return StrategyConfig(
         trigger_mode="unified",
         interval_seconds=strategy.trigger_interval or 150,
@@ -86,6 +96,7 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
         signal_pool_ids=pool_ids if pool_ids else None,
         signal_pool_name=signal_pool_name,  # Deprecated
         signal_pool_names=signal_pool_names if signal_pool_names else None,
+        warning=warning,
     )
 
 

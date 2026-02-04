@@ -67,3 +67,4 @@ class StrategyConfig(StrategyConfigBase):
     last_trigger_at: Optional[str] = None
     signal_pool_name: Optional[str] = None  # Deprecated: use signal_pool_names instead
     signal_pool_names: Optional[List[str]] = None  # Signal pool names for display
+    warning: Optional[str] = None  # Warning message if config is incomplete
