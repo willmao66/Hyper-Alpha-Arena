@@ -58,6 +58,7 @@ MIGRATIONS = [
     "create_hyperliquid_backfill_tasks.py",
     "add_exchange_to_signals.py",
     "add_binance_wallet_tables.py",
+    "add_exchange_to_trigger_configs.py",
 ]
 
 
