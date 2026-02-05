@@ -5,13 +5,14 @@
  * Each exchange section shows binding status badges with connection icons.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ChevronDown, ChevronRight, Wallet } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { useTranslation } from 'react-i18next'
 import HyperliquidWalletSection from './HyperliquidWalletSection'
 import BinanceWalletSection from './BinanceWalletSection'
+import { getAccountWallet } from '@/lib/hyperliquidApi'
 
 interface ExchangeWalletsPanelProps {
   accountId: number
@@ -49,6 +50,44 @@ export default function ExchangeWalletsPanel({
     hyperliquid: { testnet: false, mainnet: false },
     binance: { testnet: false, mainnet: false }
   })
+
+  // Load all exchange statuses on mount
+  useEffect(() => {
+    loadAllStatuses()
+  }, [accountId])
+
+  const loadAllStatuses = async () => {
+    // Load Hyperliquid status
+    try {
+      const hlInfo = await getAccountWallet(accountId)
+      setStatus(prev => ({
+        ...prev,
+        hyperliquid: {
+          testnet: !!hlInfo.testnetWallet,
+          mainnet: !!hlInfo.mainnetWallet
+        }
+      }))
+    } catch (error) {
+      console.error('Failed to load Hyperliquid status:', error)
+    }
+
+    // Load Binance status
+    try {
+      const res = await fetch(`/api/binance/accounts/${accountId}/config`)
+      if (res.ok) {
+        const data = await res.json()
+        setStatus(prev => ({
+          ...prev,
+          binance: {
+            testnet: data.testnet_configured,
+            mainnet: data.mainnet_configured
+          }
+        }))
+      }
+    } catch (error) {
+      console.error('Failed to load Binance status:', error)
+    }
+  }
 
   const toggleSection = (section: string) => {
     setOpenSections(prev =>

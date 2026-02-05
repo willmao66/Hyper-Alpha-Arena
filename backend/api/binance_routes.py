@@ -153,20 +153,46 @@ async def get_config(account_id: int, db: Session = Depends(get_db)):
         BinanceWallet.account_id == account_id
     ).all()
 
-    testnet_configured = any(w.environment == "testnet" and w.is_active == "true" for w in wallets)
-    mainnet_configured = any(w.environment == "mainnet" and w.is_active == "true" for w in wallets)
+    # Helper to mask API key
+    def mask_api_key(wallet: BinanceWallet) -> str:
+        try:
+            api_key = decrypt_private_key(wallet.api_key_encrypted)
+            if len(api_key) > 8:
+                return f"{api_key[:4]}****{api_key[-4:]}"
+            return "****"
+        except:
+            return "****"
 
-    # Get leverage settings from active wallet
+    # Get wallet info for each environment
+    testnet_wallet = next((w for w in wallets if w.environment == "testnet" and w.is_active == "true"), None)
+    mainnet_wallet = next((w for w in wallets if w.environment == "mainnet" and w.is_active == "true"), None)
+
+    testnet_info = None
+    if testnet_wallet:
+        testnet_info = {
+            "configured": True,
+            "api_key_masked": mask_api_key(testnet_wallet),
+            "max_leverage": testnet_wallet.max_leverage,
+            "default_leverage": testnet_wallet.default_leverage
+        }
+
+    mainnet_info = None
+    if mainnet_wallet:
+        mainnet_info = {
+            "configured": True,
+            "api_key_masked": mask_api_key(mainnet_wallet),
+            "max_leverage": mainnet_wallet.max_leverage,
+            "default_leverage": mainnet_wallet.default_leverage
+        }
+
     global_env = get_global_trading_mode(db)
-    active_wallet = next((w for w in wallets if w.environment == global_env and w.is_active == "true"), None)
 
     return {
-        "testnet_configured": testnet_configured,
-        "mainnet_configured": mainnet_configured,
-        "current_environment": global_env,
-        "max_leverage": active_wallet.max_leverage if active_wallet else None,
-        "default_leverage": active_wallet.default_leverage if active_wallet else None,
-        "is_active": active_wallet.is_active == "true" if active_wallet else False
+        "testnet_configured": testnet_wallet is not None,
+        "mainnet_configured": mainnet_wallet is not None,
+        "testnet": testnet_info,
+        "mainnet": mainnet_info,
+        "current_environment": global_env
     }
 
 

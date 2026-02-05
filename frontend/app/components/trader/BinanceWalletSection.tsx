@@ -20,24 +20,15 @@ interface BinanceWalletSectionProps {
   onWalletConfigured?: () => void
 }
 
-interface BinanceConfig {
-  testnetConfigured: boolean
-  mainnetConfigured: boolean
-  currentEnvironment: string
-  maxLeverage: number | null
-  defaultLeverage: number | null
-}
-
 interface BinanceWalletData {
-  id?: number
-  environment: string
+  configured: boolean
+  apiKeyMasked?: string
   maxLeverage: number
   defaultLeverage: number
-  isActive: boolean
   balance?: {
-    totalEquity: number
-    availableBalance: number
-    unrealizedPnl: number
+    total_equity: number
+    available_balance: number
+    unrealized_pnl: number
   }
 }
 
@@ -50,13 +41,19 @@ export default function BinanceWalletSection({
   onWalletConfigured
 }: BinanceWalletSectionProps) {
   const { t } = useTranslation()
-  const [config, setConfig] = useState<BinanceConfig | null>(null)
+
+  // Wallet data states
   const [testnetWallet, setTestnetWallet] = useState<BinanceWalletData | null>(null)
   const [mainnetWallet, setMainnetWallet] = useState<BinanceWalletData | null>(null)
-  const [loading, setLoading] = useState(false)
+
+  // Independent loading states
+  const [loadingConfig, setLoadingConfig] = useState(false)
+  const [savingTestnet, setSavingTestnet] = useState(false)
+  const [savingMainnet, setSavingMainnet] = useState(false)
   const [testingTestnet, setTestingTestnet] = useState(false)
   const [testingMainnet, setTestingMainnet] = useState(false)
 
+  // Editing states
   const [editingTestnet, setEditingTestnet] = useState(false)
   const [editingMainnet, setEditingMainnet] = useState(false)
   const [showTestnetKey, setShowTestnetKey] = useState(false)
@@ -75,54 +72,113 @@ export default function BinanceWalletSection({
   const [mainnetDefaultLeverage, setMainnetDefaultLeverage] = useState(1)
 
   useEffect(() => {
-    loadConfig()
+    loadWalletInfo()
   }, [accountId])
 
-  const loadConfig = async () => {
+  const loadWalletInfo = async () => {
     try {
-      setLoading(true)
+      setLoadingConfig(true)
       const res = await fetch(`${API_BASE}/accounts/${accountId}/config`)
-      if (res.ok) {
-        const data = await res.json()
-        setConfig({
-          testnetConfigured: data.testnet_configured,
-          mainnetConfigured: data.mainnet_configured,
-          currentEnvironment: data.current_environment,
-          maxLeverage: data.max_leverage,
-          defaultLeverage: data.default_leverage
+      if (!res.ok) return
+
+      const data = await res.json()
+      const testnetConfigured = data.testnet_configured
+      const mainnetConfigured = data.mainnet_configured
+
+      onStatusChange?.('testnet', testnetConfigured)
+      onStatusChange?.('mainnet', mainnetConfigured)
+
+      if (testnetConfigured) {
+        setTestnetWallet({
+          configured: true,
+          apiKeyMasked: data.testnet?.api_key_masked,
+          maxLeverage: data.testnet?.max_leverage || 20,
+          defaultLeverage: data.testnet?.default_leverage || 1,
+          balance: undefined
         })
-        onStatusChange?.('testnet', data.testnet_configured)
-        onStatusChange?.('mainnet', data.mainnet_configured)
+        setTestnetMaxLeverage(data.testnet?.max_leverage || 20)
+        setTestnetDefaultLeverage(data.testnet?.default_leverage || 1)
+        // Load balance
+        try {
+          const balanceRes = await fetch(`${API_BASE}/accounts/${accountId}/balance?environment=testnet`)
+          if (balanceRes.ok) {
+            const balance = await balanceRes.json()
+            setTestnetWallet(prev => prev ? { ...prev, balance } : null)
+          }
+        } catch (e) {
+          console.error('Failed to load testnet balance:', e)
+        }
+      } else {
+        setTestnetWallet(null)
+      }
+
+      if (mainnetConfigured) {
+        setMainnetWallet({
+          configured: true,
+          apiKeyMasked: data.mainnet?.api_key_masked,
+          maxLeverage: data.mainnet?.max_leverage || 20,
+          defaultLeverage: data.mainnet?.default_leverage || 1,
+          balance: undefined
+        })
+        setMainnetMaxLeverage(data.mainnet?.max_leverage || 20)
+        setMainnetDefaultLeverage(data.mainnet?.default_leverage || 1)
+        // Load balance
+        try {
+          const balanceRes = await fetch(`${API_BASE}/accounts/${accountId}/balance?environment=mainnet`)
+          if (balanceRes.ok) {
+            const balance = await balanceRes.json()
+            setMainnetWallet(prev => prev ? { ...prev, balance } : null)
+          }
+        } catch (e) {
+          console.error('Failed to load mainnet balance:', e)
+        }
+      } else {
+        setMainnetWallet(null)
       }
     } catch (error) {
       console.error('Failed to load Binance config:', error)
     } finally {
-      setLoading(false)
+      setLoadingConfig(false)
     }
   }
 
   const handleSaveWallet = async (environment: 'testnet' | 'mainnet') => {
+    const setSaving = environment === 'testnet' ? setSavingTestnet : setSavingMainnet
     const apiKey = environment === 'testnet' ? testnetApiKey : mainnetApiKey
     const secretKey = environment === 'testnet' ? testnetSecretKey : mainnetSecretKey
     const maxLev = environment === 'testnet' ? testnetMaxLeverage : mainnetMaxLeverage
     const defaultLev = environment === 'testnet' ? testnetDefaultLeverage : mainnetDefaultLeverage
 
-    if (!apiKey.trim() || !secretKey.trim()) {
+    // Clean input: remove whitespace, newlines, invisible characters
+    const cleanApiKey = apiKey.trim().replace(/[\s\r\n\t\u200B-\u200D\uFEFF]/g, '')
+    const cleanSecretKey = secretKey.trim().replace(/[\s\r\n\t\u200B-\u200D\uFEFF]/g, '')
+
+    if (!cleanApiKey || !cleanSecretKey) {
       toast.error('Please enter both API Key and Secret Key')
       return
     }
 
+    // Validate format: API Key and Secret should be alphanumeric
+    if (!/^[A-Za-z0-9]+$/.test(cleanApiKey)) {
+      toast.error('API Key contains invalid characters. Please check for spaces or special characters.')
+      return
+    }
+    if (!/^[A-Za-z0-9]+$/.test(cleanSecretKey)) {
+      toast.error('Secret Key contains invalid characters. Please check for spaces or special characters.')
+      return
+    }
+
     try {
-      setLoading(true)
+      setSaving(true)
       const res = await fetch(`${API_BASE}/accounts/${accountId}/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           environment,
-          apiKey,
-          secretKey,
-          maxLeverage: maxLev,
-          defaultLeverage: defaultLev
+          api_key: cleanApiKey,
+          secret_key: cleanSecretKey,
+          max_leverage: maxLev,
+          default_leverage: defaultLev
         })
       })
 
@@ -137,16 +193,24 @@ export default function BinanceWalletSection({
           setMainnetSecretKey('')
           setEditingMainnet(false)
         }
-        await loadConfig()
+        await loadWalletInfo()
         onWalletConfigured?.()
       } else {
-        const err = await res.json()
-        toast.error(err.detail || 'Failed to configure')
+        let errorMsg = 'Failed to configure'
+        try {
+          const err = await res.json()
+          errorMsg = err.detail || errorMsg
+        } catch {
+          if (res.status === 502 || res.status === 500) {
+            errorMsg = 'Server error. Please check API Key and Secret Key format.'
+          }
+        }
+        toast.error(errorMsg)
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to configure')
+      toast.error('Network error. Please check your connection and try again.')
     } finally {
-      setLoading(false)
+      setSaving(false)
     }
   }
 
@@ -158,6 +222,12 @@ export default function BinanceWalletSection({
       if (res.ok) {
         const data = await res.json()
         toast.success(`✅ Connected! Balance: $${data.total_equity?.toFixed(2) || '0.00'}`)
+        // Update wallet balance
+        if (environment === 'testnet' && testnetWallet) {
+          setTestnetWallet({ ...testnetWallet, balance: data })
+        } else if (environment === 'mainnet' && mainnetWallet) {
+          setMainnetWallet({ ...mainnetWallet, balance: data })
+        }
       } else {
         const err = await res.json()
         toast.error(`❌ ${err.detail || 'Connection failed'}`)
@@ -171,26 +241,27 @@ export default function BinanceWalletSection({
 
   const handleDeleteWallet = async (environment: 'testnet' | 'mainnet') => {
     if (!confirm(`Delete Binance ${environment} wallet?`)) return
+    const setSaving = environment === 'testnet' ? setSavingTestnet : setSavingMainnet
     try {
-      setLoading(true)
+      setSaving(true)
       const res = await fetch(`${API_BASE}/accounts/${accountId}/wallet?environment=${environment}`, {
         method: 'DELETE'
       })
       if (res.ok) {
         toast.success(`Binance ${environment} wallet deleted`)
-        await loadConfig()
+        await loadWalletInfo()
         onWalletConfigured?.()
       }
     } catch (error) {
       toast.error('Failed to delete wallet')
     } finally {
-      setLoading(false)
+      setSaving(false)
     }
   }
 
   const renderWalletBlock = (
     environment: 'testnet' | 'mainnet',
-    configured: boolean,
+    wallet: BinanceWalletData | null,
     editing: boolean,
     setEditing: (v: boolean) => void,
     apiKey: string,
@@ -203,6 +274,7 @@ export default function BinanceWalletSection({
     setDefaultLev: (v: number) => void,
     showKey: boolean,
     setShowKey: (v: boolean) => void,
+    saving: boolean,
     testing: boolean
   ) => {
     const envName = environment === 'testnet' ? 'Testnet' : 'Mainnet'
@@ -217,31 +289,67 @@ export default function BinanceWalletSection({
               {environment === 'testnet' ? 'TESTNET' : 'MAINNET'}
             </Badge>
           </div>
-          {configured && !editing && (
+          {wallet && !editing && (
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                 {t('common.edit', 'Edit')}
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => handleDeleteWallet(environment)} disabled={loading}>
+              <Button variant="destructive" size="sm" onClick={() => handleDeleteWallet(environment)} disabled={saving}>
                 <Trash2 className="h-3 w-3" />
               </Button>
             </div>
           )}
         </div>
 
-        {configured && !editing ? (
+        {wallet && !editing ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">API Key configured</span>
-              <CheckCircle className="h-4 w-4 text-green-600" />
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">API Key</label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-2 py-1 bg-muted rounded text-xs overflow-hidden">
+                  {wallet.apiKeyMasked || '****'}
+                </code>
+                <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+              </div>
             </div>
+
+            {wallet.balance && (
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <div className="text-muted-foreground">{t('wallet.balance', 'Balance')}</div>
+                  <div className="font-medium">${wallet.balance.total_equity?.toFixed(2) || '0.00'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">{t('wallet.available', 'Available')}</div>
+                  <div className="font-medium">${wallet.balance.available_balance?.toFixed(2) || '0.00'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">PnL</div>
+                  <div className={`font-medium ${(wallet.balance.unrealized_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    ${wallet.balance.unrealized_pnl?.toFixed(2) || '0.00'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <div className="text-muted-foreground">{t('wallet.maxLeverage', 'Max Leverage')}</div>
+                <div className="font-medium">{wallet.maxLeverage}x</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">{t('wallet.defaultLeverage', 'Default Leverage')}</div>
+                <div className="font-medium">{wallet.defaultLeverage}x</div>
+              </div>
+            </div>
+
             <Button variant="outline" size="sm" onClick={() => handleTestConnection(environment)} disabled={testing} className="w-full">
               {testing ? <><RefreshCw className="mr-2 h-3 w-3 animate-spin" />{t('wallet.testing', 'Testing...')}</> : t('wallet.testConnection', 'Test Connection')}
             </Button>
           </div>
         ) : (
           <div className="space-y-3">
-            {!configured && (
+            {!wallet && (
               <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
                 <p className="text-yellow-800">⚠️ No {envName.toLowerCase()} API configured.</p>
               </div>
@@ -289,8 +397,8 @@ export default function BinanceWalletSection({
             </div>
 
             <div className="flex gap-2">
-              <Button onClick={() => handleSaveWallet(environment)} disabled={loading} size="sm" className="flex-1 h-8 text-xs">
-                {loading ? <><RefreshCw className="mr-2 h-3 w-3 animate-spin" />{t('wallet.saving', 'Saving...')}</> : t('wallet.saveWallet', 'Save Wallet')}
+              <Button onClick={() => handleSaveWallet(environment)} disabled={saving} size="sm" className="flex-1 h-8 text-xs">
+                {saving ? <><RefreshCw className="mr-2 h-3 w-3 animate-spin" />{t('wallet.saving', 'Saving...')}</> : t('wallet.saveWallet', 'Save Wallet')}
               </Button>
               {editing && (
                 <Button variant="outline" onClick={() => { setEditing(false); setApiKey(''); setSecretKey('') }} size="sm" className="h-8 text-xs">
@@ -304,7 +412,7 @@ export default function BinanceWalletSection({
     )
   }
 
-  if (loading && !config) {
+  if (loadingConfig && !testnetWallet && !mainnetWallet) {
     return (
       <div className="flex items-center justify-center py-4">
         <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -315,18 +423,18 @@ export default function BinanceWalletSection({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
       {renderWalletBlock(
-        'testnet', config?.testnetConfigured || false, editingTestnet, setEditingTestnet,
+        'testnet', testnetWallet, editingTestnet, setEditingTestnet,
         testnetApiKey, setTestnetApiKey, testnetSecretKey, setTestnetSecretKey,
         testnetMaxLeverage, setTestnetMaxLeverage,
         testnetDefaultLeverage, setTestnetDefaultLeverage,
-        showTestnetKey, setShowTestnetKey, testingTestnet
+        showTestnetKey, setShowTestnetKey, savingTestnet, testingTestnet
       )}
       {renderWalletBlock(
-        'mainnet', config?.mainnetConfigured || false, editingMainnet, setEditingMainnet,
+        'mainnet', mainnetWallet, editingMainnet, setEditingMainnet,
         mainnetApiKey, setMainnetApiKey, mainnetSecretKey, setMainnetSecretKey,
         mainnetMaxLeverage, setMainnetMaxLeverage,
         mainnetDefaultLeverage, setMainnetDefaultLeverage,
-        showMainnetKey, setShowMainnetKey, testingMainnet
+        showMainnetKey, setShowMainnetKey, savingMainnet, testingMainnet
       )}
     </div>
   )
