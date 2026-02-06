@@ -113,6 +113,11 @@ def initialize_services():
         asyncio.create_task(hyperliquid_snapshot_service.start())
         logger.info("Hyperliquid snapshot service started (30-second interval)")
 
+        # Start Binance account snapshot service (every 5 minutes)
+        from services.binance_snapshot_service import binance_snapshot_service
+        asyncio.create_task(binance_snapshot_service.start())
+        logger.info("Binance snapshot service started (5-minute interval)")
+
         # Start K-line realtime collection service
         from services.kline_realtime_collector import realtime_collector
         asyncio.create_task(realtime_collector.start())

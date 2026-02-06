@@ -345,3 +345,77 @@ async def delete_wallet(
     db.commit()
 
     return {"success": True, "message": f"Binance {environment} wallet disabled"}
+
+
+@router.get("/accounts/{account_id}/summary")
+async def get_account_summary(
+    account_id: int,
+    environment: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get Binance account summary for dashboard display."""
+    if not environment:
+        environment = get_global_trading_mode(db)
+
+    wallet = db.query(BinanceWallet).filter(
+        BinanceWallet.account_id == account_id,
+        BinanceWallet.environment == environment,
+        BinanceWallet.is_active == "true"
+    ).first()
+
+    if not wallet:
+        raise HTTPException(status_code=404, detail=f"No {environment} wallet configured")
+
+    try:
+        client = _get_client(wallet)
+        balance = client.get_balance()
+        rate_limit = client.get_rate_limit()
+
+        total_equity = balance.get("total_equity", 0.0)
+        used_margin = balance.get("used_margin", 0.0)
+        margin_usage = (used_margin / total_equity * 100) if total_equity > 0 else 0.0
+
+        return {
+            "account_id": account_id,
+            "environment": environment,
+            "exchange": "binance",
+            "equity": total_equity,
+            "available_balance": balance.get("available_balance", 0.0),
+            "used_margin": used_margin,
+            "margin_usage": round(margin_usage, 1),
+            "unrealized_pnl": balance.get("unrealized_pnl", 0.0),
+            "rate_limit": rate_limit,
+            "last_updated": balance.get("timestamp"),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get account summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/accounts/{account_id}/rate-limit")
+async def get_rate_limit(
+    account_id: int,
+    environment: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get Binance API rate limit (weight per minute) for an account."""
+    if not environment:
+        environment = get_global_trading_mode(db)
+
+    wallet = db.query(BinanceWallet).filter(
+        BinanceWallet.account_id == account_id,
+        BinanceWallet.environment == environment,
+        BinanceWallet.is_active == "true"
+    ).first()
+
+    if not wallet:
+        raise HTTPException(status_code=404, detail=f"No {environment} wallet configured")
+
+    try:
+        client = _get_client(wallet)
+        # Make a lightweight call to get fresh weight from response header
+        client.get_balance()
+        return {"success": True, "rate_limit": client.get_rate_limit()}
+    except Exception as e:
+        logger.error(f"Failed to get rate limit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

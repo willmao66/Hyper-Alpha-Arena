@@ -11,9 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
-from database.models import Account, BinanceWallet
-from database.snapshot_connection import SnapshotSessionLocal
-from database.snapshot_models import BinanceAccountSnapshot
+from database.models import Account, BinanceWallet, BinanceAccountSnapshot
 from services.binance_trading_client import BinanceTradingClient
 from services.hyperliquid_environment import get_global_trading_mode
 from api.ws import broadcast_arena_asset_update, manager
@@ -63,17 +61,16 @@ class BinanceSnapshotService:
 
     async def take_snapshots(self):
         """Take snapshots for all active Binance accounts"""
-        main_db = SessionLocal()
-        snapshot_db = SnapshotSessionLocal()
+        db = SessionLocal()
 
         try:
-            global_environment = get_global_trading_mode(main_db)
+            global_environment = get_global_trading_mode(db)
             if not global_environment:
                 logger.debug("[BINANCE SNAPSHOT] No global trading mode set, skipping")
                 return
 
             # Find all active AI accounts with Binance wallets for current environment
-            accounts = main_db.query(Account).join(
+            accounts = db.query(Account).join(
                 BinanceWallet,
                 Account.id == BinanceWallet.account_id
             ).filter(
@@ -90,26 +87,23 @@ class BinanceSnapshotService:
             snapshot_count = 0
             for account in accounts:
                 try:
-                    success = await self._take_account_snapshot(
-                        account, global_environment, main_db, snapshot_db
-                    )
+                    success = await self._take_account_snapshot(account, global_environment, db)
                     if success:
                         snapshot_count += 1
                 except Exception as e:
                     logger.error(f"[BINANCE SNAPSHOT] Failed for account {account.id}: {e}")
 
-            snapshot_db.commit()
+            db.commit()
             logger.debug(f"[BINANCE SNAPSHOT] Took {snapshot_count} snapshots")
 
         except Exception as e:
             logger.error(f"[BINANCE SNAPSHOT] Error: {e}", exc_info=True)
-            snapshot_db.rollback()
+            db.rollback()
         finally:
-            main_db.close()
-            snapshot_db.close()
+            db.close()
 
     async def _take_account_snapshot(
-        self, account: Account, environment: str, main_db: Session, snapshot_db: Session
+        self, account: Account, environment: str, db: Session
     ) -> bool:
         """
         Take snapshot for a single Binance account.
@@ -126,7 +120,7 @@ class BinanceSnapshotService:
             True if snapshot was taken successfully
         """
         # Get wallet for this account and environment
-        wallet = main_db.query(BinanceWallet).filter(
+        wallet = db.query(BinanceWallet).filter(
             BinanceWallet.account_id == account.id,
             BinanceWallet.environment == environment,
             BinanceWallet.is_active == "true"
@@ -137,7 +131,7 @@ class BinanceSnapshotService:
             return False
 
         try:
-            client = self._get_client(wallet, main_db)
+            client = self._get_client(wallet, db)
             account_data = client.get_account()
 
             # Create snapshot with field mapping
@@ -154,7 +148,7 @@ class BinanceSnapshotService:
                 snapshot_data=json.dumps(account_data)
             )
 
-            snapshot_db.add(snapshot)
+            db.add(snapshot)
 
             logger.debug(
                 f"[BINANCE SNAPSHOT] Account {account.id} ({account.name}): "

@@ -67,6 +67,10 @@ class BinanceTradingClient:
         self._exchange_info_timestamp: float = 0
         self._cache_ttl = 3600  # 1 hour
 
+        # Rate limit tracking (from response headers)
+        self._last_used_weight: int = 0
+        self._weight_cap: int = 2400  # Binance Futures default
+
         logger.info(f"[BINANCE] Client initialized for {environment}")
 
     def _get_timestamp(self) -> int:
@@ -127,9 +131,13 @@ class BinanceTradingClient:
             else:
                 response = self.session.post(url, data=params, timeout=10)
 
-            # Log rate limit info
-            used_weight = response.headers.get("X-MBX-USED-WEIGHT-1M", "?")
-            logger.debug(f"[BINANCE] {method} {endpoint} - Weight: {used_weight}/2400")
+            # Log rate limit info and save to instance
+            used_weight = response.headers.get("X-MBX-USED-WEIGHT-1M", "0")
+            try:
+                self._last_used_weight = int(used_weight)
+            except (ValueError, TypeError):
+                pass
+            logger.debug(f"[BINANCE] {method} {endpoint} - Weight: {used_weight}/{self._weight_cap}")
 
             if response.status_code != 200:
                 error_data = response.json() if response.text else {}
@@ -645,6 +653,22 @@ class BinanceTradingClient:
             "used_margin": balance.get("used_margin", 0.0),
             "margin_usage_percent": balance.get("margin_usage_percent", 0.0),
             "maintenance_margin": balance.get("maintenance_margin", 0.0),
+        }
+
+    def get_rate_limit(self) -> Dict[str, Any]:
+        """
+        Get current API rate limit info from last request's response header.
+
+        Returns:
+            Dict with: used_weight, weight_cap, remaining, usage_percent
+        """
+        remaining = self._weight_cap - self._last_used_weight
+        usage_percent = (self._last_used_weight / self._weight_cap * 100) if self._weight_cap > 0 else 0
+        return {
+            "used_weight": self._last_used_weight,
+            "weight_cap": self._weight_cap,
+            "remaining": remaining,
+            "usage_percent": round(usage_percent, 1),
         }
 
     def get_open_orders_formatted(self, db=None, symbol: Optional[str] = None) -> List[Dict[str, Any]]:

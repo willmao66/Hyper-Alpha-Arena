@@ -494,3 +494,43 @@ export async function setGlobalTradingMode(
   });
   return response.json();
 }
+
+// --- Binance API functions ---
+
+const BINANCE_API_BASE = '/api/binance';
+
+export interface BinanceSummary {
+  account_id: number;
+  environment: string;
+  exchange: string;
+  equity: number;
+  available_balance: number;
+  used_margin: number;
+  margin_usage: number;
+  unrealized_pnl: number;
+  rate_limit: {
+    used_weight: number;
+    weight_cap: number;
+    remaining: number;
+    usage_percent: number;
+  } | null;
+  last_updated: string | null;
+}
+
+export async function getBinanceSummary(accountId: number): Promise<BinanceSummary> {
+  const response = await apiRequest(`${BINANCE_API_BASE}/accounts/${accountId}/summary`);
+  return response.json();
+}
+
+export async function getBinanceRateLimit(accountId: number): Promise<{
+  success: boolean;
+  rate_limit: {
+    used_weight: number;
+    weight_cap: number;
+    remaining: number;
+    usage_percent: number;
+  };
+}> {
+  const response = await apiRequest(`${BINANCE_API_BASE}/accounts/${accountId}/rate-limit`);
+  return response.json();
+}

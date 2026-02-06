@@ -201,6 +201,7 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
                 "account_name": account.name,
                 "model": account.model,
                 "environment": environment,
+                "exchange": "hyperliquid",
                 "wallet_address": wallet_address,
                 "total_unrealized_pnl": total_unrealized,
                 "available_cash": available_balance,
@@ -240,6 +241,157 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
         "generated_at": datetime.utcnow().isoformat(),
         "trading_mode": environment,
         "accounts": snapshots,
+    }
+
+
+def _get_binance_positions(db: Session, account_id: Optional[int], environment: str) -> list:
+    """
+    Get real-time positions from Binance Futures API.
+
+    Returns:
+        List of account snapshot dicts (same format as Hyperliquid snapshots)
+    """
+    from database.models import BinanceWallet
+    from services.binance_trading_client import BinanceTradingClient
+
+    accounts_query = db.query(Account).filter(
+        Account.account_type == "AI",
+        Account.is_active == "true",
+        Account.show_on_dashboard == True
+    )
+    if account_id:
+        accounts_query = accounts_query.filter(Account.id == account_id)
+
+    accounts = accounts_query.all()
+    snapshots = []
+
+    for account in accounts:
+        wallet = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == account.id,
+            BinanceWallet.environment == environment,
+            BinanceWallet.is_active == "true"
+        ).first()
+
+        if not wallet:
+            continue
+
+        try:
+            api_key = decrypt_private_key(wallet.api_key_encrypted)
+            secret_key = decrypt_private_key(wallet.secret_key_encrypted)
+            client = BinanceTradingClient(
+                api_key=api_key,
+                secret_key=secret_key,
+                environment=environment
+            )
+
+            balance = client.get_balance()
+            positions_data = client.get_positions()
+            rate_limit = client.get_rate_limit()
+
+            snapshots.append(
+                _build_binance_snapshot(
+                    account, environment, balance,
+                    positions_data, rate_limit
+                )
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to get Binance positions for account {account.id}: {e}",
+                exc_info=True
+            )
+            snapshots.append(_build_binance_fallback(account, environment))
+
+    return snapshots
+
+
+def _build_binance_snapshot(
+    account, environment, balance, positions_data, rate_limit
+) -> dict:
+    """Build a Binance account snapshot dict."""
+    position_items = []
+    total_unrealized = 0.0
+
+    for p in positions_data:
+        unrealized_pnl = p.get("unrealized_pnl", 0)
+        total_unrealized += unrealized_pnl
+        szi = float(p.get("szi", 0) or 0)
+        entry_px = float(p.get("entry_px", 0) or 0)
+        position_value = float(p.get("position_value", 0) or 0)
+        notional = abs(szi) * entry_px
+        current_price = position_value / abs(szi) if szi != 0 else entry_px
+
+        position_items.append({
+            "id": 0,
+            "symbol": p.get("coin", ""),
+            "name": p.get("coin", ""),
+            "market": "BINANCE_PERP",
+            "side": "LONG" if szi > 0 else "SHORT",
+            "quantity": abs(szi),
+            "avg_cost": entry_px,
+            "current_price": current_price,
+            "notional": notional,
+            "current_value": position_value,
+            "unrealized_pnl": float(unrealized_pnl),
+            "leverage": p.get("leverage"),
+            "margin_used": float(p.get("margin_used", 0) or 0),
+            "return_on_equity": 0.0,
+            "percentage": 0.0,
+            "margin_mode": p.get("leverage_type", "cross"),
+            "liquidation_px": float(p.get("liquidation_px", 0) or 0),
+            "max_leverage": None,
+            "leverage_type": p.get("leverage_type"),
+        })
+
+    total_equity = balance.get("total_equity", 0)
+    available_balance = balance.get("available_balance", 0)
+    used_margin = balance.get("used_margin", 0)
+    initial_capital = float(account.initial_capital or 0)
+    total_return = None
+    if initial_capital > 0:
+        total_return = (total_equity - initial_capital) / initial_capital
+    margin_pct = (used_margin / total_equity * 100) if total_equity > 0 else 0
+
+    return {
+        "account_id": account.id,
+        "account_name": account.name,
+        "model": account.model,
+        "environment": environment,
+        "exchange": "binance",
+        "wallet_address": None,
+        "total_unrealized_pnl": total_unrealized,
+        "available_cash": available_balance,
+        "used_margin": used_margin,
+        "positions_value": used_margin,
+        "positions": position_items,
+        "total_assets": total_equity,
+        "margin_usage_percent": round(margin_pct, 1),
+        "margin_mode": "cross",
+        "initial_capital": initial_capital,
+        "total_return": total_return,
+        "rate_limit": rate_limit,
+    }
+
+
+def _build_binance_fallback(account, environment) -> dict:
+    """Build a fallback snapshot when Binance API call fails."""
+    return {
+        "account_id": account.id,
+        "account_name": account.name,
+        "model": account.model,
+        "environment": environment,
+        "exchange": "binance",
+        "wallet_address": None,
+        "total_unrealized_pnl": 0.0,
+        "available_cash": 0.0,
+        "used_margin": 0.0,
+        "positions_value": 0.0,
+        "positions": [],
+        "total_assets": float(account.initial_capital or 0),
+        "margin_usage_percent": 0.0,
+        "margin_mode": "cross",
+        "initial_capital": float(account.initial_capital or 0),
+        "total_return": 0.0,
+        "rate_limit": None,
     }
 
 
@@ -916,9 +1068,13 @@ def get_positions_snapshot(
 ):
     """Return consolidated positions and cash for active AI accounts, filtered by trading mode."""
 
-    # For Hyperliquid modes (testnet/mainnet), fetch real-time data from Hyperliquid API
+    # For Hyperliquid modes (testnet/mainnet), fetch real-time data from exchanges
     if trading_mode and trading_mode in ["testnet", "mainnet"]:
-        return _get_hyperliquid_positions(db, account_id, trading_mode)
+        result = _get_hyperliquid_positions(db, account_id, trading_mode)
+        # Also include Binance accounts
+        binance_accounts = _get_binance_positions(db, account_id, trading_mode)
+        result["accounts"] = result.get("accounts", []) + binance_accounts
+        return result
 
     # For paper mode (or no mode specified), query local database
     accounts_query = db.query(Account).filter(

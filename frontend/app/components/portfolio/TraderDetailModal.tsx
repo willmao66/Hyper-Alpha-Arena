@@ -8,7 +8,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { RefreshCw, TrendingUp, AlertTriangle, Info } from 'lucide-react'
-import { getWalletRateLimit, getTradingStats, TradingStats } from '@/lib/hyperliquidApi'
+import { getWalletRateLimit, getTradingStats, TradingStats, getBinanceRateLimit } from '@/lib/hyperliquidApi'
 import { setCachedData, getCachedData, getCacheTimestamp, getApiUsageCacheKey, getTradingStatsCacheKey } from '@/lib/cacheUtils'
 import { formatDateTime } from '@/lib/dateTime'
 import type { HyperliquidBalance } from '@/lib/types/hyperliquid'
@@ -29,6 +29,7 @@ interface RateLimitData {
 interface AccountData {
   accountId: number
   accountName: string
+  exchange: string
   balance: HyperliquidBalance | null
   rateLimit: RateLimitData | null
   rateLimitUpdated: number | null
@@ -74,16 +75,36 @@ export default function TraderDetailModal({
     }
   }, [isOpen, account.accountId, environment])
 
+  const isBinance = (account.exchange || 'hyperliquid') === 'binance'
+
   // Refresh API Usage
   const handleRefreshRateLimit = async () => {
     setRefreshingRateLimit(true)
     try {
-      const res = await getWalletRateLimit(account.accountId, environment)
-      if (res.success && res.rateLimit) {
-        setRateLimit(res.rateLimit)
-        setRateLimitUpdated(Date.now())
-        setCachedData(getApiUsageCacheKey(account.accountId, environment), res.rateLimit)
-        toast.success('API usage updated')
+      if (isBinance) {
+        const res = await getBinanceRateLimit(account.accountId)
+        if (res.success && res.rate_limit) {
+          const rl: RateLimitData = {
+            cumVlm: 0,
+            nRequestsUsed: res.rate_limit.used_weight,
+            nRequestsCap: res.rate_limit.weight_cap,
+            remaining: res.rate_limit.remaining,
+            usagePercent: res.rate_limit.usage_percent,
+            isOverLimit: res.rate_limit.usage_percent >= 100,
+          }
+          setRateLimit(rl)
+          setRateLimitUpdated(Date.now())
+          setCachedData(getApiUsageCacheKey(account.accountId, environment), rl)
+          toast.success('API weight updated')
+        }
+      } else {
+        const res = await getWalletRateLimit(account.accountId, environment)
+        if (res.success && res.rateLimit) {
+          setRateLimit(res.rateLimit)
+          setRateLimitUpdated(Date.now())
+          setCachedData(getApiUsageCacheKey(account.accountId, environment), res.rateLimit)
+          toast.success('API usage updated')
+        }
       }
     } catch (e) {
       toast.error('Failed to refresh API usage')
@@ -128,6 +149,11 @@ export default function TraderDetailModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span>{account.accountName} - {t('accountDetail.details', 'Details')}</span>
+            <img
+              src={isBinance ? '/binance_logo.svg' : '/hyperliquid_logo.svg'}
+              alt={isBinance ? 'Binance' : 'Hyperliquid'}
+              className="h-4 w-4"
+            />
             <Badge variant={environment === 'testnet' ? 'default' : 'destructive'} className="uppercase text-xs">
               {environment}
             </Badge>
@@ -137,7 +163,7 @@ export default function TraderDetailModal({
         <div className="space-y-6">
           {/* Account Status Section */}
           {account.balance && (
-            <AccountStatusSection balance={account.balance} t={t} />
+            <AccountStatusSection balance={account.balance} isBinance={isBinance} t={t} />
           )}
 
           {/* API Usage Section */}
@@ -148,10 +174,17 @@ export default function TraderDetailModal({
             onRefresh={handleRefreshRateLimit}
             getUsageColor={getUsageColor}
             getUsageBarColor={getUsageBarColor}
+            isBinance={isBinance}
             t={t}
           />
 
           {/* Trading Stats Section */}
+          {isBinance ? (
+            <div className="border rounded-lg p-4">
+              <h3 className="text-sm font-semibold mb-3">{t('accountDetail.tradingStats', 'Trading Statistics')}</h3>
+              <div className="text-sm text-muted-foreground">{t('accountDetail.comingSoon', 'Coming Soon')}</div>
+            </div>
+          ) : (
           <TradingStatsSection
             stats={tradingStats}
             statsUpdated={tradingStatsUpdated}
@@ -159,6 +192,7 @@ export default function TraderDetailModal({
             onRefresh={handleRefreshStats}
             t={t}
           />
+          )}
 
           {/* Positions Section */}
           <PositionsSection positions={positions} t={t} />
@@ -169,7 +203,7 @@ export default function TraderDetailModal({
 }
 
 // Account Status Section
-function AccountStatusSection({ balance, t }: { balance: HyperliquidBalance; t: any }) {
+function AccountStatusSection({ balance, isBinance, t }: { balance: HyperliquidBalance; isBinance: boolean; t: any }) {
   return (
     <div className="border rounded-lg p-4">
       <h3 className="text-sm font-semibold mb-3">{t('accountDetail.accountStatus', 'Account Status')}</h3>
@@ -187,7 +221,7 @@ function AccountStatusSection({ balance, t }: { balance: HyperliquidBalance; t: 
           <div className="font-medium">${balance.usedMargin.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
         </div>
       </div>
-      {balance.walletAddress && (
+      {!isBinance && balance.walletAddress && (
         <div className="mt-3 pt-3 border-t">
           <div className="text-muted-foreground text-xs">{t('accountDetail.wallet', 'Wallet')}</div>
           <div className="font-mono text-xs">{balance.walletAddress}</div>
@@ -205,6 +239,7 @@ function ApiUsageSection({
   onRefresh,
   getUsageColor,
   getUsageBarColor,
+  isBinance,
   t,
 }: {
   rateLimit: RateLimitData | null
@@ -213,12 +248,15 @@ function ApiUsageSection({
   onRefresh: () => void
   getUsageColor: (p: number) => string
   getUsageBarColor: (p: number) => string
+  isBinance: boolean
   t: any
 }) {
   return (
     <div className="border rounded-lg p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold">{t('accountDetail.apiUsage', 'API Usage')}</h3>
+        <h3 className="text-sm font-semibold">
+          {isBinance ? t('accountDetail.apiWeight', 'API Weight (per minute)') : t('accountDetail.apiUsage', 'API Usage')}
+        </h3>
         <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
           <RefreshCw className={`w-3 h-3 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
           {t('common.refresh', 'Refresh')}
@@ -227,60 +265,21 @@ function ApiUsageSection({
 
       {rateLimit ? (
         <div className="space-y-3">
-          <div className="grid grid-cols-4 gap-3 text-sm">
-            <div>
-              <div className="text-muted-foreground text-xs">{t('accountDetail.cumulativeVolume', 'Cumulative Volume')}</div>
-              <div className="font-bold">${rateLimit.cumVlm.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground text-xs">{t('accountDetail.requestsUsed', 'Requests Used')}</div>
-              <div className="font-medium">{rateLimit.nRequestsUsed.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground text-xs">{t('accountDetail.requestsCap', 'Requests Cap')}</div>
-              <div className="font-medium">{rateLimit.nRequestsCap.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground text-xs">{t('accountDetail.remaining', 'Remaining')}</div>
-              <div className={`font-bold ${getUsageColor(rateLimit.usagePercent)}`}>
-                {rateLimit.remaining.toLocaleString()}
-              </div>
-            </div>
-          </div>
-
-          {/* Progress bar */}
-          <div>
-            <div className="flex justify-between text-xs mb-1">
-              <span className="text-muted-foreground">{t('accountDetail.usage', 'Usage')}</span>
-              <span className={getUsageColor(rateLimit.usagePercent)}>{rateLimit.usagePercent.toFixed(1)}%</span>
-            </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-              <div
-                className={`h-full rounded-full ${getUsageBarColor(rateLimit.usagePercent)}`}
-                style={{ width: `${Math.min(rateLimit.usagePercent, 100)}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Warning if over limit */}
-          {rateLimit.isOverLimit && (
-            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded p-3 flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="text-xs text-red-700 dark:text-red-400">
-                <strong>{t('accountDetail.quotaExceeded', 'API Quota Exceeded!')}</strong> {t('accountDetail.quotaExceededDesc', 'Order placement will fail. Trade more to increase quota.')}
-              </div>
-            </div>
+          {isBinance ? (
+            <BinanceApiUsageContent
+              rateLimit={rateLimit}
+              getUsageColor={getUsageColor}
+              getUsageBarColor={getUsageBarColor}
+              t={t}
+            />
+          ) : (
+            <HyperliquidApiUsageContent
+              rateLimit={rateLimit}
+              getUsageColor={getUsageColor}
+              getUsageBarColor={getUsageBarColor}
+              t={t}
+            />
           )}
-
-          {/* Info box */}
-          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded p-3">
-            <div className="flex items-start gap-2">
-              <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="text-xs text-blue-700 dark:text-blue-400">
-                <strong>{t('accountDetail.increaseQuota', 'To increase quota:')}</strong> {t('accountDetail.increaseQuotaDesc', 'Complete more trades. Every $1 USDC traded adds 1 request to your cap.')}
-              </div>
-            </div>
-          </div>
 
           {rateLimitUpdated && (
             <div className="text-xs text-muted-foreground text-right">
@@ -292,6 +291,120 @@ function ApiUsageSection({
         <div className="text-sm text-muted-foreground">{t('accountDetail.clickRefreshApi', 'Click Refresh to load API usage data')}</div>
       )}
     </div>
+  )
+}
+
+// Binance API Weight content
+function BinanceApiUsageContent({
+  rateLimit, getUsageColor, getUsageBarColor, t,
+}: {
+  rateLimit: RateLimitData
+  getUsageColor: (p: number) => string
+  getUsageBarColor: (p: number) => string
+  t: any
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-3 text-sm">
+        <div>
+          <div className="text-muted-foreground text-xs">{t('accountDetail.weightUsed', 'Weight Used')}</div>
+          <div className="font-bold">{rateLimit.nRequestsUsed.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-xs">{t('accountDetail.weightCap', 'Weight Cap')}</div>
+          <div className="font-medium">{rateLimit.nRequestsCap.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-xs">{t('accountDetail.remaining', 'Remaining')}</div>
+          <div className={`font-bold ${getUsageColor(rateLimit.usagePercent)}`}>
+            {rateLimit.remaining.toLocaleString()}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div className="flex justify-between text-xs mb-1">
+          <span className="text-muted-foreground">{t('accountDetail.usage', 'Usage')}</span>
+          <span className={getUsageColor(rateLimit.usagePercent)}>{rateLimit.usagePercent.toFixed(1)}%</span>
+        </div>
+        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+          <div
+            className={`h-full rounded-full ${getUsageBarColor(rateLimit.usagePercent)}`}
+            style={{ width: `${Math.min(rateLimit.usagePercent, 100)}%` }}
+          />
+        </div>
+      </div>
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded p-3">
+        <div className="flex items-start gap-2">
+          <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-blue-700 dark:text-blue-400">
+            {t('accountDetail.binanceWeightInfo', 'Binance API weight resets every minute. Each API call consumes different weight.')}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// Hyperliquid API Usage content
+function HyperliquidApiUsageContent({
+  rateLimit, getUsageColor, getUsageBarColor, t,
+}: {
+  rateLimit: RateLimitData
+  getUsageColor: (p: number) => string
+  getUsageBarColor: (p: number) => string
+  t: any
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-4 gap-3 text-sm">
+        <div>
+          <div className="text-muted-foreground text-xs">{t('accountDetail.cumulativeVolume', 'Cumulative Volume')}</div>
+          <div className="font-bold">${rateLimit.cumVlm.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-xs">{t('accountDetail.requestsUsed', 'Requests Used')}</div>
+          <div className="font-medium">{rateLimit.nRequestsUsed.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-xs">{t('accountDetail.requestsCap', 'Requests Cap')}</div>
+          <div className="font-medium">{rateLimit.nRequestsCap.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-xs">{t('accountDetail.remaining', 'Remaining')}</div>
+          <div className={`font-bold ${getUsageColor(rateLimit.usagePercent)}`}>
+            {rateLimit.remaining.toLocaleString()}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div className="flex justify-between text-xs mb-1">
+          <span className="text-muted-foreground">{t('accountDetail.usage', 'Usage')}</span>
+          <span className={getUsageColor(rateLimit.usagePercent)}>{rateLimit.usagePercent.toFixed(1)}%</span>
+        </div>
+        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+          <div
+            className={`h-full rounded-full ${getUsageBarColor(rateLimit.usagePercent)}`}
+            style={{ width: `${Math.min(rateLimit.usagePercent, 100)}%` }}
+          />
+        </div>
+      </div>
+      {rateLimit.isOverLimit && (
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded p-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-red-700 dark:text-red-400">
+            <strong>{t('accountDetail.quotaExceeded', 'API Quota Exceeded!')}</strong> {t('accountDetail.quotaExceededDesc', 'Order placement will fail. Trade more to increase quota.')}
+          </div>
+        </div>
+      )}
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded p-3">
+        <div className="flex items-start gap-2">
+          <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-blue-700 dark:text-blue-400">
+            <strong>{t('accountDetail.increaseQuota', 'To increase quota:')}</strong> {t('accountDetail.increaseQuotaDesc', 'Complete more trades. Every $1 USDC traded adds 1 request to your cap.')}
+          </div>
+        </div>
+      </div>
+    </>
   )
 }
 

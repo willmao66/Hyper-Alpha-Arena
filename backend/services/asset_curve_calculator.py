@@ -13,7 +13,7 @@ from sqlalchemy import cast, func
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.types import Integer
 
-from database.models import Account, AccountAssetSnapshot
+from database.models import Account, AccountAssetSnapshot, BinanceAccountSnapshot
 from database.snapshot_connection import SnapshotSessionLocal
 from database.snapshot_models import HyperliquidAccountSnapshot
 
@@ -109,6 +109,7 @@ def get_all_asset_curves_data_new(
 ) -> List[Dict]:
     """
     Build asset curve data for all active accounts (or specific account) using cached SQL aggregation.
+    Returns data from both Hyperliquid and Binance with 'exchange' field to distinguish.
     """
     bucket_minutes = TIMEFRAME_BUCKET_MINUTES.get(timeframe, TIMEFRAME_BUCKET_MINUTES["5m"])
 
@@ -118,7 +119,9 @@ def get_all_asset_curves_data_new(
         effective_environment = environment
         if effective_environment not in {"testnet", "mainnet"} and trading_mode in {"testnet", "mainnet"}:
             effective_environment = trading_mode
-        return _build_hyperliquid_asset_curve(
+
+        # Get Hyperliquid data
+        hl_data = _build_hyperliquid_asset_curve(
             db,
             bucket_minutes,
             environment=effective_environment,
@@ -127,6 +130,21 @@ def get_all_asset_curves_data_new(
             start_date=start_date,
             end_date=end_date,
         )
+
+        # Get Binance data
+        binance_data = _build_binance_asset_curve(
+            db,
+            bucket_minutes,
+            environment=effective_environment,
+            account_id=account_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        # Merge and sort by timestamp
+        combined = hl_data + binance_data
+        combined.sort(key=lambda item: (item["timestamp"], item["account_id"]))
+        return combined
 
     # For other non-paper modes, return empty data for now
     if trading_mode != "paper":
@@ -337,6 +355,7 @@ def _build_hyperliquid_asset_curve(
                 "cash": 0.0,  # Not tracked separately in Hyperliquid snapshots
                 "positions_value": float(total_equity),  # Approximate as total_equity
                 "wallet_address": snap_wallet,
+                "exchange": "hyperliquid",
             })
 
         # No longer fill missing accounts with initial_capital
@@ -348,3 +367,131 @@ def _build_hyperliquid_asset_curve(
 
     finally:
         snapshot_db.close()
+
+
+def _build_binance_asset_curve(
+    db: Session,
+    bucket_minutes: int,
+    environment: Optional[str] = None,
+    account_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict]:
+    """Build asset curve for Binance accounts with bucketing"""
+    bucket_seconds = bucket_minutes * 60
+    if bucket_seconds <= 0:
+        bucket_seconds = TIMEFRAME_BUCKET_MINUTES["5m"] * 60
+
+    # Get all active AI accounts
+    account_query = db.query(Account).filter(
+        Account.is_active == "true",
+        Account.account_type == "AI",
+        Account.show_on_dashboard == True,
+    )
+    if account_id:
+        account_query = account_query.filter(Account.id == account_id)
+
+    accounts = account_query.all()
+    if not accounts:
+        return []
+
+    account_map = {account.id: account for account in accounts}
+    account_ids = list(account_map.keys())
+
+    env_filter = environment if environment in {"testnet", "mainnet"} else None
+
+    # Build bucket query for Binance snapshots (stored in main DB)
+    time_seconds = cast(func.extract('epoch', BinanceAccountSnapshot.snapshot_time), Integer)
+    bucket_index_expr = cast(func.floor(time_seconds / bucket_seconds), Integer)
+
+    bucket_query = db.query(
+        BinanceAccountSnapshot.account_id.label("account_id"),
+        bucket_index_expr.label("bucket_index"),
+        func.max(BinanceAccountSnapshot.snapshot_time).label("latest_snapshot_time"),
+    ).filter(BinanceAccountSnapshot.account_id.in_(account_ids))
+
+    if env_filter:
+        bucket_query = bucket_query.filter(BinanceAccountSnapshot.environment == env_filter)
+    if account_id:
+        bucket_query = bucket_query.filter(BinanceAccountSnapshot.account_id == account_id)
+
+    # Apply time range filters
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            bucket_query = bucket_query.filter(BinanceAccountSnapshot.snapshot_time >= start_dt)
+        except (ValueError, AttributeError):
+            logger.warning(f"Invalid start_date format: {start_date}")
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            bucket_query = bucket_query.filter(BinanceAccountSnapshot.snapshot_time <= end_dt)
+        except (ValueError, AttributeError):
+            logger.warning(f"Invalid end_date format: {end_date}")
+
+    bucket_subquery = bucket_query.group_by(
+        BinanceAccountSnapshot.account_id,
+        bucket_index_expr,
+    ).subquery()
+
+    snapshot_alias = aliased(BinanceAccountSnapshot)
+    rows_query = db.query(
+        snapshot_alias.account_id,
+        snapshot_alias.total_margin_balance,
+        snapshot_alias.available_balance,
+        snapshot_alias.total_unrealized_profit,
+        snapshot_alias.snapshot_time,
+    ).join(
+        bucket_subquery,
+        (snapshot_alias.account_id == bucket_subquery.c.account_id)
+        & (snapshot_alias.snapshot_time == bucket_subquery.c.latest_snapshot_time),
+    )
+
+    if env_filter:
+        rows_query = rows_query.filter(snapshot_alias.environment == env_filter)
+    if account_id:
+        rows_query = rows_query.filter(snapshot_alias.account_id == account_id)
+
+    # Apply time range filters to rows query
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            rows_query = rows_query.filter(snapshot_alias.snapshot_time >= start_dt)
+        except (ValueError, AttributeError):
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            rows_query = rows_query.filter(snapshot_alias.snapshot_time <= end_dt)
+        except (ValueError, AttributeError):
+            pass
+
+    rows = rows_query.order_by(
+        snapshot_alias.snapshot_time.asc(),
+        snapshot_alias.account_id.asc(),
+    ).all()
+
+    result: List[Dict] = []
+
+    for acct_id, total_margin, available, unrealized_pnl, snapshot_time in rows:
+        account = account_map.get(acct_id)
+        if not account:
+            continue
+
+        timestamp = _to_utc_timestamp(snapshot_time)
+
+        result.append({
+            "timestamp": timestamp,
+            "datetime_str": _ensure_utc(snapshot_time).strftime("%Y-%m-%d %H:%M:%S"),
+            "account_id": acct_id,
+            "username": account.name,
+            "user_id": account.user_id,
+            "total_assets": float(total_margin),
+            "cash": float(available),
+            "positions_value": float(unrealized_pnl) if unrealized_pnl else 0.0,
+            "wallet_address": None,
+            "exchange": "binance",
+        })
+
+    result.sort(key=lambda item: (item["timestamp"], item["account_id"]))
+    return result

@@ -73,6 +73,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
   const accounts = positionsData?.accounts?.map((acc: any) => ({
     account_id: acc.account_id,
     account_name: acc.account_name,
+    exchange: acc.exchange || 'hyperliquid',
   })) || []
 
   // Extract all positions with account_id for the summary component
