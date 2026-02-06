@@ -59,8 +59,8 @@
     "noneMatched": "以上条件均未匹配"
   },
   "trade": {
-    "title": "Hyperliquid 交易",
-    "subtitle": "手动交易操作",
+    "title": "手动交易",
+    "subtitle": "手动交易主要用于熟悉交易规则以及手动平仓",
     "refreshingData": "正在刷新持仓和余额",
     "loadingWallet": "正在加载钱包数据...",
     "overview": "概览",
@@ -81,7 +81,12 @@
     "tip4": "交易前检查清算价格",
     "tip5": "平仓以释放保证金",
     "walletDisabled": "钱包已禁用",
-    "walletDisabledDesc": "请在AI交易员管理页面重新启用此钱包后再进行交易。"
+    "walletDisabledDesc": "请在AI交易员管理页面重新启用此钱包后再进行交易。",
+    "selectExchange": "交易所",
+    "selectWallet": "选择交易钱包",
+    "noWalletsAvailable": "暂无可用钱包",
+    "noWalletsHint": "请先为您的AI交易员配置钱包。",
+    "loadingWallets": "正在加载钱包..."
   },
   "aiPrompt": {
     "title": "AI策略提示词生成器",
@@ -874,7 +879,7 @@
     "noDataCollected": "尚未采集数据"
   },
   "order": {
-    "title": "手动下单（Hyperliquid）",
+    "title": "手动下单",
     "description": "永续合约手动下单",
     "symbol": "交易对",
     "side": "方向",

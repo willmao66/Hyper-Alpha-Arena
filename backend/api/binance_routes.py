@@ -72,6 +72,8 @@ class ManualOrderRequest(BaseModel):
     price: Optional[float] = Field(None, gt=0)
     leverage: int = Field(1, ge=1, le=125)
     reduce_only: bool = Field(False, alias="reduceOnly")
+    take_profit_price: Optional[float] = Field(None, gt=0, alias="takeProfitPrice")
+    stop_loss_price: Optional[float] = Field(None, gt=0, alias="stopLossPrice")
 
     class Config:
         populate_by_name = True
@@ -258,6 +260,7 @@ async def place_order(
     db: Session = Depends(get_db)
 ):
     """Place a manual order on Binance Futures"""
+    print(f"[BINANCE DEBUG] place_order request: tp={request.take_profit_price}, sl={request.stop_loss_price}")
     if not environment:
         environment = get_global_trading_mode(db)
 
@@ -288,6 +291,75 @@ async def place_order(
             leverage=request.leverage,
             reduce_only=request.reduce_only
         )
+
+        # Place TP/SL orders if main order succeeded and not reduce_only
+        # For MARKET orders, status may be "NEW" initially but will fill immediately
+        tp_result = None
+        sl_result = None
+        order_status = result.get("status")
+        main_order_id = result.get("order_id")
+        is_market_order = request.order_type.upper() == "MARKET"
+        should_place_tpsl = (
+            not request.reduce_only and
+            order_status in ["FILLED", "NEW"]  # Support both MARKET and LIMIT orders
+        )
+
+        logger.info(f"TP/SL check: status={order_status}, is_market={is_market_order}, reduce_only={request.reduce_only}, should_place={should_place_tpsl}, tp={request.take_profit_price}, sl={request.stop_loss_price}")
+        print(f"[BINANCE DEBUG] TP/SL check: should_place={should_place_tpsl}, tp={request.take_profit_price}, sl={request.stop_loss_price}")
+
+        if should_place_tpsl:
+            executed_qty = result.get("executed_qty") or request.quantity
+            # Determine close side (opposite of entry)
+            close_side = "SELL" if request.side == "BUY" else "BUY"
+            logger.info(f"Placing TP/SL: executed_qty={executed_qty}, close_side={close_side}")
+            print(f"[BINANCE DEBUG] Placing TP/SL: executed_qty={executed_qty}, close_side={close_side}")
+
+            # Place Take Profit order with client_algo_id for association
+            if request.take_profit_price and request.take_profit_price > 0:
+                logger.info(f"Attempting TP order: symbol={request.symbol}, price={request.take_profit_price}")
+                print(f"[BINANCE DEBUG] Attempting TP order: symbol={request.symbol}, price={request.take_profit_price}")
+                try:
+                    tp_result = client.place_stop_order(
+                        symbol=request.symbol,
+                        side=close_side,
+                        quantity=executed_qty,
+                        stop_price=request.take_profit_price,
+                        order_type="TAKE_PROFIT_MARKET",
+                        reduce_only=True,
+                        client_algo_id=f"TP_{main_order_id}" if main_order_id else None
+                    )
+                    logger.info(f"TP order placed: algo_id={tp_result.get('algo_id')}")
+                    print(f"[BINANCE DEBUG] TP order placed: algo_id={tp_result.get('algo_id')}")
+                except Exception as e:
+                    logger.error(f"Failed to place TP order: {e}", exc_info=True)
+                    print(f"[BINANCE DEBUG] TP order FAILED: {e}")
+
+            # Place Stop Loss order with client_algo_id for association
+            if request.stop_loss_price and request.stop_loss_price > 0:
+                logger.warning(f"Attempting SL order: symbol={request.symbol}, price={request.stop_loss_price}")
+                print(f"[BINANCE DEBUG] Attempting SL order: symbol={request.symbol}, price={request.stop_loss_price}")
+                try:
+                    sl_result = client.place_stop_order(
+                        symbol=request.symbol,
+                        side=close_side,
+                        quantity=executed_qty,
+                        stop_price=request.stop_loss_price,
+                        order_type="STOP_MARKET",
+                        reduce_only=True,
+                        client_algo_id=f"SL_{main_order_id}" if main_order_id else None
+                    )
+                    logger.warning(f"SL order placed: algo_id={sl_result.get('algo_id')}")
+                    print(f"[BINANCE DEBUG] SL order placed: algo_id={sl_result.get('algo_id')}")
+                except Exception as e:
+                    logger.error(f"Failed to place SL order: {e}", exc_info=True)
+                    print(f"[BINANCE DEBUG] SL order FAILED: {e}")
+            else:
+                logger.warning(f"SL order skipped: stop_loss_price={request.stop_loss_price}")
+                print(f"[BINANCE DEBUG] SL order skipped: stop_loss_price={request.stop_loss_price}")
+
+        # Add TP/SL results to response
+        result["tp_order"] = tp_result
+        result["sl_order"] = sl_result
         return result
     except Exception as e:
         logger.error(f"Order failed: {e}")
@@ -419,3 +491,74 @@ async def get_rate_limit(
     except Exception as e:
         logger.error(f"Failed to get rate limit: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/price/{symbol}")
+async def get_price(symbol: str):
+    """
+    Get current price for a symbol from Binance Futures.
+    This is a public endpoint that doesn't require authentication.
+    """
+    import requests
+    try:
+        binance_symbol = symbol.upper()
+        if not binance_symbol.endswith("USDT"):
+            binance_symbol = f"{binance_symbol}USDT"
+
+        # Use public API endpoint (no auth required)
+        url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={binance_symbol}"
+        response = requests.get(url, timeout=5)
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Failed to get price")
+
+        data = response.json()
+        return {
+            "symbol": symbol.upper(),
+            "price": float(data.get("price", 0)),
+            "binance_symbol": binance_symbol
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to get Binance price: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/wallets/all")
+async def get_all_binance_wallets(db: Session = Depends(get_db)):
+    """
+    Get all Binance wallets across all accounts for manual trading page.
+    Returns wallet info with masked API keys.
+    """
+    wallets = db.query(BinanceWallet).filter(
+        BinanceWallet.is_active == "true"
+    ).all()
+
+    result = []
+    for wallet in wallets:
+        account = db.query(Account).filter(Account.id == wallet.account_id).first()
+        if not account:
+            continue
+
+        # Mask API key for display
+        try:
+            api_key = decrypt_private_key(wallet.api_key_encrypted)
+            if len(api_key) > 8:
+                masked_key = f"{api_key[:4]}****{api_key[-4:]}"
+            else:
+                masked_key = "****"
+        except:
+            masked_key = "****"
+
+        result.append({
+            "wallet_id": wallet.id,
+            "account_id": wallet.account_id,
+            "account_name": account.name,
+            "model": account.model,
+            "api_key_masked": masked_key,
+            "environment": wallet.environment,
+            "is_active": wallet.is_active == "true",
+            "max_leverage": wallet.max_leverage,
+            "default_leverage": wallet.default_leverage,
+        })
+
+    return result

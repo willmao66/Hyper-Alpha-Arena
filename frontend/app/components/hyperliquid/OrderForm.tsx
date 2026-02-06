@@ -18,13 +18,19 @@ import {
   getHyperliquidBalance,
   getCurrentPrice,
   getHyperliquidPositions,
+  getBinanceBalance,
+  getBinancePositions,
+  getBinancePrice,
+  placeBinanceOrder,
 } from '@/lib/hyperliquidApi';
 import type { ManualOrderRequest, HyperliquidBalance, HyperliquidPosition } from '@/lib/types/hyperliquid';
 import { useTranslation } from 'react-i18next';
+import type { ExchangeType } from './WalletSelector';
 
 interface OrderFormProps {
   accountId: number;
   environment: 'testnet' | 'mainnet';
+  exchange: ExchangeType;
   availableSymbols: string[];
   maxLeverage: number;
   defaultLeverage: number;
@@ -37,6 +43,7 @@ type TimeInForce = 'Ioc' | 'Gtc' | 'Alo';
 export default function OrderForm({
   accountId,
   environment,
+  exchange,
   availableSymbols,
   maxLeverage,
   defaultLeverage,
@@ -59,7 +66,7 @@ export default function OrderForm({
   useEffect(() => {
     loadBalance();
     loadPositions();
-  }, [accountId]);
+  }, [accountId, exchange]);
 
   useEffect(() => {
     setLeverage(defaultLeverage);
@@ -67,11 +74,10 @@ export default function OrderForm({
 
   useEffect(() => {
     loadCurrentPrice();
-  }, [symbol]);
+  }, [symbol, exchange]);
 
   useEffect(() => {
     if (currentPrice > 0 && !price) {
-      // Auto-fill price based on side (slightly favorable to get filled)
       const adjustedPrice = side === 'long' ? currentPrice * 1.001 : currentPrice * 0.999;
       setPrice(adjustedPrice.toFixed(2));
     }
@@ -79,7 +85,9 @@ export default function OrderForm({
 
   const loadBalance = async () => {
     try {
-      const data = await getHyperliquidBalance(accountId, environment);
+      const data = exchange === 'hyperliquid'
+        ? await getHyperliquidBalance(accountId, environment)
+        : await getBinanceBalance(accountId, environment);
       setBalance(data);
     } catch (error) {
       console.error('Failed to load balance:', error);
@@ -88,8 +96,10 @@ export default function OrderForm({
 
   const loadCurrentPrice = async () => {
     try {
-      const price = await getCurrentPrice(symbol);
-      setCurrentPrice(price);
+      const priceValue = exchange === 'hyperliquid'
+        ? await getCurrentPrice(symbol)
+        : await getBinancePrice(symbol);
+      setCurrentPrice(priceValue);
     } catch (error) {
       console.error('Failed to load current price:', error);
     }
@@ -97,8 +107,10 @@ export default function OrderForm({
 
   const loadPositions = async () => {
     try {
-      const data = await getHyperliquidPositions(accountId, environment);
-      setPositions(data);
+      const data = exchange === 'hyperliquid'
+        ? await getHyperliquidPositions(accountId, environment)
+        : await getBinancePositions(accountId, environment);
+      setPositions(data.positions || []);
     } catch (error) {
       console.error('Failed to load positions:', error);
     }
@@ -183,51 +195,64 @@ export default function OrderForm({
       if (side === 'close') {
         const position = getCurrentPosition();
         if (position) {
-          // Close long position = sell (is_buy: false)
-          // Close short position = buy (is_buy: true)
-          isBuy = position.szi < 0; // If short position (negative), buy to close
+          isBuy = position.szi < 0;
         }
       }
 
-      const request: ManualOrderRequest = {
-        symbol,
-        is_buy: isBuy,
-        size: parseFloat(size),
-        price: parseFloat(price),
-        time_in_force: timeInForce,
-        reduce_only: side === 'close',
-        leverage: side !== 'close' ? leverage : 1,
-        take_profit_price: takeProfitPrice && parseFloat(takeProfitPrice) > 0 ? parseFloat(takeProfitPrice) : undefined,
-        stop_loss_price: stopLossPrice && parseFloat(stopLossPrice) > 0 ? parseFloat(stopLossPrice) : undefined,
-        environment,
-      };
+      let result: any;
 
-      const result = await placeManualOrder(accountId, request);
+      if (exchange === 'hyperliquid') {
+        const request: ManualOrderRequest = {
+          symbol,
+          is_buy: isBuy,
+          size: parseFloat(size),
+          price: parseFloat(price),
+          time_in_force: timeInForce,
+          reduce_only: side === 'close',
+          leverage: side !== 'close' ? leverage : 1,
+          take_profit_price: takeProfitPrice && parseFloat(takeProfitPrice) > 0 ? parseFloat(takeProfitPrice) : undefined,
+          stop_loss_price: stopLossPrice && parseFloat(stopLossPrice) > 0 ? parseFloat(stopLossPrice) : undefined,
+          environment,
+        };
+        result = await placeManualOrder(accountId, request);
 
-      const orderResult = result.order_result || result;
-      const avgPrice = orderResult.averagePrice || orderResult.average_price || orderResult.price;
-      const priceText = avgPrice ? ` @ $${avgPrice.toFixed(2)}` : '';
+        const orderResult = result.order_result || result;
+        const avgPrice = orderResult.averagePrice || orderResult.average_price || orderResult.price;
+        const priceText = avgPrice ? ` @ $${avgPrice.toFixed(2)}` : '';
+        const status = orderResult.status;
 
-      // 根据Hyperliquid状态判断订单结果
-      const status = orderResult.status;
-
-      if (status === 'filled') {
-        toast.success(
-          `Order Filled! ${side.toUpperCase()} ${size} ${symbol}${priceText}`
-        );
-      } else if (status === 'resting') {
-        toast.success(
-          `Order Placed! ${side.toUpperCase()} ${size} ${symbol}${priceText} (waiting to fill)`
-        );
-      } else if (status === 'error') {
-        toast.error(
-          `Order failed: ${orderResult.error || 'Unknown error'}`
-        );
+        if (status === 'filled') {
+          toast.success(`Order Filled! ${side.toUpperCase()} ${size} ${symbol}${priceText}`);
+        } else if (status === 'resting') {
+          toast.success(`Order Placed! ${side.toUpperCase()} ${size} ${symbol}${priceText} (waiting to fill)`);
+        } else if (status === 'error') {
+          toast.error(`Order failed: ${orderResult.error || 'Unknown error'}`);
+        } else {
+          toast.error(`Order failed: Unknown status (${status})`);
+        }
       } else {
-        // 未知状态，显示为错误
-        toast.error(
-          `Order failed: Unknown status (${status})`
-        );
+        // Binance order
+        result = await placeBinanceOrder(accountId, {
+          symbol,
+          side: isBuy ? 'BUY' : 'SELL',
+          quantity: parseFloat(size),
+          orderType: timeInForce === 'Ioc' ? 'MARKET' : 'LIMIT',
+          price: timeInForce !== 'Ioc' ? parseFloat(price) : undefined,
+          leverage: side !== 'close' ? leverage : 1,
+          reduceOnly: side === 'close',
+          takeProfitPrice: takeProfitPrice && parseFloat(takeProfitPrice) > 0 ? parseFloat(takeProfitPrice) : undefined,
+          stopLossPrice: stopLossPrice && parseFloat(stopLossPrice) > 0 ? parseFloat(stopLossPrice) : undefined,
+        }, environment);
+
+        const status = result.status;
+        const avgPrice = result.avg_price || result.price;
+        const priceText = avgPrice ? ` @ $${avgPrice.toFixed(2)}` : '';
+
+        if (status === 'FILLED' || status === 'NEW') {
+          toast.success(`Order ${status}! ${side.toUpperCase()} ${size} ${symbol}${priceText}`);
+        } else {
+          toast.error(`Order failed: ${result.error || status || 'Unknown error'}`);
+        }
       }
 
       // Reset form

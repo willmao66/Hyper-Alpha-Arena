@@ -29,6 +29,7 @@ export interface Position {
   unrealized_pnl: number
   leverage: number
   account_id: number
+  exchange?: string  // 'hyperliquid' | 'binance'
 }
 
 interface RateLimitData {
@@ -287,9 +288,9 @@ export default function HyperliquidMultiAccountSummary({
     loadAllBalances()
   }, [filteredAccounts, tradingMode, refreshKey])
 
-  // Get positions for a specific account
-  const getAccountPositions = (accountId: number) => {
-    return positions.filter(p => p.account_id === accountId)
+  // Get positions for a specific account and exchange
+  const getAccountPositions = (accountId: number, exchange: string) => {
+    return positions.filter(p => p.account_id === accountId && (p.exchange || 'hyperliquid') === exchange)
   }
 
   // Handle opening modal
@@ -362,7 +363,7 @@ export default function HyperliquidMultiAccountSummary({
           const marginStatus = account.balance
             ? getMarginStatus(account.balance.marginUsagePercent, t)
             : null
-          const accountPositions = getAccountPositions(account.accountId)
+          const accountPositions = getAccountPositions(account.accountId, account.exchange)
           const isBinance = account.exchange === 'binance'
           const exchangeLogo = isBinance ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'
 
@@ -526,7 +527,7 @@ export default function HyperliquidMultiAccountSummary({
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           account={selectedTraderForModal}
-          positions={getAccountPositions(selectedTraderForModal.accountId)}
+          positions={getAccountPositions(selectedTraderForModal.accountId, selectedTraderForModal.exchange)}
           environment={environment}
         />
       )}

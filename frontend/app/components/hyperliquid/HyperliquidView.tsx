@@ -76,7 +76,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
     exchange: acc.exchange || 'hyperliquid',
   })) || []
 
-  // Extract all positions with account_id for the summary component
+  // Extract all positions with account_id and exchange for the summary component
   const allPositions = positionsData?.accounts?.flatMap((acc: any) =>
     (acc.positions || []).map((pos: any) => ({
       symbol: pos.symbol,
@@ -87,6 +87,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
       unrealized_pnl: pos.unrealized_pnl,
       leverage: pos.leverage || 1,
       account_id: acc.account_id,
+      exchange: acc.exchange || 'hyperliquid',
     }))
   ) || []
 

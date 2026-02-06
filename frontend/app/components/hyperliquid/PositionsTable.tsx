@@ -14,22 +14,27 @@ import {
 import { RefreshCw, TrendingUp, TrendingDown, X } from 'lucide-react';
 import {
   getHyperliquidPositions,
+  getBinancePositions,
   placeManualOrder,
+  closeBinancePosition,
   getPositionSide,
   formatPnl,
   formatLeverage,
   getCurrentPrice,
+  getBinancePrice,
 } from '@/lib/hyperliquidApi';
 import type { PositionDisplay } from '@/lib/types/hyperliquid';
+import type { ExchangeType } from './WalletSelector';
 import { cn } from '@/lib/utils';
 import { formatTime } from '@/lib/dateTime';
 
 interface PositionsTableProps {
   accountId: number;
   environment: 'testnet' | 'mainnet';
+  exchange?: ExchangeType;
   autoRefresh?: boolean;
   refreshInterval?: number;
-  refreshTrigger?: number; // external trigger for forced refresh
+  refreshTrigger?: number;
   onPositionClosed?: () => void;
   className?: string;
   showRefreshButton?: boolean;
@@ -38,6 +43,7 @@ interface PositionsTableProps {
 export default function PositionsTable({
   accountId,
   environment,
+  exchange = 'hyperliquid',
   autoRefresh = false,
   refreshInterval = 300,
   refreshTrigger,
@@ -58,13 +64,15 @@ export default function PositionsTable({
       const interval = setInterval(loadPositions, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [accountId, environment, autoRefresh, refreshInterval, refreshTrigger]);
+  }, [accountId, environment, exchange, autoRefresh, refreshInterval, refreshTrigger]);
 
   const loadPositions = async (forceRefresh?: boolean) => {
     try {
       setLoading(true);
-      const data = await getHyperliquidPositions(accountId, environment, forceRefresh);
-      // Transform positions to display format
+      const data = exchange === 'hyperliquid'
+        ? await getHyperliquidPositions(accountId, environment, forceRefresh)
+        : await getBinancePositions(accountId, environment);
+
       const displayPositions: PositionDisplay[] = data.positions.map((pos) => {
         const side = getPositionSide(pos.szi);
         const sizeAbs = Math.abs(pos.szi);
@@ -111,33 +119,42 @@ export default function PositionsTable({
     setClosingPositionId(positionId);
 
     try {
-      const marketPrice = await getCurrentPrice(position.coin);
-      const executionPrice = marketPrice || position.entryPx || 0;
+      if (exchange === 'hyperliquid') {
+        const marketPrice = await getCurrentPrice(position.coin);
+        const executionPrice = marketPrice || position.entryPx || 0;
 
-      if (!executionPrice || executionPrice <= 0) {
-        throw new Error('Unable to determine market price for closing the position');
-      }
+        if (!executionPrice || executionPrice <= 0) {
+          throw new Error('Unable to determine market price for closing the position');
+        }
 
-      const response = await placeManualOrder(accountId, {
-        symbol: position.coin,
-        is_buy: position.side === 'SHORT', // Opposite side to close
-        size: position.sizeAbs,
-        price: executionPrice,
-        time_in_force: 'Ioc',
-        leverage: 1,
-        reduce_only: true,
-        environment,
-      });
+        const response = await placeManualOrder(accountId, {
+          symbol: position.coin,
+          is_buy: position.side === 'SHORT',
+          size: position.sizeAbs,
+          price: executionPrice,
+          time_in_force: 'Ioc',
+          leverage: 1,
+          reduce_only: true,
+          environment,
+        });
 
-      // Check if order was actually filled
-      const orderStatus = response?.order_result?.main_order?.status;
-      if (orderStatus === 'filled') {
-        toast.success(`Closed ${position.side} position for ${position.coin}`);
+        const orderStatus = response?.order_result?.main_order?.status;
+        if (orderStatus === 'filled') {
+          toast.success(`Closed ${position.side} position for ${position.coin}`);
+        } else {
+          toast.error(`Failed to close position: order status is "${orderStatus || 'unknown'}". Try again or adjust price.`);
+          return;
+        }
       } else {
-        // Order was not filled (e.g., IOC order couldn't match)
-        toast.error(`Failed to close position: order status is "${orderStatus || 'unknown'}". Try again or adjust price.`);
-        return;
+        // Binance close position
+        const response = await closeBinancePosition(accountId, position.coin, environment);
+        if (response.message?.includes('No position')) {
+          toast.error('No position to close');
+          return;
+        }
+        toast.success(`Closed ${position.side} position for ${position.coin}`);
       }
+
       await loadPositions();
 
       if (onPositionClosed) {

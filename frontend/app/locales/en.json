@@ -56,8 +56,8 @@
     "noneMatched": "None of the above matched"
   },
   "trade": {
-    "title": "Hyperliquid Trade",
-    "subtitle": "Manual Trading Operations",
+    "title": "Manual Trading",
+    "subtitle": "Manual trading for learning rules and closing positions",
     "refreshingData": "Refreshing positions and balance",
     "loadingWallet": "Loading wallet data...",
     "overview": "Overview",
@@ -78,7 +78,12 @@
     "tip4": "Check liquidation price before trading",
     "tip5": "Close positions to free up margin",
     "walletDisabled": "Wallet Disabled",
-    "walletDisabledDesc": "Please re-enable this wallet in the AI Traders management page before trading."
+    "walletDisabledDesc": "Please re-enable this wallet in the AI Traders management page before trading.",
+    "selectExchange": "Exchange",
+    "selectWallet": "Select Trading Wallet",
+    "noWalletsAvailable": "No Wallets Available",
+    "noWalletsHint": "Please configure wallets for your AI Traders first.",
+    "loadingWallets": "Loading wallets..."
   },
   "aiPrompt": {
     "title": "AI Strategy Prompt Generator",
@@ -855,7 +860,7 @@
     "noDataCollected": "No data collected yet"
   },
   "order": {
-    "title": "Place Hyperliquid Order (Manual)",
+    "title": "Place Order (Manual)",
     "description": "Manual order placement for perpetual contracts",
     "symbol": "Symbol",
     "side": "Side",

@@ -128,6 +128,8 @@ class BinanceTradingClient:
         try:
             if method == "GET":
                 response = self.session.get(url, params=params, timeout=10)
+            elif method == "DELETE":
+                response = self.session.delete(url, params=params, timeout=10)
             else:
                 response = self.session.post(url, data=params, timeout=10)
 
@@ -288,17 +290,23 @@ class BinanceTradingClient:
             - used_margin: Total initial margin
             - maintenance_margin: Total maintenance margin
             - unrealized_pnl: Total unrealized profit
+            - margin_usage_percent: Margin usage percentage
         """
         account = self.get_account()
 
+        total_equity = float(account.get("totalMarginBalance", 0))
+        used_margin = float(account.get("totalInitialMargin", 0))
+        margin_usage_percent = (used_margin / total_equity * 100) if total_equity > 0 else 0.0
+
         return {
             "environment": self.environment,
-            "total_equity": float(account.get("totalMarginBalance", 0)),
+            "total_equity": total_equity,
             "available_balance": float(account.get("availableBalance", 0)),
-            "used_margin": float(account.get("totalInitialMargin", 0)),
+            "used_margin": used_margin,
             "maintenance_margin": float(account.get("totalMaintMargin", 0)),
             "unrealized_pnl": float(account.get("totalUnrealizedProfit", 0)),
             "total_wallet_balance": float(account.get("totalWalletBalance", 0)),
+            "margin_usage_percent": round(margin_usage_percent, 1),
             "timestamp": self._get_timestamp(),
             "source": "live"
         }
@@ -307,6 +315,9 @@ class BinanceTradingClient:
         """
         Get all open positions with unified field format (compatible with Hyperliquid).
 
+        Uses /fapi/v3/positionRisk endpoint which provides complete position data
+        including entryPrice, markPrice, and liquidationPrice.
+
         Returns:
             List of position dicts with unified format matching Hyperliquid:
             - coin: Symbol without suffix (e.g., "BTC")
@@ -314,15 +325,16 @@ class BinanceTradingClient:
             - entry_px: Average entry price
             - position_value: Notional value
             - unrealized_pnl: Position PnL
-            - leverage: Position leverage
+            - leverage: Position leverage (calculated from notional/margin)
             - liquidation_px: Estimated liquidation price
             - margin_used: Initial margin
             - leverage_type: "cross" or "isolated"
         """
-        account = self.get_account()
+        # Use positionRisk endpoint for complete position data
+        position_risk = self._request("GET", "/fapi/v3/positionRisk", signed=True)
         positions = []
 
-        for pos in account.get("positions", []):
+        for pos in position_risk:
             position_amt = float(pos.get("positionAmt", 0))
             if position_amt == 0:
                 continue  # Skip empty positions
@@ -333,24 +345,29 @@ class BinanceTradingClient:
                 symbol = symbol[:-4]
 
             entry_price = float(pos.get("entryPrice", 0))
-            notional = float(pos.get("notional", 0))
-            leverage = int(pos.get("leverage", 1))
+            notional = abs(float(pos.get("notional", 0)))
+            initial_margin = float(pos.get("initialMargin", 0))
 
-            # Calculate position value if notional is 0
-            if notional == 0 and entry_price > 0:
-                notional = abs(position_amt) * entry_price
+            # Calculate leverage from notional / initialMargin
+            leverage = 1
+            if initial_margin > 0:
+                leverage = round(notional / initial_margin)
+
+            # Determine margin type from isolatedMargin field
+            isolated_margin = float(pos.get("isolatedMargin", 0))
+            leverage_type = "isolated" if isolated_margin > 0 else "cross"
 
             positions.append({
                 # Unified fields (Hyperliquid-compatible)
                 "coin": symbol,
                 "szi": position_amt,
                 "entry_px": entry_price,
-                "position_value": abs(notional),
-                "unrealized_pnl": float(pos.get("unrealizedProfit", 0)),
+                "position_value": notional,
+                "unrealized_pnl": float(pos.get("unRealizedProfit", 0)),
                 "leverage": leverage,
                 "liquidation_px": float(pos.get("liquidationPrice", 0)),
-                "margin_used": float(pos.get("initialMargin", 0)),
-                "leverage_type": pos.get("marginType", "cross"),
+                "margin_used": initial_margin,
+                "leverage_type": leverage_type,
                 # Additional Binance-specific fields (for reference)
                 "symbol": symbol,  # Alias for coin
                 "mark_price": float(pos.get("markPrice", 0)),
@@ -480,10 +497,14 @@ class BinanceTradingClient:
         stop_price: float,
         order_type: str = "STOP_MARKET",
         reduce_only: bool = True,
-        working_type: str = "MARK_PRICE"
+        working_type: str = "MARK_PRICE",
+        client_algo_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Place a stop-loss or take-profit order.
+        Place a stop-loss or take-profit order using Algo Order API.
+
+        Since 2025-12-09, Binance migrated conditional orders to Algo Service.
+        This method uses /fapi/v1/algoOrder endpoint.
 
         Args:
             symbol: Trading pair (e.g., 'BTC')
@@ -493,9 +514,10 @@ class BinanceTradingClient:
             order_type: 'STOP_MARKET' or 'TAKE_PROFIT_MARKET'
             reduce_only: Only reduce position (default True for SL/TP)
             working_type: 'MARK_PRICE' or 'CONTRACT_PRICE'
+            client_algo_id: Custom ID for order association (e.g., 'TP_123' or 'SL_123')
 
         Returns:
-            Order result dict
+            Order result dict with algo_id for tracking
         """
         binance_symbol = self._to_binance_symbol(symbol)
         precision = self._get_precision(binance_symbol)
@@ -507,31 +529,34 @@ class BinanceTradingClient:
             "symbol": binance_symbol,
             "side": side.upper(),
             "type": order_type.upper(),
+            "algoType": "CONDITIONAL",
             "quantity": str(rounded_qty),
-            "stopPrice": str(rounded_stop),
+            "triggerPrice": str(rounded_stop),
             "workingType": working_type,
-            "newClientOrderId": f"x-{self.broker_id}-{self._get_timestamp()}"
         }
+
+        if client_algo_id:
+            params["clientAlgoId"] = client_algo_id
 
         if reduce_only:
             params["reduceOnly"] = "true"
 
-        result = self._request("POST", "/fapi/v1/order", params, signed=True)
+        result = self._request("POST", "/fapi/v1/algoOrder", params, signed=True)
 
         logger.info(
-            f"[BINANCE] Stop order placed: {order_type} {side} {rounded_qty} "
-            f"{binance_symbol} @ {rounded_stop}"
+            f"[BINANCE] Algo order placed: {order_type} {side} {rounded_qty} "
+            f"{binance_symbol} trigger@{rounded_stop} algoId={result.get('algoId')}"
         )
 
         return {
-            "order_id": result.get("orderId"),
-            "client_order_id": result.get("clientOrderId"),
+            "algo_id": result.get("algoId"),
+            "client_algo_id": result.get("clientAlgoId"),
             "symbol": symbol,
             "side": side,
             "type": order_type,
             "quantity": float(rounded_qty),
-            "stop_price": float(rounded_stop),
-            "status": result.get("status"),
+            "trigger_price": float(rounded_stop),
+            "status": result.get("algoStatus"),
             "working_type": working_type,
             "reduce_only": reduce_only,
             "environment": self.environment,
@@ -579,6 +604,77 @@ class BinanceTradingClient:
         logger.info(f"[BINANCE] All orders cancelled for {binance_symbol}")
         return result
 
+    def get_open_algo_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get all open Algo orders (TP/SL conditional orders).
+
+        Args:
+            symbol: Optional symbol filter
+
+        Returns:
+            List of open algo orders
+        """
+        params = {}
+        if symbol:
+            params["symbol"] = self._to_binance_symbol(symbol)
+
+        result = self._request("GET", "/fapi/v1/openAlgoOrders", params, signed=True)
+        return result.get("orders", []) if isinstance(result, dict) else result
+
+    def cancel_algo_order(self, symbol: str, algo_id: int) -> Dict[str, Any]:
+        """
+        Cancel a specific Algo order.
+
+        Args:
+            symbol: Trading pair
+            algo_id: Algo order ID
+
+        Returns:
+            Cancellation result
+        """
+        binance_symbol = self._to_binance_symbol(symbol)
+        params = {
+            "symbol": binance_symbol,
+            "algoId": algo_id
+        }
+        result = self._request("DELETE", "/fapi/v1/algoOrder", params, signed=True)
+        logger.info(f"[BINANCE] Algo order {algo_id} cancelled for {binance_symbol}")
+        return result
+
+    def cancel_all_algo_orders(self, symbol: str) -> Dict[str, Any]:
+        """
+        Cancel all open Algo orders (TP/SL) for a symbol.
+
+        Args:
+            symbol: Trading pair
+
+        Returns:
+            Dict with cancelled count and details
+        """
+        binance_symbol = self._to_binance_symbol(symbol)
+        algo_orders = self.get_open_algo_orders(symbol)
+
+        cancelled = []
+        errors = []
+
+        for order in algo_orders:
+            algo_id = order.get("algoId")
+            if algo_id:
+                try:
+                    self.cancel_algo_order(symbol, algo_id)
+                    cancelled.append(algo_id)
+                except Exception as e:
+                    logger.warning(f"[BINANCE] Failed to cancel algo order {algo_id}: {e}")
+                    errors.append({"algo_id": algo_id, "error": str(e)})
+
+        logger.info(f"[BINANCE] Cancelled {len(cancelled)} algo orders for {binance_symbol}")
+        return {
+            "symbol": symbol,
+            "cancelled_count": len(cancelled),
+            "cancelled_ids": cancelled,
+            "errors": errors
+        }
+
     def get_open_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get all open orders, optionally filtered by symbol."""
         params = {}
@@ -612,9 +708,13 @@ class BinanceTradingClient:
         result = self._request("GET", "/fapi/v1/premiumIndex", {"symbol": binance_symbol})
         return float(result.get("markPrice", 0))
 
-    def close_position(self, symbol: str) -> Optional[Dict[str, Any]]:
+    def close_position(self, symbol: str, cancel_tpsl: bool = True) -> Optional[Dict[str, Any]]:
         """
         Close entire position for a symbol using market order.
+
+        Args:
+            symbol: Trading pair symbol
+            cancel_tpsl: If True, also cancel associated TP/SL algo orders
 
         Returns:
             Order result if position exists, None if no position
@@ -622,21 +722,34 @@ class BinanceTradingClient:
         positions = self.get_positions()
         position = next((p for p in positions if p["symbol"] == symbol.upper()), None)
 
-        if not position or position["position_size"] == 0:
+        if not position or position["szi"] == 0:
             logger.info(f"[BINANCE] No position to close for {symbol}")
             return None
 
         # Determine side to close
-        size = abs(position["position_size"])
-        side = "SELL" if position["position_size"] > 0 else "BUY"
+        size = abs(position["szi"])
+        side = "SELL" if position["szi"] > 0 else "BUY"
 
-        return self.place_order(
+        # Place market order to close position
+        result = self.place_order(
             symbol=symbol,
             side=side,
             quantity=size,
             order_type="MARKET",
             reduce_only=True
         )
+
+        # Cancel associated TP/SL algo orders
+        if cancel_tpsl:
+            try:
+                algo_result = self.cancel_all_algo_orders(symbol)
+                result["cancelled_algo_orders"] = algo_result
+                logger.info(f"[BINANCE] Closed position and cancelled {algo_result['cancelled_count']} TP/SL orders for {symbol}")
+            except Exception as e:
+                logger.warning(f"[BINANCE] Position closed but failed to cancel TP/SL: {e}")
+                result["cancelled_algo_orders"] = {"error": str(e)}
+
+        return result
 
     def get_account_state(self, db=None) -> Dict[str, Any]:
         """
