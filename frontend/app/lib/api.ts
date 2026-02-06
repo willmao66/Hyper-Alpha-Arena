@@ -842,6 +842,7 @@ export interface ArenaPositionsAccount {
   account_name: string
   model?: string | null
   environment?: string | null
+  exchange?: string
   wallet_address?: string | null
   total_unrealized_pnl: number
   available_cash: number
@@ -873,6 +874,7 @@ export async function getArenaPositions(params?: { account_id?: number; trading_
         account_name: account.account_name ?? '',
         model: account.model ?? null,
         environment: account.environment ?? null,
+        exchange: account.exchange ?? 'hyperliquid',
         wallet_address: account.wallet_address ?? null,
         total_unrealized_pnl: Number(account.total_unrealized_pnl ?? 0),
         available_cash: Number(account.available_cash ?? 0),

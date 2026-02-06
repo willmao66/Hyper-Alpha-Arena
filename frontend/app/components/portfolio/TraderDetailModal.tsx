@@ -61,21 +61,22 @@ export default function TraderDetailModal({
   const [refreshingRateLimit, setRefreshingRateLimit] = useState(false)
   const [refreshingStats, setRefreshingStats] = useState(false)
 
+  const isBinance = (account.exchange || 'hyperliquid') === 'binance'
+  const accountExchange = account.exchange || 'hyperliquid'
+
   // When modal opens, read latest data from cache (fixes stale data after refresh)
   useEffect(() => {
     if (isOpen) {
       // Read from cache first (may have been updated by previous refresh)
-      const cachedRateLimit = getCachedData<RateLimitData>(getApiUsageCacheKey(account.accountId, environment))
-      const cachedStats = getCachedData<TradingStats>(getTradingStatsCacheKey(account.accountId, environment))
+      const cachedRateLimit = getCachedData<RateLimitData>(getApiUsageCacheKey(account.accountId, environment, accountExchange))
+      const cachedStats = getCachedData<TradingStats>(getTradingStatsCacheKey(account.accountId, environment, accountExchange))
 
       setRateLimit(cachedRateLimit || account.rateLimit)
-      setRateLimitUpdated(cachedRateLimit ? getCacheTimestamp(getApiUsageCacheKey(account.accountId, environment)) : account.rateLimitUpdated)
+      setRateLimitUpdated(cachedRateLimit ? getCacheTimestamp(getApiUsageCacheKey(account.accountId, environment, accountExchange)) : account.rateLimitUpdated)
       setTradingStats(cachedStats || account.tradingStats)
-      setTradingStatsUpdated(cachedStats ? getCacheTimestamp(getTradingStatsCacheKey(account.accountId, environment)) : account.tradingStatsUpdated)
+      setTradingStatsUpdated(cachedStats ? getCacheTimestamp(getTradingStatsCacheKey(account.accountId, environment, accountExchange)) : account.tradingStatsUpdated)
     }
-  }, [isOpen, account.accountId, environment])
-
-  const isBinance = (account.exchange || 'hyperliquid') === 'binance'
+  }, [isOpen, account.accountId, environment, accountExchange])
 
   // Refresh API Usage
   const handleRefreshRateLimit = async () => {
@@ -94,7 +95,7 @@ export default function TraderDetailModal({
           }
           setRateLimit(rl)
           setRateLimitUpdated(Date.now())
-          setCachedData(getApiUsageCacheKey(account.accountId, environment), rl)
+          setCachedData(getApiUsageCacheKey(account.accountId, environment, accountExchange), rl)
           toast.success('API weight updated')
         }
       } else {
@@ -102,7 +103,7 @@ export default function TraderDetailModal({
         if (res.success && res.rateLimit) {
           setRateLimit(res.rateLimit)
           setRateLimitUpdated(Date.now())
-          setCachedData(getApiUsageCacheKey(account.accountId, environment), res.rateLimit)
+          setCachedData(getApiUsageCacheKey(account.accountId, environment, accountExchange), res.rateLimit)
           toast.success('API usage updated')
         }
       }
@@ -121,7 +122,7 @@ export default function TraderDetailModal({
       if (res.success && res.stats) {
         setTradingStats(res.stats)
         setTradingStatsUpdated(Date.now())
-        setCachedData(getTradingStatsCacheKey(account.accountId, environment), res.stats)
+        setCachedData(getTradingStatsCacheKey(account.accountId, environment, accountExchange), res.stats)
         toast.success('Trading stats updated')
       }
     } catch (e) {
@@ -150,7 +151,7 @@ export default function TraderDetailModal({
           <DialogTitle className="flex items-center gap-2">
             <span>{account.accountName} - {t('accountDetail.details', 'Details')}</span>
             <img
-              src={isBinance ? '/binance_logo.svg' : '/hyperliquid_logo.svg'}
+              src={isBinance ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
               alt={isBinance ? 'Binance' : 'Hyperliquid'}
               className="h-4 w-4"
             />

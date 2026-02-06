@@ -131,7 +131,11 @@ export default function HyperliquidMultiAccountSummary({
               usedMargin: summary.used_margin,
               marginUsagePercent: summary.margin_usage,
               unrealizedPnl: summary.unrealized_pnl,
-              lastUpdated: summary.last_updated || new Date().toISOString(),
+              lastUpdated: summary.last_updated
+                ? (typeof summary.last_updated === 'number'
+                    ? new Date(summary.last_updated).toISOString()
+                    : summary.last_updated)
+                : new Date().toISOString(),
             } as HyperliquidBalance
             if (summary.rate_limit) {
               rateLimit = {
@@ -147,8 +151,8 @@ export default function HyperliquidMultiAccountSummary({
             balance = await getHyperliquidBalance(acc.account_id)
           }
 
-          const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment)
-          const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment)
+          const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment, exchange)
+          const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment, exchange)
           return {
             accountId: acc.account_id,
             accountName: acc.account_name,
@@ -209,8 +213,9 @@ export default function HyperliquidMultiAccountSummary({
       // Skip Binance accounts - their rate limit is already loaded in Step 1
       if ((acc.exchange || 'hyperliquid') === 'binance') return
 
-      const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment)
-      const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment)
+      const accExchange = acc.exchange || 'hyperliquid'
+      const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment, accExchange)
+      const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment, accExchange)
       let needsUpdate = false
       let newRateLimit = getCachedData<RateLimitData>(apiUsageCacheKey)
       let newRateLimitUpdated = getCacheTimestamp(apiUsageCacheKey)
@@ -246,7 +251,7 @@ export default function HyperliquidMultiAccountSummary({
       // Update state if new data fetched
       if (needsUpdate) {
         setAccountBalances(prev => prev.map(a =>
-          a.accountId === acc.account_id
+          (a.accountId === acc.account_id && a.exchange === (acc.exchange || 'hyperliquid'))
             ? { ...a, rateLimit: newRateLimit, rateLimitUpdated: newRateLimitUpdated, tradingStats: newTradingStats, tradingStatsUpdated: newTradingStatsUpdated }
             : a
         ))
@@ -359,7 +364,7 @@ export default function HyperliquidMultiAccountSummary({
             : null
           const accountPositions = getAccountPositions(account.accountId)
           const isBinance = account.exchange === 'binance'
-          const exchangeLogo = isBinance ? '/binance_logo.svg' : '/hyperliquid_logo.svg'
+          const exchangeLogo = isBinance ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'
 
           return (
             <Card

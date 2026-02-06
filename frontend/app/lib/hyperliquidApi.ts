@@ -497,7 +497,7 @@ export async function setGlobalTradingMode(
 
 // --- Binance API functions ---
 
-const BINANCE_API_BASE = '/api/binance';
+const BINANCE_API_BASE = '/binance';
 
 export interface BinanceSummary {
   account_id: number;
@@ -514,7 +514,7 @@ export interface BinanceSummary {
     remaining: number;
     usage_percent: number;
   } | null;
-  last_updated: string | null;
+  last_updated: number | string | null;
 }
 
 export async function getBinanceSummary(accountId: number): Promise<BinanceSummary> {
