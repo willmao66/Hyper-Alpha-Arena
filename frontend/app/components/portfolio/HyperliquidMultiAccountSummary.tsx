@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TrendingUp, AlertTriangle, Eye, Zap } from 'lucide-react'
-import { getHyperliquidBalance, getWalletRateLimit, getTradingStats, TradingStats, getBinanceSummary } from '@/lib/hyperliquidApi'
+import { getHyperliquidBalance, getWalletRateLimit, getTradingStats, getBinanceTradingStats, TradingStats, getBinanceSummary } from '@/lib/hyperliquidApi'
 import { getModelLogo } from './logoAssets'
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid'
 import type { HyperliquidBalance } from '@/lib/types/hyperliquid'
@@ -239,7 +239,9 @@ export default function HyperliquidMultiAccountSummary({
       // Fetch Trading Stats if not cached
       if (!newTradingStats) {
         try {
-          const res = await getTradingStats(acc.account_id, environment)
+          const res = accExchange === 'binance'
+            ? await getBinanceTradingStats(acc.account_id, environment)
+            : await getTradingStats(acc.account_id, environment)
           if (res.success && res.stats) {
             newTradingStats = res.stats
             setCachedData(statsCacheKey, newTradingStats)

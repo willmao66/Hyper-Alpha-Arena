@@ -562,3 +562,59 @@ async def get_all_binance_wallets(db: Session = Depends(get_db)):
         })
 
     return result
+
+
+@router.get("/accounts/{account_id}/trading-stats")
+async def get_binance_trading_stats(
+    account_id: int,
+    environment: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get trading statistics for Binance account.
+
+    Returns win rate, profit factor, and other trading metrics based on
+    historical trades.
+
+    Args:
+        account_id: Account ID
+        environment: Optional environment override ("testnet" or "mainnet")
+                    If not specified, uses global trading mode
+        db: Database session
+
+    Returns:
+        Trading statistics including win rate, total trades, PnL metrics
+    """
+    try:
+        # Determine environment
+        if environment is None:
+            environment = get_global_trading_mode(db)
+
+        # Get wallet
+        wallet = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == account_id,
+            BinanceWallet.environment == environment,
+            BinanceWallet.is_active == "true"
+        ).first()
+
+        if not wallet:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No active Binance wallet for account {account_id} in {environment}"
+            )
+
+        client = _get_client(wallet)
+        stats = client.get_trading_stats()
+
+        return {
+            "success": True,
+            "accountId": account_id,
+            "environment": environment,
+            "stats": stats
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get Binance trading stats for account {account_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

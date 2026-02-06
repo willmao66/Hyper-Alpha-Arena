@@ -8,7 +8,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { RefreshCw, TrendingUp, AlertTriangle, Info } from 'lucide-react'
-import { getWalletRateLimit, getTradingStats, TradingStats, getBinanceRateLimit } from '@/lib/hyperliquidApi'
+import { getWalletRateLimit, getTradingStats, getBinanceTradingStats, TradingStats, getBinanceRateLimit } from '@/lib/hyperliquidApi'
 import { setCachedData, getCachedData, getCacheTimestamp, getApiUsageCacheKey, getTradingStatsCacheKey } from '@/lib/cacheUtils'
 import { formatDateTime } from '@/lib/dateTime'
 import type { HyperliquidBalance } from '@/lib/types/hyperliquid'
@@ -118,7 +118,9 @@ export default function TraderDetailModal({
   const handleRefreshStats = async () => {
     setRefreshingStats(true)
     try {
-      const res = await getTradingStats(account.accountId, environment)
+      const res = isBinance
+        ? await getBinanceTradingStats(account.accountId, environment)
+        : await getTradingStats(account.accountId, environment)
       if (res.success && res.stats) {
         setTradingStats(res.stats)
         setTradingStatsUpdated(Date.now())
@@ -180,12 +182,6 @@ export default function TraderDetailModal({
           />
 
           {/* Trading Stats Section */}
-          {isBinance ? (
-            <div className="border rounded-lg p-4">
-              <h3 className="text-sm font-semibold mb-3">{t('accountDetail.tradingStats', 'Trading Statistics')}</h3>
-              <div className="text-sm text-muted-foreground">{t('accountDetail.comingSoon', 'Coming Soon')}</div>
-            </div>
-          ) : (
           <TradingStatsSection
             stats={tradingStats}
             statsUpdated={tradingStatsUpdated}
@@ -193,7 +189,6 @@ export default function TraderDetailModal({
             onRefresh={handleRefreshStats}
             t={t}
           />
-          )}
 
           {/* Positions Section */}
           <PositionsSection positions={positions} t={t} />

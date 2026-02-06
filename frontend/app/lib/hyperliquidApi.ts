@@ -371,6 +371,23 @@ export async function getTradingStats(
   return response.json();
 }
 
+export async function getBinanceTradingStats(
+  accountId: number,
+  environment?: 'testnet' | 'mainnet'
+): Promise<{
+  success: boolean;
+  accountId: number;
+  environment: string;
+  stats: TradingStats;
+}> {
+  const url = environment
+    ? `${BINANCE_API_BASE}/accounts/${accountId}/trading-stats?environment=${environment}`
+    : `${BINANCE_API_BASE}/accounts/${accountId}/trading-stats`;
+
+  const response = await apiRequest(url);
+  return response.json();
+}
+
 /**
  * Wallet Management (Multi-Wallet Architecture)
  */
