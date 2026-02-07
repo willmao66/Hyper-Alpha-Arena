@@ -147,6 +147,12 @@ def initialize_services():
         print("Binance data collector started")
         logger.info(f"Binance data collector started with symbols: {watchlist_symbols}")
 
+        # Start Binance WebSocket collector (15-second Taker Volume aggregation)
+        from services.exchanges.binance_ws_collector import binance_ws_collector
+        binance_ws_collector.start(symbols=watchlist_symbols if watchlist_symbols else ["BTC"])
+        print("Binance WebSocket collector started")
+        logger.info(f"Binance WebSocket collector started with symbols: {watchlist_symbols}")
+
         logger.info("All services initialized successfully")
 
     except Exception as e:
@@ -177,6 +183,10 @@ def shutdown_services():
         # Stop Binance data collector
         from services.exchanges.binance_collector import binance_collector
         binance_collector.stop()
+
+        # Stop Binance WebSocket collector
+        from services.exchanges.binance_ws_collector import binance_ws_collector
+        binance_ws_collector.stop()
 
         stop_scheduler()
         logger.info("All services have been shut down")

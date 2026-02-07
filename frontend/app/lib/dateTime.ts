@@ -147,6 +147,17 @@ export function utcToLocalTimestamp(utcTimestamp: number): number {
 }
 
 /**
+ * Convert local timestamp back to UTC timestamp
+ * Input: Unix timestamp in seconds (local timezone adjusted)
+ * Output: Unix timestamp in seconds (UTC)
+ * This is the reverse of utcToLocalTimestamp
+ */
+export function localToUtcTimestamp(localTimestamp: number): number {
+  const offsetSeconds = new Date().getTimezoneOffset() * 60
+  return localTimestamp + offsetSeconds
+}
+
+/**
  * Format timestamp for chart display (converts UTC to local)
  * For use with lightweight-charts
  */

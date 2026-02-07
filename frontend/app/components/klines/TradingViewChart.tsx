@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, AreaSeries } from 'lightweight-charts'
 import PacmanLoader from '../ui/pacman-loader'
-import { formatChartTime } from '../../lib/dateTime'
+import { formatChartTime, localToUtcTimestamp } from '../../lib/dateTime'
 
 // Mobile detection helper
 const isMobileDevice = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -1301,11 +1301,14 @@ export default function TradingViewChart({
       let endTime: number
 
       if (chartData.length > 0) {
-        // chartData.time is in seconds (TradingView format), convert to milliseconds
+        // chartData.time is in local timezone (adjusted by formatChartTime for display)
+        // Convert back to UTC for API request
         const firstTime = chartData[0].time
         const lastTime = chartData[chartData.length - 1].time
-        startTime = (typeof firstTime === 'number' ? firstTime : new Date(firstTime).getTime() / 1000) * 1000
-        endTime = (typeof lastTime === 'number' ? lastTime : new Date(lastTime).getTime() / 1000) * 1000
+        const utcFirstTime = typeof firstTime === 'number' ? localToUtcTimestamp(firstTime) : new Date(firstTime).getTime() / 1000
+        const utcLastTime = typeof lastTime === 'number' ? localToUtcTimestamp(lastTime) : new Date(lastTime).getTime() / 1000
+        startTime = utcFirstTime * 1000
+        endTime = utcLastTime * 1000
       } else {
         endTime = Date.now()
         startTime = endTime - 7 * 24 * 60 * 60 * 1000

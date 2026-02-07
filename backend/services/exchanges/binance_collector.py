@@ -1,14 +1,16 @@
 """
-Binance Data Collector Service
+Binance Data Collector Service (REST API)
 
 Collects market data from Binance using REST API polling:
-- K-lines (with taker volumes)
+- K-lines (price data + taker volumes as 1-minute backup)
 - Open Interest history
 - Funding Rate history
 - Sentiment (long/short ratio)
 - Orderbook snapshots
 
-Data is fetched at configurable intervals and persisted to database.
+Note: Taker Buy/Sell volumes are also collected via WebSocket (binance_ws_collector.py)
+for 15-second granularity. REST provides 1-minute backup data and historical coverage.
+Both write to the same table with automatic deduplication.
 """
 
 import logging
@@ -28,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Default collection intervals (seconds)
 KLINE_INTERVAL_SECONDS = 60  # 1 minute
 OI_INTERVAL_SECONDS = 60  # 1 minute (using real-time API for finer granularity)
-FUNDING_INTERVAL_SECONDS = 3600  # 1 hour (funding settles every 8h)
+FUNDING_INTERVAL_SECONDS = 60  # 1 minute (using premiumIndex for real-time rate)
 SENTIMENT_INTERVAL_SECONDS = 300  # 5 minutes
 ORDERBOOK_INTERVAL_SECONDS = 15  # 15 seconds
 
@@ -178,7 +180,7 @@ class BinanceCollector:
         logger.info("Initial data collection completed")
 
     def _collect_klines(self):
-        """Collect K-line data for all symbols"""
+        """Collect K-line data for all symbols (includes taker volumes as backup)"""
         db = SessionLocal()
         try:
             persistence = ExchangeDataPersistence(db)
@@ -187,6 +189,8 @@ class BinanceCollector:
                     klines = self.adapter.fetch_klines(symbol, "1m", limit=5)
                     if klines:
                         result = persistence.save_klines(klines)
+                        # Also save taker volumes from klines as backup/historical data
+                        # WebSocket provides 15s granularity, REST provides 1m backup
                         persistence.save_taker_volumes_from_klines(klines)
                         logger.debug(f"Klines {symbol}: {result}")
                 except Exception as e:
@@ -208,21 +212,29 @@ class BinanceCollector:
                         logger.debug(f"OI {symbol}: {result}")
                 except Exception as e:
                     logger.error(f"Failed to collect OI for {symbol}: {e}")
-                except Exception as e:
-                    logger.error(f"Failed to collect OI for {symbol}: {e}")
         finally:
             db.close()
 
     def _collect_funding(self):
-        """Collect Funding Rate data for all symbols"""
+        """Collect real-time Funding Rate data for all symbols using premiumIndex API"""
         db = SessionLocal()
         try:
             persistence = ExchangeDataPersistence(db)
             for symbol in self.symbols:
                 try:
-                    funding_list = self.adapter.fetch_funding_history(symbol, limit=3)
-                    if funding_list:
-                        result = persistence.save_funding_rate_batch(funding_list)
+                    # Use premiumIndex for real-time funding rate
+                    premium_data = self.adapter.fetch_premium_index(symbol)
+                    if premium_data:
+                        # Create UnifiedFunding from premium index data
+                        from services.exchanges.base_adapter import UnifiedFunding
+                        funding = UnifiedFunding(
+                            exchange="binance",
+                            symbol=symbol,
+                            timestamp=premium_data["timestamp"],
+                            funding_rate=premium_data["funding_rate"],
+                            mark_price=premium_data["mark_price"],
+                        )
+                        result = persistence.save_funding_rate(funding)
                         logger.debug(f"Funding {symbol}: {result}")
                 except Exception as e:
                     logger.error(f"Failed to collect funding for {symbol}: {e}")

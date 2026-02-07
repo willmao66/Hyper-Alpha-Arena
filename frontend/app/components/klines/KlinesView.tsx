@@ -59,8 +59,8 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
         // OI: Binance historical API only supports 5m+, real-time collection started recently
         oi: minutes >= 5,
         oi_delta: minutes >= 5,
-        // Funding: Binance settles every 8h, only meaningful for 8h+ periods
-        funding: minutes >= 480,
+        // Funding: Now collected every minute via premiumIndex API
+        funding: true,
         depth_ratio: true,
         order_imbalance: true
       }
