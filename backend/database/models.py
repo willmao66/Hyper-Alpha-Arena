@@ -281,6 +281,7 @@ class AccountStrategyConfig(Base):
     signal_pool_ids = Column(Text, nullable=True)  # JSON array of signal pool IDs, e.g. "[1, 2, 3]"
     enabled = Column(String(10), nullable=False, default="true")
     scheduled_trigger_enabled = Column(Boolean, nullable=False, default=True)  # Enable/disable scheduled trigger
+    exchange = Column(String(20), nullable=False, default="hyperliquid")  # "hyperliquid" or "binance"
     last_trigger_at = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
@@ -1188,6 +1189,9 @@ class AccountProgramBinding(Base):
 
     # Custom params override (optional, overrides program.params)
     params_override = Column(Text, nullable=True)  # JSON
+
+    # Exchange selection for this binding (hyperliquid or binance)
+    exchange = Column(String(20), nullable=False, default="hyperliquid")
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(

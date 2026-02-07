@@ -838,7 +838,12 @@
     "saveGlobalSettings": "保存全局设置",
     "watchlistMoved": "监控列表管理已移至设置页面。",
     "currentWatchlist": "当前监控列表",
-    "goToSettings": "前往设置"
+    "goToSettings": "前往设置",
+    "exchange": "交易所",
+    "selectExchange": "选择交易所",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "币安",
+    "exchangeHint": "选择用于市场数据和交易执行的交易所"
   },
   "settings": {
     "language": "语言",
@@ -1202,6 +1207,10 @@
     "status": "状态",
     "active": "启用",
     "saveBinding": "保存绑定",
+    "exchange": "交易所",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "Binance",
+    "exchangeHint": "选择市场数据和交易执行的交易所",
     "testRun": "测试运行",
     "testing": "测试中...",
     "triggerSymbol": "触发币种",

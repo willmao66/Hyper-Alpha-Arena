@@ -188,6 +188,7 @@ export interface StrategyConfig {
   tick_batch_size?: number | null
   enabled: boolean
   last_trigger_at?: string | null
+  exchange?: string  // "hyperliquid" or "binance"
 }
 
 export interface StrategyConfigUpdate {
@@ -345,6 +346,7 @@ export interface PromptPreviewRequest {
   promptTemplateKey?: string  // Optional: Fallback to database template if templateText not provided
   accountIds: number[]
   symbols?: string[]
+  exchanges?: string[]  // Optional: Array of exchanges ["hyperliquid", "binance"] (default: ["hyperliquid"])
 }
 
 export interface PromptPreviewItem {
@@ -352,6 +354,7 @@ export interface PromptPreviewItem {
   accountName: string
   symbols: string[]
   filledPrompt: string
+  exchange?: string  // Which exchange this preview is for
 }
 
 export interface PromptPreviewResponse {

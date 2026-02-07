@@ -190,6 +190,27 @@ class BinanceAdapter(BaseExchangeAdapter):
             mark_price=Decimal(str(item["markPrice"])) if "markPrice" in item else None,
         )
 
+    def fetch_premium_index(self, symbol: str) -> dict:
+        """
+        Fetch real-time premium index data from Binance.
+        Returns current funding rate, mark price, index price, etc.
+
+        This is different from fetch_funding_rate() which returns historical settled rates.
+        Use this for real-time display, use fetch_funding_rate() for historical records.
+        """
+        exchange_symbol = self._to_exchange_symbol(symbol)
+        params = {"symbol": exchange_symbol}
+
+        raw_data = self._request("/fapi/v1/premiumIndex", params)
+        return {
+            "symbol": symbol,
+            "mark_price": Decimal(str(raw_data["markPrice"])),
+            "index_price": Decimal(str(raw_data["indexPrice"])),
+            "funding_rate": Decimal(str(raw_data["lastFundingRate"])),
+            "next_funding_time": raw_data["nextFundingTime"],
+            "timestamp": raw_data["time"],
+        }
+
     def fetch_open_interest(self, symbol: str) -> UnifiedOpenInterest:
         """Fetch current open interest from Binance."""
         exchange_symbol = self._to_exchange_symbol(symbol)

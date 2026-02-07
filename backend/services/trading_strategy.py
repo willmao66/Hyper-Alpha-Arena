@@ -50,6 +50,7 @@ class StrategyState:
     enabled: bool
     scheduled_trigger_enabled: bool  # Enable/disable scheduled trigger
     last_trigger_at: Optional[datetime]
+    exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
     running: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -169,6 +170,7 @@ class StrategyManager:
                         enabled=strategy.enabled == "true",
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
+                        exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
                     )
                     self.strategies[strategy.account_id] = state
 
@@ -265,10 +267,17 @@ class StrategyManager:
                     logger.debug(f"Account {account_id} auto trading disabled, skipping strategy execution")
                     return
 
-            # Execute AI trading decision with trigger context
-            logger.info(f"Account {account_id} executing Hyperliquid trading (trigger: {trigger_type})")
-            from services.trading_commands import place_ai_driven_hyperliquid_order
-            place_ai_driven_hyperliquid_order(account_id=account_id, trigger_context=trigger_context)
+            # Execute AI trading decision based on exchange configuration
+            exchange = state.exchange
+            logger.info(f"Account {account_id} executing {exchange} trading (trigger: {trigger_type})")
+
+            if exchange == "binance":
+                from services.trading_commands import place_ai_driven_binance_order
+                place_ai_driven_binance_order(account_id=account_id, trigger_context=trigger_context)
+            else:
+                # Default to Hyperliquid
+                from services.trading_commands import place_ai_driven_hyperliquid_order
+                place_ai_driven_hyperliquid_order(account_id=account_id, trigger_context=trigger_context)
 
         except Exception as e:
             logger.error(f"Error executing strategy for account {account_id}: {e}")

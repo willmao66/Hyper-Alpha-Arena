@@ -48,6 +48,7 @@ def upsert_strategy(
     trigger_interval: Optional[int] = None,
     signal_pool_id: Optional[int] = None,  # Deprecated: kept for backward compatibility
     signal_pool_ids: Optional[List[int]] = None,  # New: list of pool IDs
+    exchange: str = "hyperliquid",  # "hyperliquid" or "binance"
 ) -> AccountStrategyConfig:
     print(f"upsert_strategy called with: account_id={account_id}, signal_pool_ids={signal_pool_ids}, signal_pool_id={signal_pool_id}")
     strategy = get_strategy_by_account(db, account_id)
@@ -60,6 +61,7 @@ def upsert_strategy(
     strategy.tick_batch_size = tick_batch_size
     strategy.enabled = "true" if enabled else "false"
     strategy.scheduled_trigger_enabled = scheduled_trigger_enabled
+    strategy.exchange = exchange
     if price_threshold is not None:
         strategy.price_threshold = price_threshold
 

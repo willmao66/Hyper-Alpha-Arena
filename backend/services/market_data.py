@@ -46,7 +46,7 @@ def get_kline_data(symbol: str, market: str = "CRYPTO", period: str = "1d", coun
             from services.exchanges.binance_adapter import BinanceAdapter
             from datetime import datetime
 
-            adapter = BinanceAdapter()
+            adapter = BinanceAdapter(environment=environment)
             unified_klines = adapter.fetch_klines(symbol, period, limit=count)
 
             # Convert UnifiedKline to dict format expected by technical indicators
@@ -66,11 +66,11 @@ def get_kline_data(symbol: str, market: str = "CRYPTO", period: str = "1d", coun
                 })
 
             if data:
-                logger.info(f"Got K-line data for {key} from Binance, total {len(data)} items")
+                logger.info(f"Got K-line data for {key} from Binance ({environment}), total {len(data)} items")
                 return data
             raise Exception("Binance returned empty K-line data")
         except Exception as bn_err:
-            logger.error(f"Failed to get K-line data from Binance: {bn_err}")
+            logger.error(f"Failed to get K-line data from Binance ({environment}): {bn_err}")
             raise Exception(f"Unable to get K-line data for {key}: {bn_err}")
     else:
         # Default to Hyperliquid
@@ -117,22 +117,23 @@ def get_ticker_data(symbol: str, market: str = "CRYPTO", environment: str = "mai
     if market.lower() == "binance":
         try:
             from services.exchanges.binance_adapter import BinanceAdapter
-            adapter = BinanceAdapter()
+            adapter = BinanceAdapter(environment=environment)
             exchange_symbol = adapter._to_exchange_symbol(symbol)
 
             # Fetch 24h ticker data from Binance
             ticker = adapter._request("/fapi/v1/ticker/24hr", {"symbol": exchange_symbol})
 
-            # Fetch OI and funding rate
+            # Fetch OI
             oi_data = adapter.fetch_open_interest(symbol)
             open_interest_value = float(oi_data.open_interest) * float(ticker.get('lastPrice', 0)) if oi_data else 0
 
+            # Fetch real-time funding rate using premiumIndex API
             funding_rate = 0
             try:
-                funding_data = adapter.fetch_funding_rate(symbol)
-                funding_rate = float(funding_data.funding_rate) if funding_data else 0
-            except Exception:
-                pass
+                premium_data = adapter.fetch_premium_index(symbol)
+                funding_rate = float(premium_data["funding_rate"]) if premium_data else 0
+            except Exception as e:
+                logger.warning(f"Failed to fetch premium index for {symbol}: {e}")
 
             return {
                 'symbol': symbol,
@@ -145,7 +146,7 @@ def get_ticker_data(symbol: str, market: str = "CRYPTO", environment: str = "mai
                 'funding_rate': funding_rate,
             }
         except Exception as e:
-            logger.error(f"Failed to get ticker data from Binance: {e}")
+            logger.error(f"Failed to get ticker data from Binance ({environment}): {e}")
             raise Exception(f"Unable to get ticker data for {key}: {e}")
 
     try:

@@ -333,3 +333,4 @@ prompts/
 
 # Internal docs (not for public repo)
 docs/desktop-installer-spec.md
+backend/scripts/

@@ -819,7 +819,12 @@
     "saveGlobalSettings": "Save Global Settings",
     "watchlistMoved": "Watchlist management has been moved to Settings.",
     "currentWatchlist": "Current watchlist",
-    "goToSettings": "Go to Settings"
+    "goToSettings": "Go to Settings",
+    "exchange": "Exchange",
+    "selectExchange": "Select exchange",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "Binance",
+    "exchangeHint": "Select exchange for market data and trade execution"
   },
   "settings": {
     "language": "Language",
@@ -1183,6 +1188,10 @@
     "status": "Status",
     "active": "Active",
     "saveBinding": "Save Binding",
+    "exchange": "Exchange",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "Binance",
+    "exchangeHint": "Select exchange for market data and trade execution",
     "testRun": "Test Run",
     "testing": "Testing...",
     "triggerSymbol": "Trigger Symbol",

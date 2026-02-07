@@ -60,6 +60,7 @@ interface Binding {
   is_active: boolean
   last_trigger_at: string | null
   params_override: Record<string, any> | null
+  exchange: string
   wallets: WalletInfo[]
   created_at: string
   updated_at: string
@@ -138,6 +139,7 @@ export default function ProgramTrader() {
   const [bindingInterval, setBindingInterval] = useState(300)
   const [bindingScheduledEnabled, setBindingScheduledEnabled] = useState(false)
   const [bindingActive, setBindingActive] = useState(true)
+  const [bindingExchange, setBindingExchange] = useState<string>('hyperliquid')
   const [savingBinding, setSavingBinding] = useState(false)
 
   // Validate state
@@ -318,7 +320,8 @@ export default function ProgramTrader() {
           signal_pool_ids: bindingPoolIds,
           trigger_interval: bindingInterval,
           scheduled_trigger_enabled: bindingScheduledEnabled,
-          is_active: bindingActive
+          is_active: bindingActive,
+          exchange: bindingExchange
         })
       })
       if (res.ok) {
@@ -348,7 +351,8 @@ export default function ProgramTrader() {
           signal_pool_ids: bindingPoolIds,
           trigger_interval: bindingInterval,
           scheduled_trigger_enabled: bindingScheduledEnabled,
-          is_active: bindingActive
+          is_active: bindingActive,
+          exchange: bindingExchange
         })
       })
       if (res.ok) {
@@ -390,6 +394,7 @@ export default function ProgramTrader() {
     setBindingInterval(300)
     setBindingScheduledEnabled(false)
     setBindingActive(true)
+    setBindingExchange('hyperliquid')
   }
 
   const selectBindingForEdit = (binding: Binding) => {
@@ -401,6 +406,7 @@ export default function ProgramTrader() {
     setBindingInterval(binding.trigger_interval)
     setBindingScheduledEnabled(binding.scheduled_trigger_enabled)
     setBindingActive(binding.is_active)
+    setBindingExchange(binding.exchange || 'hyperliquid')
   }
 
   const togglePoolId = (poolId: number) => {
@@ -831,6 +837,10 @@ export default function ProgramTrader() {
                         <span className="font-medium">{b.account_name}</span>
                       </div>
                       <div>
+                        <span className="text-muted-foreground">{t('programTrader.exchange')}:</span>{' '}
+                        <span className="font-medium capitalize">{b.exchange || 'hyperliquid'}</span>
+                      </div>
+                      <div>
                         <span className="text-muted-foreground">{t('programTrader.wallets')}:</span>{' '}
                         {b.wallets.length > 0 ? b.wallets.map(w => (
                           <span key={w.address} className="font-mono text-xs" title={w.address}>
@@ -912,6 +922,24 @@ export default function ProgramTrader() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Exchange Selection */}
+              <div>
+                <label className="text-xs uppercase text-muted-foreground">{t('programTrader.exchange')}</label>
+                <Select
+                  value={bindingExchange}
+                  onValueChange={setBindingExchange}
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hyperliquid">{t('programTrader.exchangeHyperliquid')}</SelectItem>
+                    <SelectItem value="binance">{t('programTrader.exchangeBinance')}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">{t('programTrader.exchangeHint')}</p>
               </div>
 
               {/* Signal Pools */}

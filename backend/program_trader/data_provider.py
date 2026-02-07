@@ -21,19 +21,25 @@ class DataProvider:
         account_id: int,
         environment: str = "mainnet",
         trading_client: Any = None,
-        record_queries: bool = False
+        record_queries: bool = False,
+        exchange: str = "hyperliquid"
     ):
         self.db = db
         self.account_id = account_id
         self.environment = environment
         self.trading_client = trading_client
         self.record_queries = record_queries
+        self.exchange = exchange  # "hyperliquid" or "binance"
         self._query_log: List[Dict[str, Any]] = []
         self._kline_cache: Dict[str, List[Kline]] = {}
         self._account_cache: Optional[Dict[str, Any]] = None
         self._positions_cache: Optional[Dict[str, Position]] = None
         self._open_orders_cache: Optional[List[Order]] = None
         self._recent_trades_cache: Optional[List[Trade]] = None
+
+    def _get_market_param(self) -> str:
+        """Get market parameter for data services based on exchange."""
+        return "binance" if self.exchange == "binance" else "CRYPTO"
 
     def _log_query(self, method: str, args: Dict[str, Any], result: Any) -> None:
         """Record a data query for preview run debugging."""
@@ -62,8 +68,10 @@ class DataProvider:
         try:
             # Use get_flow_indicators_for_prompt to get full data structure
             # _get_price_change_data returns: {current, start_price, end_price, last_5, period}
+            # Pass exchange parameter to route to correct data source
             results = get_flow_indicators_for_prompt(
-                self.db, symbol, period, ["PRICE_CHANGE"], current_time_ms
+                self.db, symbol, period, ["PRICE_CHANGE"], current_time_ms,
+                exchange=self.exchange
             )
             data = results.get("PRICE_CHANGE")
             if data:
@@ -77,14 +85,14 @@ class DataProvider:
                 }
         except Exception:
             pass
-        self._log_query("get_price_change", {"symbol": symbol, "period": period}, result)
+        self._log_query("get_price_change", {"symbol": symbol, "period": period, "exchange": self.exchange}, result)
         return result
 
     def get_klines(self, symbol: str, period: str, count: int = 50) -> List[Kline]:
-        """Get K-line data from Hyperliquid API (real-time).
+        """Get K-line data from exchange API (real-time).
 
         Uses the same data source as AI Trader's {BTC_klines_15m} variable.
-        Always fetches fresh data from Hyperliquid API, not from database.
+        Always fetches fresh data from exchange API, not from database.
         """
         from services.market_data import get_kline_data
 
@@ -97,12 +105,12 @@ class DataProvider:
 
         klines = []
         try:
-            # Use same API as AI Trader: get_kline_data() -> get_kline_data_from_hyperliquid()
+            # Use same API as AI Trader: get_kline_data()
             # Fetch more candles for indicator calculation, return requested count
             fetch_count = max(count, 100)  # At least 100 for indicator accuracy
             raw_data = get_kline_data(
                 symbol=symbol,
-                market="CRYPTO",
+                market=self._get_market_param(),
                 period=period,
                 count=fetch_count,
                 environment=self.environment,
@@ -157,7 +165,7 @@ class DataProvider:
                 # Use 500 candles for accurate indicator calculation
                 kline_data = get_kline_data(
                     symbol=symbol,
-                    market="CRYPTO",
+                    market=self._get_market_param(),
                     period=period,
                     count=500,
                     environment=self.environment,
@@ -211,13 +219,15 @@ class DataProvider:
         result = {}
         try:
             # Use get_flow_indicators_for_prompt to get full data structure
+            # Pass exchange parameter to route to correct data source
             results = get_flow_indicators_for_prompt(
-                self.db, symbol, period, [metric.upper()], current_time_ms
+                self.db, symbol, period, [metric.upper()], current_time_ms,
+                exchange=self.exchange
             )
             result = results.get(metric.upper(), {}) or {}
         except Exception:
             pass
-        self._log_query("get_flow", {"symbol": symbol, "metric": metric, "period": period}, result)
+        self._log_query("get_flow", {"symbol": symbol, "metric": metric, "period": period, "exchange": self.exchange}, result)
         return result
 
     def get_regime(self, symbol: str, period: str) -> RegimeInfo:
@@ -231,7 +241,10 @@ class DataProvider:
         regime_info = RegimeInfo(regime="noise", conf=0.0)
         try:
             # Use use_realtime=True to match AI Trader behavior
-            result = get_market_regime(self.db, symbol, period, use_realtime=True)
+            # Pass exchange parameter to route to correct data source
+            result = get_market_regime(
+                self.db, symbol, period, use_realtime=True, exchange=self.exchange
+            )
             if result:
                 regime_info = RegimeInfo(
                     regime=result.get("regime", "noise"),
@@ -243,7 +256,7 @@ class DataProvider:
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"get_regime failed for {symbol} {period}: {e}")
-        self._log_query("get_regime", {"symbol": symbol, "period": period}, {
+        self._log_query("get_regime", {"symbol": symbol, "period": period, "exchange": self.exchange}, {
             "regime": regime_info.regime,
             "conf": regime_info.conf,
             "direction": regime_info.direction
@@ -403,7 +416,7 @@ class DataProvider:
 
         # Call the same function AI Trader uses
         try:
-            result = get_ticker_data(symbol, "CRYPTO", self.environment)
+            result = get_ticker_data(symbol, self._get_market_param(), self.environment)
             if result:
                 self._market_data_cache[cache_key] = result
                 self._log_query("get_market_data", {"symbol": symbol}, result)

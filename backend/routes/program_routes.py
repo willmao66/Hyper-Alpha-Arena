@@ -74,6 +74,7 @@ class BindingCreate(BaseModel):
     scheduled_trigger_enabled: bool = False
     is_active: bool = True
     params_override: Optional[Dict[str, Any]] = None
+    exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
 
 
 class BindingUpdate(BaseModel):
@@ -82,6 +83,7 @@ class BindingUpdate(BaseModel):
     scheduled_trigger_enabled: Optional[bool] = None
     is_active: Optional[bool] = None
     params_override: Optional[Dict[str, Any]] = None
+    exchange: Optional[str] = None  # "hyperliquid" or "binance"
 
 
 class BindingResponse(BaseModel):
@@ -97,6 +99,7 @@ class BindingResponse(BaseModel):
     is_active: bool
     last_trigger_at: Optional[str]
     params_override: Optional[Dict[str, Any]]
+    exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
     wallets: List[WalletInfo] = []  # AI Trader's wallets
     created_at: str
     updated_at: str
@@ -287,6 +290,7 @@ def _binding_to_response(binding: AccountProgramBinding, db: Session) -> Binding
         is_active=binding.is_active,
         last_trigger_at=binding.last_trigger_at.isoformat() if binding.last_trigger_at else None,
         params_override=params_override,
+        exchange=binding.exchange or "hyperliquid",
         wallets=wallets,
         created_at=binding.created_at.isoformat() if binding.created_at else "",
         updated_at=binding.updated_at.isoformat() if binding.updated_at else "",
@@ -975,6 +979,7 @@ def create_binding(data: BindingCreate, account_id: int = Query(...), db: Sessio
         scheduled_trigger_enabled=data.scheduled_trigger_enabled,
         is_active=data.is_active,
         params_override=json.dumps(data.params_override) if data.params_override else None,
+        exchange=data.exchange,
     )
     db.add(binding)
     db.commit()
@@ -1003,6 +1008,8 @@ def update_binding(binding_id: int, data: BindingUpdate, db: Session = Depends(g
         binding.is_active = data.is_active
     if data.params_override is not None:
         binding.params_override = json.dumps(data.params_override)
+    if data.exchange is not None:
+        binding.exchange = data.exchange
 
     db.commit()
     db.refresh(binding)
@@ -1085,6 +1092,9 @@ def preview_run_binding(binding_id: int, db: Session = Depends(get_db)):
     if not binding:
         raise HTTPException(status_code=404, detail="Binding not found")
 
+    # Get exchange from binding (default to hyperliquid for backward compatibility)
+    exchange = getattr(binding, 'exchange', None) or 'hyperliquid'
+
     # Get program
     program = db.query(TradingProgram).filter(
         TradingProgram.id == binding.program_id
@@ -1128,17 +1138,50 @@ def preview_run_binding(binding_id: int, db: Session = Depends(get_db)):
 
     # Create trading client and data provider with query recording
     try:
-        trading_client = get_hyperliquid_client(
-            db,
-            binding.account_id,
-            override_environment=wallet.environment
-        )
+        if exchange == "binance":
+            # Use Binance trading client
+            from services.binance_trading_client import BinanceTradingClient
+            from database.models import BinanceWallet as BinanceWalletModel
+
+            from utils.encryption import decrypt_private_key
+
+            binance_wallet = db.query(BinanceWalletModel).filter(
+                BinanceWalletModel.account_id == binding.account_id
+            ).first()
+
+            if not binance_wallet or not binance_wallet.api_key_encrypted:
+                return PreviewRunResponse(
+                    success=False,
+                    error="Binance wallet not configured for this AI Trader",
+                    execution_time_ms=(time.time() - start_time) * 1000
+                )
+
+            # Decrypt API keys
+            api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+            secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+
+            trading_client = BinanceTradingClient(
+                api_key=api_key,
+                secret_key=secret_key,
+                environment=binance_wallet.environment or "testnet"
+            )
+            environment = binance_wallet.environment or "testnet"
+        else:
+            # Default to Hyperliquid
+            trading_client = get_hyperliquid_client(
+                db,
+                binding.account_id,
+                override_environment=wallet.environment
+            )
+            environment = wallet.environment
+
         data_provider = DataProvider(
             db,
             account_id=binding.account_id,
-            environment=wallet.environment,
+            environment=environment,
             trading_client=trading_client,
-            record_queries=True  # Enable query logging
+            record_queries=True,  # Enable query logging
+            exchange=exchange  # Pass exchange to DataProvider
         )
     except Exception as e:
         return PreviewRunResponse(
@@ -1172,7 +1215,8 @@ def preview_run_binding(binding_id: int, db: Session = Depends(get_db)):
         input_data = {
             "trigger_symbol": trigger_symbol,
             "trigger_type": trigger_type,
-            "environment": wallet.environment,
+            "environment": environment,
+            "exchange": exchange,
             "signal_pool_name": "",  # Preview run doesn't have signal context
             "pool_logic": "OR",
             "triggered_signals": [],

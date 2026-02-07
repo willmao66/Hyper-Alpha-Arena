@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional, List
 from database.connection import SessionLocal
 from database.models import (
     TradingProgram, AccountProgramBinding, ProgramExecutionLog,
-    Account, HyperliquidWallet
+    Account, HyperliquidWallet, BinanceWallet
 )
 from program_trader.executor import execute_strategy
 from program_trader.models import MarketData, ActionType
@@ -254,28 +254,45 @@ class ProgramExecutionService:
 
             logger.info(f"[ProgramExecution] Executing: {program.name} via {account.name} (trigger: {trigger_type})")
 
-            # Get wallet address for this account
-            wallet_address = self._get_wallet_address(db, account)
+            # Get exchange from binding (default to hyperliquid for backward compatibility)
+            exchange = getattr(binding, 'exchange', None) or 'hyperliquid'
+
+            # Get wallet address for this account based on exchange
+            wallet_address = self._get_wallet_address(db, account, exchange)
 
             # Get trading environment and create trading client
             from services.hyperliquid_environment import get_global_trading_mode, get_hyperliquid_client, get_leverage_settings
 
             environment = get_global_trading_mode(db)
             trading_client = None
-            if environment and wallet_address:
-                try:
-                    trading_client = get_hyperliquid_client(db, account.id, override_environment=environment)
-                except Exception as e:
-                    logger.warning(f"[ProgramExecution] Failed to create trading client: {e}")
 
-            # Get leverage settings (same as AI Trader)
-            leverage_settings = get_leverage_settings(db, account.id, environment or "mainnet")
+            if exchange == "binance":
+                # Use Binance trading client
+                if wallet_address:  # wallet_address here is actually API key presence indicator
+                    try:
+                        from services.binance_trading_client import BinanceTradingClient
+                        trading_client = BinanceTradingClient(db, account.id, environment or "mainnet")
+                    except Exception as e:
+                        logger.warning(f"[ProgramExecution] Failed to create Binance trading client: {e}")
+                # Get leverage settings from BinanceWallet
+                leverage_settings = self._get_binance_leverage_settings(db, account.id, environment or "mainnet")
+            else:
+                # Use Hyperliquid trading client (default)
+                if environment and wallet_address:
+                    try:
+                        trading_client = get_hyperliquid_client(db, account.id, override_environment=environment)
+                    except Exception as e:
+                        logger.warning(f"[ProgramExecution] Failed to create Hyperliquid trading client: {e}")
+                # Get leverage settings (same as AI Trader)
+                leverage_settings = get_leverage_settings(db, account.id, environment or "mainnet")
+
             max_leverage = leverage_settings["max_leverage"]
             default_leverage = leverage_settings["default_leverage"]
 
             # Build MarketData with trading client (enable query recording for analysis)
             data_provider = DataProvider(
-                db, account.id, environment or "mainnet", trading_client, record_queries=True
+                db, account.id, environment or "mainnet", trading_client,
+                record_queries=True, exchange=exchange
             )
             market_data = self._build_market_data(
                 data_provider=data_provider,
@@ -330,21 +347,45 @@ class ProgramExecutionService:
             self._running_bindings[binding_id] = False
             lock.release()
 
-    def _get_wallet_address(self, db, account: Account) -> Optional[str]:
-        """Get the active wallet address for an account."""
+    def _get_wallet_address(self, db, account: Account, exchange: str = "hyperliquid") -> Optional[str]:
+        """Get the active wallet address for an account based on exchange."""
         from services.hyperliquid_environment import get_global_trading_mode
 
         environment = get_global_trading_mode(db)
         if not environment:
             return None
 
-        wallet = db.query(HyperliquidWallet).filter(
-            HyperliquidWallet.account_id == account.id,
-            HyperliquidWallet.environment == environment,
-            HyperliquidWallet.is_active == "true"
-        ).first()
+        if exchange == "binance":
+            # For Binance, check if API key exists (return a truthy value if configured)
+            wallet = db.query(BinanceWallet).filter(
+                BinanceWallet.account_id == account.id,
+                BinanceWallet.environment == environment,
+                BinanceWallet.is_active == "true"
+            ).first()
+            # Return a placeholder to indicate wallet is configured
+            return "binance_configured" if wallet and wallet.api_key_encrypted else None
+        else:
+            # Hyperliquid wallet
+            wallet = db.query(HyperliquidWallet).filter(
+                HyperliquidWallet.account_id == account.id,
+                HyperliquidWallet.environment == environment,
+                HyperliquidWallet.is_active == "true"
+            ).first()
+            return wallet.wallet_address if wallet else None
 
-        return wallet.wallet_address if wallet else None
+    def _get_binance_leverage_settings(self, db, account_id: int, environment: str) -> dict:
+        """Get leverage settings from BinanceWallet."""
+        wallet = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == account_id,
+            BinanceWallet.environment == environment,
+            BinanceWallet.is_active == "true"
+        ).first()
+        if wallet:
+            return {
+                "max_leverage": wallet.max_leverage or 10,
+                "default_leverage": wallet.default_leverage or 3
+            }
+        return {"max_leverage": 10, "default_leverage": 3}
 
     def _build_market_data(
         self,

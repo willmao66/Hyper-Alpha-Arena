@@ -518,6 +518,7 @@ def place_ai_driven_hyperliquid_order(
                 hyperliquid_state=hyperliquid_state,
                 symbol_metadata=prompt_symbol_metadata,
                 trigger_context=trigger_context,
+                exchange="hyperliquid",
             )
 
             if not decisions:
@@ -1164,3 +1165,278 @@ def place_ai_driven_hyperliquid_order(
 
 
 HYPERLIQUID_TRADE_JOB_ID = "hyperliquid_ai_trade"
+
+
+def place_ai_driven_binance_order(
+    account_ids: Optional[Iterable[int]] = None,
+    account_id: Optional[int] = None,
+    bypass_auto_trading: bool = False,
+    trigger_context: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Place Binance perpetual contract order based on AI decision.
+
+    This function handles real trading on Binance exchange, supporting:
+    - Perpetual contract trading (long/short)
+    - Leverage configuration
+    - Position management
+
+    Args:
+        account_ids: Optional iterable of account IDs to process
+        account_id: Optional single account ID to process
+        bypass_auto_trading: Skip auto_trading_enabled check
+        trigger_context: Optional context about what triggered this decision
+    """
+    from services.binance_trading_client import BinanceTradingClient
+    from database.models import BinanceWallet
+
+    # Get accounts list
+    accounts = []
+    db = SessionLocal()
+    try:
+        if account_id is not None:
+            account = db.query(Account).filter(Account.id == account_id).first()
+            if not account or account.is_active != "true":
+                logger.debug(f"Account {account_id} not found or inactive")
+                return
+
+            if not bypass_auto_trading and getattr(account, "auto_trading_enabled", "false") != "true":
+                logger.debug(f"Account {account_id} auto trading disabled - skipping Binance AI order")
+                return
+
+            accounts = [account]
+        else:
+            accounts = db.query(Account).filter(
+                Account.is_active == "true",
+                Account.auto_trading_enabled == "true"
+            ).all()
+
+            if not accounts:
+                logger.debug("No active accounts with auto trading enabled")
+                return
+
+            if account_ids is not None:
+                id_set = {int(acc_id) for acc_id in account_ids}
+                accounts = [acc for acc in accounts if acc.id in id_set]
+    finally:
+        db.close()
+
+    # Get Binance symbols from watchlist (uses same watchlist as Hyperliquid)
+    selected_symbols = get_hyperliquid_selected_symbols()
+    if not selected_symbols:
+        logger.warning("No watchlist configured, skipping Binance trading")
+        return
+
+    # Get market prices
+    prices = {}
+    for sym in selected_symbols:
+        try:
+            price = get_last_price(sym, market="binance")
+            if price:
+                prices[sym] = price
+        except Exception as e:
+            logger.warning(f"Failed to get price for {sym}: {e}")
+
+    if not prices:
+        logger.warning("Failed to fetch Binance market prices, skipping trading")
+        return
+
+    # Process each account
+    for account in accounts:
+        db = SessionLocal()
+        try:
+            # Check Binance wallet configuration
+            wallet = db.query(BinanceWallet).filter(
+                BinanceWallet.account_id == account.id
+            ).first()
+
+            if not wallet or not wallet.api_key or not wallet.api_secret:
+                logger.warning(
+                    f"AI Trader '{account.name}' (ID: {account.id}) skipped - "
+                    f"Binance wallet not configured."
+                )
+                continue
+
+            # Initialize Binance trading client
+            client = BinanceTradingClient(
+                api_key=wallet.api_key,
+                secret_key=wallet.api_secret,
+                environment=wallet.environment or "testnet"
+            )
+
+            # Get account state
+            try:
+                account_state = client.get_account_state(db)
+                available_balance = account_state['available_balance']
+                total_equity = account_state['total_equity']
+                margin_usage = account_state['margin_usage_percent']
+
+                logger.info(
+                    f"Binance account state for {account.name}: "
+                    f"equity=${total_equity:.2f}, available=${available_balance:.2f}, "
+                    f"margin_usage={margin_usage:.1f}%"
+                )
+            except Exception as e:
+                logger.error(f"Failed to get Binance account state for {account.name}: {e}")
+                continue
+
+            # Get positions
+            try:
+                positions = client.get_positions()
+                logger.info(f"Account {account.name} has {len(positions)} open positions")
+            except Exception as e:
+                logger.error(f"Failed to get Binance positions for {account.name}: {e}")
+                positions = []
+
+            # Check equity
+            if total_equity <= 0 and len(positions) == 0:
+                logger.warning(
+                    f"Account {account.name} (ID: {account.id}) skipped - No balance to trade!"
+                )
+                continue
+
+            # Build portfolio for AI
+            portfolio = {
+                'cash': available_balance,
+                'frozen_cash': account_state.get('used_margin', 0),
+                'positions': {},
+                'total_assets': total_equity
+            }
+
+            for pos in positions:
+                symbol = pos['coin']
+                portfolio['positions'][symbol] = {
+                    'quantity': pos['szi'],
+                    'avg_cost': pos['entry_px'],
+                    'current_value': pos['position_value'],
+                    'unrealized_pnl': pos['unrealized_pnl'],
+                    'leverage': pos['leverage']
+                }
+
+            # Build Binance state for prompt
+            binance_state = {
+                'total_equity': total_equity,
+                'available_balance': available_balance,
+                'used_margin': account_state.get('used_margin', 0),
+                'margin_usage_percent': margin_usage,
+                'positions': positions
+            }
+
+            # Call AI for decision
+            decisions = call_ai_for_decision(
+                db,
+                account,
+                portfolio,
+                prices,
+                symbols=selected_symbols,
+                hyperliquid_state=binance_state,
+                trigger_context=trigger_context,
+                exchange="binance",
+            )
+
+            if not decisions:
+                logger.info(f"No AI decisions for Binance account {account.name}")
+                continue
+
+            # Execute decisions
+            for decision in decisions:
+                _execute_binance_decision(db, account, client, decision, portfolio, positions, prices)
+
+        except Exception as e:
+            logger.error(f"Error processing Binance account {account.name}: {e}", exc_info=True)
+            db.rollback()
+        finally:
+            db.close()
+
+
+def _execute_binance_decision(
+    db: Session,
+    account: Account,
+    client,
+    decision: Dict[str, Any],
+    portfolio: Dict[str, Any],
+    positions: List[Dict[str, Any]],
+    prices: Dict[str, float]
+) -> None:
+    """Execute a single AI decision on Binance."""
+    operation = decision.get("operation", "").lower()
+    symbol = decision.get("symbol", "")
+
+    if operation == "hold" or not symbol:
+        save_ai_decision(db, account, decision, portfolio, executed=False)
+        return
+
+    price = prices.get(symbol, 0)
+    if not price:
+        logger.warning(f"No price for {symbol}, skipping decision")
+        save_ai_decision(db, account, decision, portfolio, executed=False)
+        return
+
+    try:
+        if operation == "buy":
+            quantity = decision.get("quantity", 0)
+            leverage = decision.get("leverage", 1)
+
+            if quantity <= 0:
+                logger.warning(f"Invalid quantity {quantity} for BUY {symbol}")
+                save_ai_decision(db, account, decision, portfolio, executed=False)
+                return
+
+            # Set leverage and place order
+            result = client.place_order(
+                symbol=symbol,
+                side="BUY",
+                quantity=quantity,
+                order_type="MARKET",
+                leverage=leverage
+            )
+
+            if result.get("status") in ("FILLED", "NEW"):
+                logger.info(f"[BINANCE] BUY order executed: {symbol} qty={quantity}")
+                save_ai_decision(db, account, decision, portfolio, executed=True)
+            else:
+                logger.warning(f"[BINANCE] BUY order failed: {result}")
+                save_ai_decision(db, account, decision, portfolio, executed=False)
+
+        elif operation == "sell":
+            quantity = decision.get("quantity", 0)
+            leverage = decision.get("leverage", 1)
+
+            if quantity <= 0:
+                logger.warning(f"Invalid quantity {quantity} for SELL {symbol}")
+                save_ai_decision(db, account, decision, portfolio, executed=False)
+                return
+
+            result = client.place_order(
+                symbol=symbol,
+                side="SELL",
+                quantity=quantity,
+                order_type="MARKET",
+                leverage=leverage
+            )
+
+            if result.get("status") in ("FILLED", "NEW"):
+                logger.info(f"[BINANCE] SELL order executed: {symbol} qty={quantity}")
+                save_ai_decision(db, account, decision, portfolio, executed=True)
+            else:
+                logger.warning(f"[BINANCE] SELL order failed: {result}")
+                save_ai_decision(db, account, decision, portfolio, executed=False)
+
+        elif operation == "close":
+            result = client.close_position(symbol, cancel_tpsl=True)
+            if result:
+                logger.info(f"[BINANCE] Position closed: {symbol}")
+                save_ai_decision(db, account, decision, portfolio, executed=True)
+            else:
+                logger.info(f"[BINANCE] No position to close for {symbol}")
+                save_ai_decision(db, account, decision, portfolio, executed=False)
+
+        else:
+            logger.warning(f"Unknown operation: {operation}")
+            save_ai_decision(db, account, decision, portfolio, executed=False)
+
+    except Exception as e:
+        logger.error(f"[BINANCE] Error executing {operation} for {symbol}: {e}")
+        save_ai_decision(db, account, decision, portfolio, executed=False)
+
+
+BINANCE_TRADE_JOB_ID = "binance_ai_trade"
