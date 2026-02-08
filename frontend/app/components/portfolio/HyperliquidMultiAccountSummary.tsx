@@ -387,12 +387,16 @@ export default function HyperliquidMultiAccountSummary({
                   <span className="font-semibold text-sm truncate">
                     {account.accountName}
                   </span>
-                  <img
-                    src={exchangeLogo}
-                    alt={isBinance ? 'Binance' : 'Hyperliquid'}
-                    className="h-4 w-4"
-                    title={isBinance ? 'Binance Futures' : 'Hyperliquid'}
-                  />
+                  <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                    <img
+                      src={exchangeLogo}
+                      alt={isBinance ? 'Binance' : 'Hyperliquid'}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className="text-[10px] font-medium text-slate-200">
+                      {isBinance ? 'Binance' : 'Hyperliquid'}
+                    </span>
+                  </div>
                 </div>
                 {account.balance && (
                   <Button

@@ -1459,6 +1459,16 @@ export default function AlphaArenaFeed({
                                 {snapshot.environment}
                               </span>
                             )}
+                            <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                              <img
+                                src={snapshot.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                                alt={snapshot.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="text-[10px] font-medium text-slate-200">
+                                {snapshot.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-4 text-xs uppercase tracking-wide text-muted-foreground">
                             <div>
