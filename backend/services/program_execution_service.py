@@ -271,7 +271,21 @@ class ProgramExecutionService:
                 if wallet_address:  # wallet_address here is actually API key presence indicator
                     try:
                         from services.binance_trading_client import BinanceTradingClient
-                        trading_client = BinanceTradingClient(db, account.id, environment or "mainnet")
+                        from database.models import BinanceWallet
+                        from utils.encryption import decrypt_private_key
+
+                        binance_wallet = db.query(BinanceWallet).filter(
+                            BinanceWallet.account_id == account.id,
+                            BinanceWallet.environment == (environment or "mainnet"),
+                            BinanceWallet.is_active == "true"
+                        ).first()
+
+                        if binance_wallet:
+                            api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+                            secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+                            trading_client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")
+                        else:
+                            logger.warning(f"[ProgramExecution] No active Binance wallet found for account {account.id} on {environment}")
                     except Exception as e:
                         logger.warning(f"[ProgramExecution] Failed to create Binance trading client: {e}")
                 # Get leverage settings from BinanceWallet
@@ -690,7 +704,22 @@ class ProgramExecutionService:
             if exchange == "binance":
                 try:
                     from services.binance_trading_client import BinanceTradingClient
-                    client = BinanceTradingClient(db, binding.account_id, environment or "mainnet")
+                    from database.models import BinanceWallet
+                    from utils.encryption import decrypt_private_key
+
+                    binance_wallet = db.query(BinanceWallet).filter(
+                        BinanceWallet.account_id == binding.account_id,
+                        BinanceWallet.environment == (environment or "mainnet"),
+                        BinanceWallet.is_active == "true"
+                    ).first()
+
+                    if binance_wallet:
+                        api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+                        secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+                        client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")
+                    else:
+                        logger.error(f"[ProgramExecution] No active Binance wallet found for account {binding.account_id}")
+                        return False
                 except Exception as e:
                     logger.error(f"[ProgramExecution] Failed to create Binance client: {e}")
                     return False

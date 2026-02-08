@@ -795,13 +795,23 @@ export default function AlphaArenaFeed({
     try {
       const result = await updateArenaPnl()
       if (result.success) {
-        // Calculate total updates across all environments
+        // Calculate total updates across all exchanges and environments
         let totalTrades = 0
         let totalDecisions = 0
-        Object.values(result.environments).forEach((env) => {
-          totalTrades += env.trades_updated
-          totalDecisions += env.decisions_updated
-        })
+        // Process Hyperliquid environments
+        if (result.hyperliquid) {
+          Object.values(result.hyperliquid).forEach((env) => {
+            totalTrades += env.trades_updated + env.trades_created
+            totalDecisions += env.decisions_updated + env.program_logs_updated
+          })
+        }
+        // Process Binance environments
+        if (result.binance) {
+          Object.values(result.binance).forEach((env) => {
+            totalTrades += env.trades_updated + env.trades_created
+            totalDecisions += env.decisions_updated + env.program_logs_updated
+          })
+        }
         setPnlUpdateResult(
           t('feed.pnlUpdateSuccess', 'Updated {{trades}} trades, {{decisions}} decisions', {
             trades: totalTrades,

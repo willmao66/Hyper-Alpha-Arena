@@ -1188,3 +1188,40 @@ class BinanceTradingClient:
                 "gross_loss": 0.0,
                 "error": str(e),
             }
+
+    def get_user_fills(self, limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Get all user fills (trade executions) from Binance.
+
+        Similar to Hyperliquid's _get_user_fills() for PnL sync.
+
+        Returns:
+            List of fill dicts with unified fields:
+                - oid: Order ID (string)
+                - coin: Symbol name (e.g., "BTC")
+                - side: "B" (buy) or "A" (sell) - unified with Hyperliquid
+                - px: Execution price
+                - sz: Size filled
+                - time: Execution timestamp (milliseconds)
+                - closedPnl: Realized PnL
+                - fee: Commission fee
+        """
+        params = {"limit": limit}
+        raw_trades = self._request("GET", "/fapi/v1/userTrades", params, signed=True)
+
+        fills = []
+        for t in raw_trades:
+            # Convert Binance format to unified format (compatible with Hyperliquid)
+            fills.append({
+                "oid": str(t.get("orderId", "")),
+                "coin": self._to_internal_symbol(t.get("symbol", "")),
+                "side": "B" if t.get("side") == "BUY" else "A",
+                "px": str(t.get("price", "0")),
+                "sz": str(t.get("qty", "0")),
+                "time": t.get("time", 0),
+                "closedPnl": str(t.get("realizedPnl", "0")),
+                "fee": str(t.get("commission", "0")),
+            })
+
+        logger.info(f"[BINANCE] Retrieved {len(fills)} user fills")
+        return fills

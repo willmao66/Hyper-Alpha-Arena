@@ -1316,66 +1316,89 @@ def check_pnl_sync_status(
 @router.post("/update-pnl")
 def update_pnl_data(db: Session = Depends(get_db)):
     """
-    Update realized PnL and fee data for all trades by fetching from Hyperliquid API.
+    Update realized PnL and fee data for all trades by fetching from exchange APIs.
 
     This endpoint:
-    1. Fetches user_fills from all configured wallets (testnet + mainnet)
+    1. Fetches user_fills from all configured wallets (Hyperliquid + Binance, testnet + mainnet)
     2. Updates HyperliquidTrade.fee with actual fee data
-    3. Updates AIDecisionLog.realized_pnl for closed positions
+    3. Creates missing HyperliquidTrade records for resting orders that later filled
+    4. Updates AIDecisionLog.realized_pnl for closed positions
 
     Returns summary of updated records.
     """
-    from database.models import HyperliquidWallet, AccountPromptBinding
+    from database.models import HyperliquidWallet, BinanceWallet, AccountPromptBinding
     from services.hyperliquid_environment import get_hyperliquid_client
     from decimal import Decimal
     from collections import defaultdict
 
     result = {
         "success": True,
-        "environments": {},
+        "hyperliquid": {},
+        "binance": {},
         "errors": [],
     }
 
     snapshot_db = SnapshotSessionLocal()
 
     try:
-        # Get all configured wallets
-        wallets = db.query(HyperliquidWallet).all()
-        if not wallets:
-            return {
-                "success": False,
-                "message": "No Hyperliquid wallets configured",
-                "environments": {},
-                "errors": [],
-            }
+        # ========== Process Hyperliquid wallets ==========
+        hl_wallets = db.query(HyperliquidWallet).all()
+        if hl_wallets:
+            hl_wallet_configs = {}
+            for w in hl_wallets:
+                key = (w.account_id, w.environment)
+                if key not in hl_wallet_configs:
+                    hl_wallet_configs[key] = w
 
-        # Group wallets by (account_id, environment) to avoid duplicates
-        wallet_configs = {}
-        for w in wallets:
-            key = (w.account_id, w.environment)
-            if key not in wallet_configs:
-                wallet_configs[key] = w
+            all_hl_fills_by_env = defaultdict(list)
+            for (account_id, environment), wallet in hl_wallet_configs.items():
+                try:
+                    client = get_hyperliquid_client(db, account_id, override_environment=environment)
+                    fills = client._get_user_fills(db)
+                    all_hl_fills_by_env[environment].extend(fills)
+                    logger.info(f"[Hyperliquid] Fetched {len(fills)} fills for account {account_id} on {environment}")
+                except Exception as e:
+                    error_msg = f"[Hyperliquid] Failed to fetch fills for account {account_id} on {environment}: {str(e)}"
+                    logger.warning(error_msg)
+                    result["errors"].append(error_msg)
 
-        # Process each wallet
-        all_fills_by_env = defaultdict(list)
+            for environment, fills in all_hl_fills_by_env.items():
+                env_result = _process_fills_for_environment(
+                    db, snapshot_db, environment, fills, hl_wallet_configs, exchange="hyperliquid"
+                )
+                result["hyperliquid"][environment] = env_result
 
-        for (account_id, environment), wallet in wallet_configs.items():
-            try:
-                client = get_hyperliquid_client(db, account_id, override_environment=environment)
-                fills = client._get_user_fills(db)
-                all_fills_by_env[environment].extend(fills)
-                logger.info(f"Fetched {len(fills)} fills for account {account_id} on {environment}")
-            except Exception as e:
-                error_msg = f"Failed to fetch fills for account {account_id} on {environment}: {str(e)}"
-                logger.warning(error_msg)
-                result["errors"].append(error_msg)
+        # ========== Process Binance wallets ==========
+        bn_wallets = db.query(BinanceWallet).filter(BinanceWallet.is_active == "true").all()
+        if bn_wallets:
+            from services.binance_trading_client import BinanceTradingClient
+            from utils.encryption import decrypt_private_key
 
-        # Process fills for each environment
-        for environment, fills in all_fills_by_env.items():
-            env_result = _process_fills_for_environment(
-                db, snapshot_db, environment, fills, wallet_configs
-            )
-            result["environments"][environment] = env_result
+            bn_wallet_configs = {}
+            for w in bn_wallets:
+                key = (w.account_id, w.environment)
+                if key not in bn_wallet_configs:
+                    bn_wallet_configs[key] = w
+
+            all_bn_fills_by_env = defaultdict(list)
+            for (account_id, environment), wallet in bn_wallet_configs.items():
+                try:
+                    api_key = decrypt_private_key(wallet.api_key_encrypted)
+                    secret_key = decrypt_private_key(wallet.secret_key_encrypted)
+                    client = BinanceTradingClient(api_key, secret_key, environment)
+                    fills = client.get_user_fills()
+                    all_bn_fills_by_env[environment].extend(fills)
+                    logger.info(f"[Binance] Fetched {len(fills)} fills for account {account_id} on {environment}")
+                except Exception as e:
+                    error_msg = f"[Binance] Failed to fetch fills for account {account_id} on {environment}: {str(e)}"
+                    logger.warning(error_msg)
+                    result["errors"].append(error_msg)
+
+            for environment, fills in all_bn_fills_by_env.items():
+                env_result = _process_fills_for_environment(
+                    db, snapshot_db, environment, fills, bn_wallet_configs, exchange="binance"
+                )
+                result["binance"][environment] = env_result
 
         # Commit all changes
         snapshot_db.commit()
@@ -1399,6 +1422,7 @@ def _process_fills_for_environment(
     environment: str,
     fills: List[dict],
     wallet_configs: dict,
+    exchange: str = "hyperliquid",
 ) -> dict:
     """
     Process fills for a specific environment and update database records.
@@ -1406,7 +1430,10 @@ def _process_fills_for_environment(
     This function:
     1. Updates existing HyperliquidTrade records with fee data
     2. Creates missing HyperliquidTrade records for resting orders that later filled
-    3. Updates AIDecisionLog.realized_pnl for closed positions
+    3. Updates AIDecisionLog/ProgramExecutionLog.realized_pnl for closed positions
+
+    Args:
+        exchange: "hyperliquid" or "binance" - determines which wallet to use for API calls
 
     Returns summary of updates.
     """
@@ -1467,9 +1494,11 @@ def _process_fills_for_environment(
     # Collect existing trade order_ids for deduplication
     existing_trade_order_ids = {str(t.order_id) for t in trades if t.order_id}
 
-    # Helper function to get order trigger time from Hyperliquid API
+    # Helper function to get order trigger time from Hyperliquid API (only for Hyperliquid)
     def get_order_trigger_time(account_id: int, order_id: str) -> Optional[datetime]:
         """Get actual trigger time for TP/SL order from Hyperliquid API."""
+        if exchange != "hyperliquid":
+            return None  # Binance doesn't have this API
         key = (account_id, environment)
         if key not in wallet_configs:
             return None

@@ -565,14 +565,18 @@ export interface UpdatePnlEnvironmentResult {
   fills_count: number
   unique_orders: number
   trades_updated: number
+  trades_created: number
   decisions_updated: number
+  program_logs_updated: number
   skipped: number
+  historical_fixed?: number
 }
 
 export interface UpdatePnlResponse {
   success: boolean
   message?: string
-  environments: Record<string, UpdatePnlEnvironmentResult>
+  hyperliquid: Record<string, UpdatePnlEnvironmentResult>
+  binance: Record<string, UpdatePnlEnvironmentResult>
   errors: string[]
 }
 
