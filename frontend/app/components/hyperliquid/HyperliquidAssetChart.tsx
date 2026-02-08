@@ -51,6 +51,7 @@ export interface TradeMarker {
   symbol: string
   account_id: number
   price?: number
+  exchange?: string // 'hyperliquid' | 'binance'
 }
 
 interface HyperliquidAssetChartProps {
@@ -331,8 +332,9 @@ export default function HyperliquidAssetChart({
 
           const x = xAxis.scale(dataPoint.datetime_str)
           // Find the account this trade belongs to and get y value from that account's curve
-          // Trade markers only apply to Hyperliquid trades for now
-          const account = accountsData.find(a => a.account_id === marker.account_id && a.exchange === 'hyperliquid')
+          // Match by account_id and exchange (supports both Hyperliquid and Binance)
+          const markerExchange = marker.exchange || 'hyperliquid'
+          const account = accountsData.find(a => a.account_id === marker.account_id && a.exchange === markerExchange)
           if (!account) return null  // Skip if account not found (filtered out)
           const yValue = dataPoint[account.curveKey]
           if (yValue == null || x == null) return null

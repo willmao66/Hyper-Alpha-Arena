@@ -55,7 +55,8 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
           side: t.side,
           symbol: t.symbol,
           account_id: t.account_id,
-          price: t.price
+          price: t.price,
+          exchange: t.exchange || 'hyperliquid'
         }))
         setTradeMarkers(markers)
       } catch (error) {
