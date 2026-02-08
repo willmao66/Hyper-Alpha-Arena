@@ -539,6 +539,8 @@ export interface ArenaTrade {
   prompt_template_name?: string | null
   decision_source_type?: 'prompt_template' | 'program' | null
   related_orders?: ArenaRelatedOrder[]
+  // Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+  exchange?: string
 }
 
 export interface ArenaTradesResponse {
@@ -617,6 +619,8 @@ export interface ArenaModelChatEntry {
   signal_trigger_id?: number | null
   prompt_template_id?: number | null
   prompt_template_name?: string | null
+  // Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+  exchange?: string
 }
 
 export interface ArenaModelChatResponse {
@@ -696,6 +700,8 @@ export interface ProgramExecutionLog {
   params_snapshot: Record<string, unknown> | null
   decision_json: Record<string, unknown> | null
   created_at: string
+  // Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+  exchange?: string
 }
 
 export async function getProgramExecutions(params?: {

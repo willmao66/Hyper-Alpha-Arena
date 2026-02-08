@@ -722,6 +722,8 @@ def get_completed_trades(
                 "commission": commission,
                 "trade_time": trade.trade_time.isoformat() if trade.trade_time else None,
                 "wallet_address": trade.wallet_address,
+                # Exchange will be set based on decision source, default to hyperliquid
+                "exchange": "hyperliquid",
             }
 
             accounts_meta[account.id] = {
@@ -739,6 +741,8 @@ def get_completed_trades(
                 trade_dict["signal_trigger_id"] = decision.signal_trigger_id
                 trade_dict["prompt_template_id"] = decision.prompt_template_id
                 trade_dict["decision_source_type"] = source_type
+                # Get exchange from decision (NULL treated as "hyperliquid")
+                trade_dict["exchange"] = decision.exchange or "hyperliquid"
                 # Get name from correct table based on source type
                 if source_type == "program":
                     trade_dict["prompt_template_name"] = program_map.get(decision.prompt_template_id)
@@ -763,6 +767,8 @@ def get_completed_trades(
                 trade_dict["decision_source_type"] = "program"
                 trade_dict["prompt_template_name"] = program_map.get(pl.program_id) or pl.program_name
                 trade_dict["signal_pool_name"] = signal_pool_map.get(pl.signal_pool_id)
+                # Get exchange from program log (NULL treated as "hyperliquid")
+                trade_dict["exchange"] = pl.exchange or "hyperliquid"
                 trade_dict["related_orders"] = []
                 main_trades[order_id_str] = trade_dict
             elif order_id_str and order_id_str in program_sl_to_main:
@@ -1022,6 +1028,8 @@ def get_model_chat(
             "prompt_template_name": prompt_template_map.get(log.prompt_template_id) if log.prompt_template_id else None,
             "realized_pnl": float(log.realized_pnl) if log.realized_pnl else None,
             "has_snapshot": bool(log.prompt_snapshot),
+            # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+            "exchange": log.exchange or "hyperliquid",
         }
 
         # Only include heavy snapshot fields when explicitly requested

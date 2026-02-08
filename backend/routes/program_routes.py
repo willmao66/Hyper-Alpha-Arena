@@ -1402,6 +1402,8 @@ class ExecutionLogResponse(BaseModel):
     params_snapshot: Optional[Dict[str, Any]] = None  # Params used for execution
     decision_json: Optional[Dict[str, Any]] = None  # Full decision object
     created_at: str
+    # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+    exchange: str = "hyperliquid"
 
     class Config:
         from_attributes = True
@@ -1472,6 +1474,8 @@ def list_executions(
             params_snapshot=json.loads(log.params_snapshot) if log.params_snapshot else None,
             decision_json=json.loads(log.decision_json) if log.decision_json else None,
             created_at=log.created_at.isoformat() if log.created_at else "",
+            # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+            exchange=log.exchange or "hyperliquid",
         ))
 
     return result

@@ -418,13 +418,14 @@ class HyperliquidStrategyManager(StrategyManager):
                         enabled=strategy.enabled == "true",
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
+                        exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
                     )
                     self.strategies[strategy.account_id] = state
 
                     print(
                         f"[HyperliquidStrategy DEBUG] Loaded strategy for account {strategy.account_id} ({account.name}): "
                         f"interval={strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min), "
-                        f"signal_pool_ids={pool_ids}, enabled={strategy.enabled}, "
+                        f"signal_pool_ids={pool_ids}, enabled={strategy.enabled}, exchange={state.exchange}, "
                         f"scheduled_trigger={strategy.scheduled_trigger_enabled}, "
                         f"last_trigger={state.last_trigger_at}"
                     )

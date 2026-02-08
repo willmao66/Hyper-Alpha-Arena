@@ -347,7 +347,9 @@ class AIDecisionLog(Base):
     # Decision tracking fields for analysis
     prompt_template_id = Column(Integer, nullable=True, index=True)  # Link to strategy/prompt template OR program
     signal_trigger_id = Column(Integer, nullable=True, index=True)  # Link to signal trigger
-    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID from Hyperliquid
+    # NOTE: hyperliquid_order_id is used as exchange_order_id for attribution analysis
+    # It stores order IDs from any exchange (Hyperliquid, Binance, etc.), not just Hyperliquid
+    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID (exchange-agnostic)
     tp_order_id = Column(String(100), nullable=True)  # Take profit order ID
     sl_order_id = Column(String(100), nullable=True)  # Stop loss order ID
     realized_pnl = Column(DECIMAL(18, 6), nullable=True)  # Realized PnL (filled on user refresh)
@@ -356,6 +358,10 @@ class AIDecisionLog(Base):
     # Decision source type: "prompt_template" (AI Trader) or "program" (Program Trader)
     # NULL for old data, treated as "prompt_template" for backward compatibility
     decision_source_type = Column(String(20), nullable=True)
+
+    # Exchange identifier: "hyperliquid" or "binance"
+    # NULL for historical data, treated as "hyperliquid" for backward compatibility
+    exchange = Column(String(20), nullable=True)
 
     # Relationships
     account = relationship("Account")
@@ -1236,7 +1242,9 @@ class ProgramExecutionLog(Base):
     params_snapshot = Column(Text, nullable=True)  # JSON: params used for this execution
 
     # Order tracking for Completed Trades integration
-    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID
+    # NOTE: hyperliquid_order_id is used as exchange_order_id for attribution analysis
+    # It stores order IDs from any exchange (Hyperliquid, Binance, etc.), not just Hyperliquid
+    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID (exchange-agnostic)
     tp_order_id = Column(String(100), nullable=True)  # Take profit order ID
     sl_order_id = Column(String(100), nullable=True)  # Stop loss order ID
 
@@ -1244,6 +1252,10 @@ class ProgramExecutionLog(Base):
     environment = Column(String(20), nullable=True, index=True)  # "testnet" | "mainnet"
     realized_pnl = Column(DECIMAL(18, 6), nullable=True)  # Realized PnL (filled on user refresh)
     pnl_updated_at = Column(TIMESTAMP, nullable=True)  # When PnL was last updated
+
+    # Exchange identifier: "hyperliquid" or "binance"
+    # NULL for historical data, treated as "hyperliquid" for backward compatibility
+    exchange = Column(String(20), nullable=True)
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 

@@ -1996,6 +1996,8 @@ def save_ai_decision(
     hyperliquid_order_id: Optional[str] = None,
     tp_order_id: Optional[str] = None,
     sl_order_id: Optional[str] = None,
+    # Exchange identifier for attribution analysis
+    exchange: Optional[str] = None,
 ) -> None:
     """Save AI decision to the decision log"""
     try:
@@ -2070,6 +2072,8 @@ def save_ai_decision(
             hyperliquid_order_id=hyperliquid_order_id,
             tp_order_id=tp_order_id,
             sl_order_id=sl_order_id,
+            # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+            exchange=exchange,
         )
 
         db.add(decision_log)

@@ -248,8 +248,11 @@ export default function OrderForm({
         const avgPrice = result.avg_price || result.price;
         const priceText = avgPrice ? ` @ $${avgPrice.toFixed(2)}` : '';
 
-        if (status === 'FILLED' || status === 'NEW') {
-          toast.success(`Order ${status}! ${side.toUpperCase()} ${size} ${symbol}${priceText}`);
+        // Unified status: "filled" or "resting" (same as Hyperliquid)
+        if (status === 'filled') {
+          toast.success(`Order Filled! ${side.toUpperCase()} ${size} ${symbol}${priceText}`);
+        } else if (status === 'resting') {
+          toast.success(`Order Placed! ${side.toUpperCase()} ${size} ${symbol}${priceText} (waiting to fill)`);
         } else {
           toast.error(`Order failed: ${result.error || status || 'Unknown error'}`);
         }

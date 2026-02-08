@@ -260,7 +260,6 @@ async def place_order(
     db: Session = Depends(get_db)
 ):
     """Place a manual order on Binance Futures"""
-    print(f"[BINANCE DEBUG] place_order request: tp={request.take_profit_price}, sl={request.stop_loss_price}")
     if not environment:
         environment = get_global_trading_mode(db)
 
@@ -282,85 +281,36 @@ async def place_order(
 
     try:
         client = _get_client(wallet)
-        result = client.place_order(
+
+        # Use unified place_order_with_tpsl method (same as AI Trader and Program Trader)
+        is_buy = request.side.upper() == "BUY"
+        result = client.place_order_with_tpsl(
+            db=db,
             symbol=request.symbol,
-            side=request.side,
-            quantity=request.quantity,
-            order_type=request.order_type,
-            price=request.price,
+            is_buy=is_buy,
+            size=request.quantity,
+            price=request.price or 0,
             leverage=request.leverage,
-            reduce_only=request.reduce_only
+            time_in_force="GTC",
+            reduce_only=request.reduce_only,
+            take_profit_price=request.take_profit_price,
+            stop_loss_price=request.stop_loss_price,
+            order_type=request.order_type,
+            tp_execution="market",  # Manual orders default to market execution
+            sl_execution="market",
         )
 
-        # Place TP/SL orders if main order succeeded and not reduce_only
-        # For MARKET orders, status may be "NEW" initially but will fill immediately
-        tp_result = None
-        sl_result = None
-        order_status = result.get("status")
-        main_order_id = result.get("order_id")
-        is_market_order = request.order_type.upper() == "MARKET"
-        should_place_tpsl = (
-            not request.reduce_only and
-            order_status in ["FILLED", "NEW"]  # Support both MARKET and LIMIT orders
-        )
-
-        logger.info(f"TP/SL check: status={order_status}, is_market={is_market_order}, reduce_only={request.reduce_only}, should_place={should_place_tpsl}, tp={request.take_profit_price}, sl={request.stop_loss_price}")
-        print(f"[BINANCE DEBUG] TP/SL check: should_place={should_place_tpsl}, tp={request.take_profit_price}, sl={request.stop_loss_price}")
-
-        if should_place_tpsl:
-            executed_qty = result.get("executed_qty") or request.quantity
-            # Determine close side (opposite of entry)
-            close_side = "SELL" if request.side == "BUY" else "BUY"
-            logger.info(f"Placing TP/SL: executed_qty={executed_qty}, close_side={close_side}")
-            print(f"[BINANCE DEBUG] Placing TP/SL: executed_qty={executed_qty}, close_side={close_side}")
-
-            # Place Take Profit order with client_algo_id for association
-            if request.take_profit_price and request.take_profit_price > 0:
-                logger.info(f"Attempting TP order: symbol={request.symbol}, price={request.take_profit_price}")
-                print(f"[BINANCE DEBUG] Attempting TP order: symbol={request.symbol}, price={request.take_profit_price}")
-                try:
-                    tp_result = client.place_stop_order(
-                        symbol=request.symbol,
-                        side=close_side,
-                        quantity=executed_qty,
-                        stop_price=request.take_profit_price,
-                        order_type="TAKE_PROFIT_MARKET",
-                        reduce_only=True,
-                        client_algo_id=f"TP_{main_order_id}" if main_order_id else None
-                    )
-                    logger.info(f"TP order placed: algo_id={tp_result.get('algo_id')}")
-                    print(f"[BINANCE DEBUG] TP order placed: algo_id={tp_result.get('algo_id')}")
-                except Exception as e:
-                    logger.error(f"Failed to place TP order: {e}", exc_info=True)
-                    print(f"[BINANCE DEBUG] TP order FAILED: {e}")
-
-            # Place Stop Loss order with client_algo_id for association
-            if request.stop_loss_price and request.stop_loss_price > 0:
-                logger.warning(f"Attempting SL order: symbol={request.symbol}, price={request.stop_loss_price}")
-                print(f"[BINANCE DEBUG] Attempting SL order: symbol={request.symbol}, price={request.stop_loss_price}")
-                try:
-                    sl_result = client.place_stop_order(
-                        symbol=request.symbol,
-                        side=close_side,
-                        quantity=executed_qty,
-                        stop_price=request.stop_loss_price,
-                        order_type="STOP_MARKET",
-                        reduce_only=True,
-                        client_algo_id=f"SL_{main_order_id}" if main_order_id else None
-                    )
-                    logger.warning(f"SL order placed: algo_id={sl_result.get('algo_id')}")
-                    print(f"[BINANCE DEBUG] SL order placed: algo_id={sl_result.get('algo_id')}")
-                except Exception as e:
-                    logger.error(f"Failed to place SL order: {e}", exc_info=True)
-                    print(f"[BINANCE DEBUG] SL order FAILED: {e}")
-            else:
-                logger.warning(f"SL order skipped: stop_loss_price={request.stop_loss_price}")
-                print(f"[BINANCE DEBUG] SL order skipped: stop_loss_price={request.stop_loss_price}")
-
-        # Add TP/SL results to response
-        result["tp_order"] = tp_result
-        result["sl_order"] = sl_result
-        return result
+        # Map result to API response format
+        return {
+            "order_id": result.get("order_id"),
+            "status": result.get("status"),
+            "filled_qty": result.get("filled_qty"),
+            "avg_price": result.get("avg_price"),
+            "environment": result.get("environment"),
+            "tp_order": {"algo_id": result.get("tp_order_id")} if result.get("tp_order_id") else None,
+            "sl_order": {"algo_id": result.get("sl_order_id")} if result.get("sl_order_id") else None,
+            "errors": result.get("errors", []),
+        }
     except Exception as e:
         logger.error(f"Order failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

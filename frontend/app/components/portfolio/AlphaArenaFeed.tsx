@@ -1134,21 +1134,33 @@ export default function AlphaArenaFeed({
                           </div>
                         </div>
                         {(trade.signal_trigger_id || trade.prompt_template_name) && (
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground pt-1 border-t border-border/50">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                              trade.signal_trigger_id
-                                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                            }`}>
-                              {trade.signal_trigger_id
-                                ? t('feed.signalPoolTrigger', 'Signal Pool')
-                                : t('feed.scheduledTrigger', 'Scheduled')}
-                            </span>
-                            {trade.prompt_template_name && trade.decision_source_type !== 'program' && (
-                              <span className="px-2 py-0.5 rounded font-medium bg-muted text-foreground">
-                                {trade.prompt_template_name}
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground pt-1 border-t border-border/50">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                                trade.signal_trigger_id
+                                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                              }`}>
+                                {trade.signal_trigger_id
+                                  ? t('feed.signalPoolTrigger', 'Signal Pool')
+                                  : t('feed.scheduledTrigger', 'Scheduled')}
                               </span>
-                            )}
+                              {trade.prompt_template_name && trade.decision_source_type !== 'program' && (
+                                <span className="px-2 py-0.5 rounded font-medium bg-muted text-foreground">
+                                  {trade.prompt_template_name}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                              <img
+                                src={trade.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                                alt={trade.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="text-[10px] font-medium text-slate-200">
+                                {trade.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              </span>
+                            </div>
                           </div>
                         )}
                         {trade.related_orders && trade.related_orders.length > 0 && (
@@ -1238,32 +1250,44 @@ export default function AlphaArenaFeed({
                           </div>
                           <span>{formatDate(entry.decision_time)}</span>
                         </div>
-                        <div className="text-sm font-medium text-foreground flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            entry.operation?.toUpperCase() === 'BUY'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : entry.operation?.toUpperCase() === 'SELL'
-                              ? 'bg-red-100 text-red-800'
-                              : entry.operation?.toUpperCase() === 'CLOSE'
-                              ? 'bg-blue-100 text-blue-800'
-                              : entry.operation?.toUpperCase() === 'HOLD'
-                              ? 'bg-gray-200 text-gray-800'
-                              : 'bg-orange-100 text-orange-800'
-                          }`}>
-                            {(entry.operation || 'UNKNOWN').toUpperCase()}
-                          </span>
-                          {entry.symbol && (
-                            <span className="font-semibold">{entry.symbol}</span>
-                          )}
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            entry.signal_trigger_id
-                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                          }`}>
-                            {entry.signal_trigger_id
-                              ? t('feed.signalPoolTrigger', 'Signal Pool')
-                              : t('feed.scheduledTrigger', 'Scheduled')}
-                          </span>
+                        <div className="text-sm font-medium text-foreground flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${
+                              entry.operation?.toUpperCase() === 'BUY'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : entry.operation?.toUpperCase() === 'SELL'
+                                ? 'bg-red-100 text-red-800'
+                                : entry.operation?.toUpperCase() === 'CLOSE'
+                                ? 'bg-blue-100 text-blue-800'
+                                : entry.operation?.toUpperCase() === 'HOLD'
+                                ? 'bg-gray-200 text-gray-800'
+                                : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {(entry.operation || 'UNKNOWN').toUpperCase()}
+                            </span>
+                            {entry.symbol && (
+                              <span className="font-semibold">{entry.symbol}</span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              entry.signal_trigger_id
+                                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                              {entry.signal_trigger_id
+                                ? t('feed.signalPoolTrigger', 'Signal Pool')
+                                : t('feed.scheduledTrigger', 'Scheduled')}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                            <img
+                              src={entry.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                              alt={entry.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              className="h-3.5 w-3.5"
+                            />
+                            <span className="text-[10px] font-medium text-slate-200">
+                              {entry.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                            </span>
+                          </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {isExpanded ? entry.reason : `${entry.reason.slice(0, 160)}${entry.reason.length > 160 ? '…' : ''}`}
@@ -1593,37 +1617,49 @@ export default function AlphaArenaFeed({
                           </div>
                           <span>{formatDate(log.created_at)}</span>
                         </div>
-                        <div className="text-sm font-medium text-foreground flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            log.decision_action?.toUpperCase() === 'BUY'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : log.decision_action?.toUpperCase() === 'SELL'
-                              ? 'bg-red-100 text-red-800'
-                              : log.decision_action?.toUpperCase() === 'CLOSE'
-                              ? 'bg-blue-100 text-blue-800'
-                              : log.decision_action?.toUpperCase() === 'HOLD'
-                              ? 'bg-gray-200 text-gray-800'
-                              : 'bg-orange-100 text-orange-800'
-                          }`}>
-                            {(log.decision_action || 'UNKNOWN').toUpperCase()}
-                          </span>
-                          {log.decision_symbol && (
-                            <span className="font-semibold">{log.decision_symbol}</span>
-                          )}
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            log.trigger_type === 'signal'
-                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                          }`}>
-                            {log.trigger_type === 'signal' ? t('feed.signalPoolTrigger', 'Signal Pool') : t('feed.scheduledTrigger', 'Scheduled')}
-                          </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            log.success
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                              : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                          }`}>
-                            {log.success ? t('common.success', 'Success') : t('common.failed', 'Failed')}
-                          </span>
+                        <div className="text-sm font-medium text-foreground flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${
+                              log.decision_action?.toUpperCase() === 'BUY'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : log.decision_action?.toUpperCase() === 'SELL'
+                                ? 'bg-red-100 text-red-800'
+                                : log.decision_action?.toUpperCase() === 'CLOSE'
+                                ? 'bg-blue-100 text-blue-800'
+                                : log.decision_action?.toUpperCase() === 'HOLD'
+                                ? 'bg-gray-200 text-gray-800'
+                                : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {(log.decision_action || 'UNKNOWN').toUpperCase()}
+                            </span>
+                            {log.decision_symbol && (
+                              <span className="font-semibold">{log.decision_symbol}</span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              log.trigger_type === 'signal'
+                                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                              {log.trigger_type === 'signal' ? t('feed.signalPoolTrigger', 'Signal Pool') : t('feed.scheduledTrigger', 'Scheduled')}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              log.success
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                            }`}>
+                              {log.success ? t('common.success', 'Success') : t('common.failed', 'Failed')}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                            <img
+                              src={log.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                              alt={log.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              className="h-3.5 w-3.5"
+                            />
+                            <span className="text-[10px] font-medium text-slate-200">
+                              {log.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                            </span>
+                          </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {isExpanded ? log.decision_reason : `${(log.decision_reason || '').slice(0, 160)}${(log.decision_reason || '').length > 160 ? '…' : ''}`}
