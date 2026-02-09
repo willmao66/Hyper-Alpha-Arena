@@ -176,7 +176,7 @@ class DataProvider:
 
             if not kline_data:
                 logger.warning(f"No kline data for indicator {indicator} on {symbol} {period}")
-                self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period}, result)
+                self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period, "exchange": self.exchange}, result)
                 return result
 
             # Calculate indicator using same function as AI Trader
@@ -202,7 +202,7 @@ class DataProvider:
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"get_indicator failed for {symbol} {indicator} {period}: {e}")
-        self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period}, result)
+        self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period, "exchange": self.exchange}, result)
         return result
 
     def get_flow(self, symbol: str, metric: str, period: str) -> Dict[str, Any]:
@@ -411,7 +411,7 @@ class DataProvider:
 
         if cache_key in self._market_data_cache:
             result = self._market_data_cache[cache_key]
-            self._log_query("get_market_data", {"symbol": symbol}, {"cached": True, **result})
+            self._log_query("get_market_data", {"symbol": symbol, "exchange": self.exchange}, {"cached": True, **result})
             return result
 
         # Call the same function AI Trader uses
@@ -419,9 +419,9 @@ class DataProvider:
             result = get_ticker_data(symbol, self._get_market_param(), self.environment)
             if result:
                 self._market_data_cache[cache_key] = result
-                self._log_query("get_market_data", {"symbol": symbol}, result)
+                self._log_query("get_market_data", {"symbol": symbol, "exchange": self.exchange}, result)
                 return result
         except Exception as e:
-            self._log_query("get_market_data", {"symbol": symbol}, {"error": str(e)})
+            self._log_query("get_market_data", {"symbol": symbol, "exchange": self.exchange}, {"error": str(e)})
 
         return {}

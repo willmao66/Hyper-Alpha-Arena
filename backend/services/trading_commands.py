@@ -1268,6 +1268,23 @@ def place_ai_driven_binance_order(
                 environment=wallet.environment or "testnet"
             )
 
+            # Build decision_kwargs for tracking (same as Hyperliquid)
+            decision_kwargs = {"wallet_address": wallet.wallet_address, "exchange": "binance"}
+
+            # Get tracking fields for decision analysis
+            try:
+                from database.models import AccountPromptBinding
+                binding = db.query(AccountPromptBinding).filter_by(account_id=account.id).first()
+                decision_kwargs["prompt_template_id"] = binding.prompt_template_id if binding else None
+            except Exception as e:
+                logger.warning(f"Failed to get prompt_template_id for {account.name}: {e}")
+                decision_kwargs["prompt_template_id"] = None
+
+            # Get signal_trigger_id from trigger_context (only present for signal-triggered decisions)
+            decision_kwargs["signal_trigger_id"] = (
+                trigger_context.get("signal_trigger_id") if trigger_context else None
+            )
+
             # Get account state
             try:
                 account_state = client.get_account_state(db)
@@ -1348,7 +1365,8 @@ def place_ai_driven_binance_order(
                     db, account, client, decision, portfolio, positions, prices,
                     available_balance=available_balance,
                     max_leverage=wallet.max_leverage or 20,
-                    default_leverage=wallet.default_leverage or 5
+                    default_leverage=wallet.default_leverage or 5,
+                    decision_kwargs=decision_kwargs
                 )
 
         except Exception as e:
@@ -1369,6 +1387,7 @@ def _execute_binance_decision(
     available_balance: float = 0.0,
     max_leverage: int = 20,
     default_leverage: int = 5,
+    decision_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Execute a single AI decision on Binance.
@@ -1380,6 +1399,10 @@ def _execute_binance_decision(
     - Places order with TP/SL via place_order_with_tpsl()
     - Records order IDs for attribution
     """
+    # Default decision_kwargs if not provided
+    if decision_kwargs is None:
+        decision_kwargs = {}
+
     operation = decision.get("operation", "").lower()
     symbol = decision.get("symbol", "").upper() if decision.get("symbol") else ""
     target_portion = float(decision.get("target_portion_of_balance", 0))
@@ -1398,19 +1421,19 @@ def _execute_binance_decision(
     # 1. Validate operation type
     if operation not in ["buy", "sell", "hold", "close"]:
         logger.warning(f"[BINANCE] Invalid operation '{operation}' from AI for {account.name}")
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance")
+        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
         return
 
     # 2. Handle HOLD operation
     if operation == "hold":
         logger.info(f"[BINANCE] AI decided to HOLD for {account.name} - no action taken")
-        save_ai_decision(db, account, decision, portfolio, executed=True, exchange="binance")
+        save_ai_decision(db, account, decision, portfolio, executed=True, exchange="binance", **decision_kwargs)
         return
 
     # 3. Validate symbol
     if not symbol:
         logger.warning(f"[BINANCE] No symbol provided in decision for {account.name}")
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance")
+        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
         return
 
     # 4. Validate leverage range
@@ -1425,7 +1448,7 @@ def _execute_binance_decision(
     price = prices.get(symbol, 0)
     if not price or price <= 0:
         logger.warning(f"[BINANCE] Invalid price for {symbol} for {account.name}")
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance")
+        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
         return
 
     order_result = None
@@ -1435,7 +1458,7 @@ def _execute_binance_decision(
             # 6. Validate target_portion
             if target_portion <= 0 or target_portion > 1:
                 logger.warning(f"[BINANCE] Invalid target_portion {target_portion} from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance")
+                save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
                 return
 
             # 7. Calculate quantity: margin * leverage / price
@@ -1467,7 +1490,7 @@ def _execute_binance_decision(
             # Validate target_portion
             if target_portion <= 0 or target_portion > 1:
                 logger.warning(f"[BINANCE] Invalid target_portion {target_portion} from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance")
+                save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
                 return
 
             # Calculate quantity
@@ -1503,11 +1526,11 @@ def _execute_binance_decision(
                 save_ai_decision(
                     db, account, decision, portfolio, executed=True,
                     hyperliquid_order_id=str(result.get("order_id")) if result.get("order_id") else None,
-                    exchange="binance"
+                    exchange="binance", **decision_kwargs
                 )
             else:
                 logger.info(f"[BINANCE] No position to close for {symbol}")
-                save_ai_decision(db, account, decision, portfolio, executed=True, exchange="binance")
+                save_ai_decision(db, account, decision, portfolio, executed=True, exchange="binance", **decision_kwargs)
             return
 
         # 9. Save decision with order IDs for attribution
@@ -1521,7 +1544,7 @@ def _execute_binance_decision(
                 hyperliquid_order_id=str(order_result.get("order_id")) if order_result.get("order_id") else None,
                 tp_order_id=str(order_result.get("tp_order_id")) if order_result.get("tp_order_id") else None,
                 sl_order_id=str(order_result.get("sl_order_id")) if order_result.get("sl_order_id") else None,
-                exchange="binance"
+                exchange="binance", **decision_kwargs
             )
 
             if executed:
@@ -1535,7 +1558,7 @@ def _execute_binance_decision(
 
     except Exception as e:
         logger.error(f"[BINANCE] Error executing {operation} for {symbol}: {e}", exc_info=True)
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance")
+        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
 
 
 BINANCE_TRADE_JOB_ID = "binance_ai_trade"
