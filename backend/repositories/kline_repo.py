@@ -127,7 +127,8 @@ class KlineRepository:
             exchange: Exchange name
             environment: Environment (testnet or mainnet)
         """
-        cutoff_timestamp = int((time.time() - keep_days * 24 * 3600) * 1000)
+        # Note: CryptoKline.timestamp is stored in seconds (not milliseconds)
+        cutoff_timestamp = int(time.time() - keep_days * 24 * 3600)
 
         self.db.query(CryptoKline).filter(
             and_(

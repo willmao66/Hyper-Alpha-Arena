@@ -189,8 +189,9 @@ def _calculate_vwap(df: pd.DataFrame) -> List[float]:
     """计算成交量加权平均价"""
     try:
         # VWAP 需要 DatetimeIndex
+        # Note: timestamp is stored in seconds (not milliseconds)
         df_copy = df.copy()
-        df_copy['datetime'] = pd.to_datetime(df_copy['timestamp'], unit='ms')
+        df_copy['datetime'] = pd.to_datetime(df_copy['timestamp'], unit='s')
         df_copy = df_copy.set_index('datetime')
         vwap = ta.vwap(df_copy['high'], df_copy['low'], df_copy['close'], df_copy['volume'])
         return vwap.fillna(0).tolist()
@@ -279,7 +280,7 @@ def calculate_indicator(
             return None
 
         # Convert to list of dicts for calculate_indicators
-        # Note: CryptoKline uses open_price/high_price/etc and timestamp is integer (ms)
+        # Note: CryptoKline uses open_price/high_price/etc and timestamp is integer (seconds)
         kline_data = [
             {
                 'timestamp': int(row.timestamp),

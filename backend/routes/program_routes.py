@@ -1273,11 +1273,12 @@ def run_backtest(program_id: int, request: BacktestRequest, db: Session = Depend
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
 
-    start_time = datetime.utcnow() - timedelta(days=request.days)
+    # Convert datetime to seconds timestamp for comparison with CryptoKline.timestamp
+    start_time_s = int((datetime.utcnow() - timedelta(days=request.days)).timestamp())
     rows = db.query(CryptoKline).filter(
         CryptoKline.symbol == request.symbol,
         CryptoKline.period == request.period,
-        CryptoKline.timestamp >= start_time,
+        CryptoKline.timestamp >= start_time_s,
     ).order_by(CryptoKline.timestamp).all()
 
     if len(rows) < 100:
@@ -1285,12 +1286,12 @@ def run_backtest(program_id: int, request: BacktestRequest, db: Session = Depend
 
     klines = [
         Kline(
-            timestamp=int(row.timestamp.timestamp() * 1000),
-            open=float(row.open),
-            high=float(row.high),
-            low=float(row.low),
-            close=float(row.close),
-            volume=float(row.volume),
+            timestamp=int(row.timestamp) * 1000,  # Convert seconds to milliseconds
+            open=float(row.open_price) if row.open_price else 0.0,
+            high=float(row.high_price) if row.high_price else 0.0,
+            low=float(row.low_price) if row.low_price else 0.0,
+            close=float(row.close_price) if row.close_price else 0.0,
+            volume=float(row.volume) if row.volume else 0.0,
         )
         for row in rows
     ]
