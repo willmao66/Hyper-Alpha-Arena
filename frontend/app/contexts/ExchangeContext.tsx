@@ -70,8 +70,8 @@ export function ExchangeProvider({ children }: ExchangeProviderProps) {
       apiSupported: true,
       comingSoon: false,
       logo: '/static/hyperliquid_logo.svg',
-      description: 'Decentralized perpetual futures exchange',
-      features: ['No KYC Required', 'Low Fees', 'High Performance'],
+      description: '#1 Decentralized Perpetual DEX',
+      features: ['No KYC Required', 'On-chain Settlement', 'Testnet Available'],
       referralLink: 'https://app.hyperliquid.xyz/join/HYPERSVIP',
       buttonText: 'Open Futures',
       buttonVariant: 'default'
@@ -85,8 +85,8 @@ export function ExchangeProvider({ children }: ExchangeProviderProps) {
       apiSupported: false,
       comingSoon: true,
       logo: '/static/binance_logo.svg',
-      description: 'World\'s largest cryptocurrency exchange',
-      features: ['30% Fee Discount', 'High Liquidity', 'Advanced Tools'],
+      description: '#1 Global CEX by Volume',
+      features: ['KYC Required', 'High Liquidity', 'Testnet Available'],
       referralLink: 'https://accounts.maxweb.red/register?ref=HYPERVIP',
       buttonText: 'Register First',
       buttonVariant: 'outline'

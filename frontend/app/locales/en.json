@@ -154,6 +154,8 @@
   },
   "header": {
     "exchanges": "Exchanges",
+    "supported": "Supported",
+    "supportedExchanges": "Supported Exchanges",
     "premiumDiscount": "Subscribe to Premium for FREE service fee.",
     "vipMember": "VIP Member",
     "yearlyPlan": "Yearly Plan",
@@ -738,6 +740,8 @@
   "exchange": {
     "chooseExchange": "Choose Exchange",
     "selectToStart": "Select an exchange to start trading",
+    "supportedExchanges": "Supported Exchanges",
+    "compareDesc": "Compare features and data collection methods",
     "active": "Active",
     "comingSoon": "Coming Soon",
     "selectionChanged": "Exchange Selection Changed",
@@ -745,7 +749,32 @@
     "saving": "Saving...",
     "saveChanges": "Save Changes",
     "proTip": "Pro Tip",
-    "referralTip": "Register through our referral links to enjoy fee discounts and support the platform development."
+    "referralTip": "Register through our referral links to enjoy fee discounts and support the platform development.",
+    "dataCollection": "Data Collection",
+    "binanceNote": "One identity = One account. Register with referral link to get fee discount.",
+    "hyperliquid": {
+      "description": "#1 Decentralized Perpetual DEX",
+      "feature1": "No KYC Required",
+      "feature2": "On-chain Settlement",
+      "feature3": "Testnet Available",
+      "button": "Open Futures"
+    },
+    "binance": {
+      "description": "#1 Global CEX by Volume",
+      "feature1": "KYC Required",
+      "feature2": "High Liquidity",
+      "feature3": "Testnet Available",
+      "button": "Register First"
+    },
+    "data": {
+      "kline": "K-line",
+      "oi": "Open Interest",
+      "funding": "Funding Rate",
+      "trades": "Trades",
+      "takerVolume": "Taker Volume",
+      "orderbook": "Orderbook",
+      "realtime": "Real-time"
+    }
   },
   "trading": {
     "mode": "Mode",

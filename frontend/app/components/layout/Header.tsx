@@ -83,15 +83,18 @@ export default function Header({ title = 'Hyper Alpha Arena', currentAccount, sh
             variant="outline"
             size="sm"
             onClick={() => setIsExchangeModalOpen(true)}
-            className="hidden md:flex px-3 py-2 text-sm font-medium"
+            className="hidden md:flex items-center px-2 py-1.5 text-sm font-medium gap-2"
           >
-            <span className="mr-2">🔥</span>
-            {t('header.exchanges', 'Exchanges')}:
-            <span className="ml-1 mr-1">
-              <ExchangeIcon exchangeId={currentExchangeInfo.id} size={16} />
-            </span>
-            {currentExchangeInfo.displayName}
-            <ChevronDown className="ml-2 h-3 w-3" />
+            {t('header.supported', 'Supported')}
+            <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+              <ExchangeIcon exchangeId="hyperliquid" size={14} />
+              <span className="text-[10px] font-medium text-slate-200">Hyperliquid</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+              <ExchangeIcon exchangeId="binance" size={14} />
+              <span className="text-[10px] font-medium text-slate-200">Binance</span>
+            </div>
+            <ChevronDown className="h-3 w-3" />
           </Button>
           {currentExchangeInfo.id === 'hyperliquid' && !isVipMember && (
             <span className="hidden md:inline text-xs text-muted-foreground ml-2">{t('header.premiumDiscount', 'Subscribe to Premium for service fee 50% off.')}</span>

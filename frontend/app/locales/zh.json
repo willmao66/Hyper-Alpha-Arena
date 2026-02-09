@@ -157,6 +157,8 @@
   },
   "header": {
     "exchanges": "交易所",
+    "supported": "支持",
+    "supportedExchanges": "支持的交易所",
     "premiumDiscount": "订阅高级版，免服务费",
     "vipMember": "VIP会员",
     "yearlyPlan": "年度套餐",
@@ -757,6 +759,8 @@
   "exchange": {
     "chooseExchange": "选择交易所",
     "selectToStart": "选择一个交易所开始交易",
+    "supportedExchanges": "支持的交易所",
+    "compareDesc": "对比功能特性和数据采集方式",
     "active": "当前使用",
     "comingSoon": "即将上线",
     "selectionChanged": "交易所选择已更改",
@@ -764,7 +768,32 @@
     "saving": "保存中...",
     "saveChanges": "保存更改",
     "proTip": "小贴士",
-    "referralTip": "通过我们的推荐链接注册，享受手续费折扣并支持平台发展。"
+    "referralTip": "通过我们的推荐链接注册，享受手续费折扣并支持平台发展。",
+    "dataCollection": "数据采集",
+    "binanceNote": "一个身份 = 一个账户。通过推荐链接注册可享手续费折扣。",
+    "hyperliquid": {
+      "description": "最大的去中心化永续合约交易所",
+      "feature1": "无需 KYC",
+      "feature2": "链上结算",
+      "feature3": "支持测试网",
+      "button": "打开交易"
+    },
+    "binance": {
+      "description": "全球交易量最大的中心化交易所",
+      "feature1": "需要 KYC",
+      "feature2": "高流动性",
+      "feature3": "支持测试网",
+      "button": "先注册"
+    },
+    "data": {
+      "kline": "K线",
+      "oi": "持仓量",
+      "funding": "资金费率",
+      "trades": "成交",
+      "takerVolume": "主动成交量",
+      "orderbook": "订单簿",
+      "realtime": "实时"
+    }
   },
   "trading": {
     "mode": "交易模式",
