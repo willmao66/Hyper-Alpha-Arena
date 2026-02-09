@@ -101,11 +101,18 @@ def _calculate_sma(df: pd.DataFrame, period: int) -> List[float]:
 def _calculate_macd(df: pd.DataFrame) -> Dict[str, List[float]]:
     """计算MACD指标"""
     macd_data = ta.macd(df['close'])
+    if macd_data is None or macd_data.empty:
+        return {'macd': [], 'signal': [], 'histogram': []}
+
+    # Dynamic column name lookup to handle pandas-ta version differences
+    macd_col = [c for c in macd_data.columns if c.startswith('MACD_')]
+    signal_col = [c for c in macd_data.columns if c.startswith('MACDs_')]
+    hist_col = [c for c in macd_data.columns if c.startswith('MACDh_')]
 
     return {
-        'macd': macd_data['MACD_12_26_9'].fillna(0).tolist(),
-        'signal': macd_data['MACDs_12_26_9'].fillna(0).tolist(),
-        'histogram': macd_data['MACDh_12_26_9'].fillna(0).tolist()
+        'macd': macd_data[macd_col[0]].fillna(0).tolist() if macd_col else [],
+        'signal': macd_data[signal_col[0]].fillna(0).tolist() if signal_col else [],
+        'histogram': macd_data[hist_col[0]].fillna(0).tolist() if hist_col else []
     }
 
 
@@ -194,18 +201,27 @@ def _calculate_vwap(df: pd.DataFrame) -> List[float]:
         df_copy['datetime'] = pd.to_datetime(df_copy['timestamp'], unit='s')
         df_copy = df_copy.set_index('datetime')
         vwap = ta.vwap(df_copy['high'], df_copy['low'], df_copy['close'], df_copy['volume'])
+        if vwap is None:
+            return []
         return vwap.fillna(0).tolist()
     except Exception as e:
         logger.error(f"Error calculating VWAP: {e}")
-        return None
+        return []
 
 
 def _calculate_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, List[float]]:
     """计算随机震荡指标"""
     stoch = ta.stoch(df['high'], df['low'], df['close'], k=k_period, d=d_period)
+    if stoch is None or stoch.empty:
+        return {'k': [], 'd': []}
+
+    # Dynamic column name lookup to handle pandas-ta version differences
+    k_col = [c for c in stoch.columns if c.startswith('STOCHk_')]
+    d_col = [c for c in stoch.columns if c.startswith('STOCHd_')]
+
     return {
-        'k': stoch[f'STOCHk_{k_period}_{d_period}_3'].fillna(50).tolist(),
-        'd': stoch[f'STOCHd_{k_period}_{d_period}_3'].fillna(50).tolist()
+        'k': stoch[k_col[0]].fillna(50).tolist() if k_col else [],
+        'd': stoch[d_col[0]].fillna(50).tolist() if d_col else []
     }
 
 

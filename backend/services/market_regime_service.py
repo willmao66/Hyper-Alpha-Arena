@@ -628,7 +628,7 @@ def get_market_regime(
 
     # Extract indicator values
     # CVD ratio: current CVD / total notional (buy + sell)
-    cvd_current = cvd_data.get("current", 0)
+    cvd_current = cvd_data.get("current", 0) or 0
     taker_buy = taker_data.get("buy", 0)
     taker_sell = taker_data.get("sell", 0)
     total_notional = taker_buy + taker_sell

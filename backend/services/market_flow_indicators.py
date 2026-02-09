@@ -818,7 +818,7 @@ def _get_volatility_data(
     current_high = current_bucket["high"]
     current_low = current_bucket["low"]
     current_volatility = ((current_high - current_low) / current_low * 100
-                          if current_low and current_low > 0 else 0)
+                          if current_high and current_low and current_low > 0 else 0)
 
     last_5 = volatilities[-5:] if len(volatilities) >= 5 else volatilities
 
