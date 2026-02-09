@@ -75,6 +75,15 @@ export default function BinanceWalletSection({
   // Rebate ineligible modal state
   const [showRebateModal, setShowRebateModal] = useState(false)
   const [rebateInfo, setRebateInfo] = useState<{ rebate_working: boolean; is_new_user: boolean } | undefined>()
+  // Store pending mainnet binding params for confirm-limited-binding
+  const [pendingMainnetBinding, setPendingMainnetBinding] = useState<{
+    api_key: string
+    secret_key: string
+    max_leverage: number
+    default_leverage: number
+  } | null>(null)
+  // Daily quota for mainnet non-rebate accounts
+  const [mainnetQuota, setMainnetQuota] = useState<{ limited: boolean; used: number; limit: number; remaining: number } | null>(null)
 
   useEffect(() => {
     loadWalletInfo()
@@ -137,8 +146,23 @@ export default function BinanceWalletSection({
         } catch (e) {
           console.error('Failed to load mainnet balance:', e)
         }
+        // Load daily quota for mainnet
+        try {
+          const quotaRes = await fetch(`${API_BASE}/accounts/${accountId}/daily-quota`)
+          if (quotaRes.ok) {
+            const quota = await quotaRes.json()
+            if (quota.limited) {
+              setMainnetQuota(quota)
+            } else {
+              setMainnetQuota(null)
+            }
+          }
+        } catch (e) {
+          console.error('Failed to load mainnet quota:', e)
+        }
       } else {
         setMainnetWallet(null)
+        setMainnetQuota(null)
       }
     } catch (error) {
       console.error('Failed to load Binance config:', error)
@@ -192,6 +216,13 @@ export default function BinanceWalletSection({
       // Check for rebate ineligible response (mainnet only)
       if (data.error_code === 'REBATE_INELIGIBLE') {
         setRebateInfo(data.rebate_info)
+        // Store binding params for confirm-limited-binding
+        setPendingMainnetBinding({
+          api_key: cleanApiKey,
+          secret_key: cleanSecretKey,
+          max_leverage: maxLev,
+          default_leverage: defaultLev
+        })
         setShowRebateModal(true)
         return
       }
@@ -245,6 +276,39 @@ export default function BinanceWalletSection({
     }
   }
 
+  const handleConfirmLimitedBinding = async () => {
+    if (!pendingMainnetBinding) return
+    try {
+      setSavingMainnet(true)
+      const res = await fetch(`${API_BASE}/accounts/${accountId}/confirm-limited-binding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: pendingMainnetBinding.api_key,
+          secret_key: pendingMainnetBinding.secret_key,
+          max_leverage: pendingMainnetBinding.max_leverage,
+          default_leverage: pendingMainnetBinding.default_leverage
+        })
+      })
+      const data = await res.json()
+      if (res.ok && data.success !== false) {
+        toast.success('Binance mainnet configured (daily quota: 20)')
+        setMainnetApiKey('')
+        setMainnetSecretKey('')
+        setEditingMainnet(false)
+        setPendingMainnetBinding(null)
+        await loadWalletInfo()
+        onWalletConfigured?.()
+      } else {
+        toast.error(data.detail || data.message || 'Failed to configure')
+      }
+    } catch (error) {
+      toast.error('Network error')
+    } finally {
+      setSavingMainnet(false)
+    }
+  }
+
   const handleDeleteWallet = async (environment: 'testnet' | 'mainnet') => {
     if (!confirm(`Delete Binance ${environment} wallet?`)) return
     const setSaving = environment === 'testnet' ? setSavingTestnet : setSavingMainnet
@@ -281,7 +345,8 @@ export default function BinanceWalletSection({
     showKey: boolean,
     setShowKey: (v: boolean) => void,
     saving: boolean,
-    testing: boolean
+    testing: boolean,
+    quota?: { limited: boolean; used: number; limit: number; remaining: number } | null
   ) => {
     const envName = environment === 'testnet' ? 'Testnet' : 'Mainnet'
     const badgeVariant = environment === 'testnet' ? 'default' : 'destructive'
@@ -294,6 +359,11 @@ export default function BinanceWalletSection({
             <Badge variant={badgeVariant} className="text-xs">
               {environment === 'testnet' ? 'TESTNET' : 'MAINNET'}
             </Badge>
+            {environment === 'mainnet' && quota && (
+              <span className="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full" title={t('binance.continueLimitedDescription')}>
+                {t('quota.executionQuota', 'Quota')}: {quota.remaining}/{quota.limit}
+              </span>
+            )}
           </div>
           {wallet && !editing && (
             <div className="flex gap-2">
@@ -433,20 +503,23 @@ export default function BinanceWalletSection({
         testnetApiKey, setTestnetApiKey, testnetSecretKey, setTestnetSecretKey,
         testnetMaxLeverage, setTestnetMaxLeverage,
         testnetDefaultLeverage, setTestnetDefaultLeverage,
-        showTestnetKey, setShowTestnetKey, savingTestnet, testingTestnet
+        showTestnetKey, setShowTestnetKey, savingTestnet, testingTestnet,
+        null
       )}
       {renderWalletBlock(
         'mainnet', mainnetWallet, editingMainnet, setEditingMainnet,
         mainnetApiKey, setMainnetApiKey, mainnetSecretKey, setMainnetSecretKey,
         mainnetMaxLeverage, setMainnetMaxLeverage,
         mainnetDefaultLeverage, setMainnetDefaultLeverage,
-        showMainnetKey, setShowMainnetKey, savingMainnet, testingMainnet
+        showMainnetKey, setShowMainnetKey, savingMainnet, testingMainnet,
+        mainnetQuota
       )}
 
       {/* Rebate Ineligible Modal */}
       <RebateIneligibleModal
         isOpen={showRebateModal}
         onClose={() => setShowRebateModal(false)}
+        onConfirmLimited={handleConfirmLimitedBinding}
         rebateInfo={rebateInfo}
       />
     </div>

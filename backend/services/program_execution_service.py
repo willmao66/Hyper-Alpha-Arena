@@ -12,12 +12,15 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
+
+from sqlalchemy import func
 
 from database.connection import SessionLocal
 from database.models import (
     TradingProgram, AccountProgramBinding, ProgramExecutionLog,
-    Account, HyperliquidWallet, BinanceWallet
+    Account, HyperliquidWallet, BinanceWallet, AIDecisionLog,
+    User, UserSubscription
 )
 from program_trader.executor import execute_strategy
 from program_trader.models import MarketData, ActionType
@@ -50,7 +53,47 @@ class ProgramExecutionService:
         self._binding_states: Dict[int, dict] = {}  # binding_id -> state dict
         self._last_cache_refresh: Optional[datetime] = None
         self._cache_refresh_interval = 60  # Refresh cache every 60 seconds
+        self._daily_quota_limit = 20  # Daily quota for Binance mainnet non-rebate accounts
         logger.info("[ProgramExecution] Service initialized")
+
+    def _is_premium_user(self, db) -> bool:
+        """Check if current logged-in user is a premium member"""
+        try:
+            subscription = db.query(UserSubscription).join(User).filter(
+                User.username != 'default',
+                UserSubscription.subscription_type == 'premium'
+            ).first()
+            return subscription is not None
+        except Exception as e:
+            logger.warning(f"Failed to check premium status: {e}")
+            return False
+
+    def _check_binance_daily_quota(self, db, account_id: int) -> Tuple[bool, Dict[str, int]]:
+        """Check if Binance mainnet daily quota is exceeded."""
+        if self._is_premium_user(db):
+            return False, {"used": 0, "limit": self._daily_quota_limit, "remaining": self._daily_quota_limit}
+
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        ai_count = db.query(func.count(AIDecisionLog.id)).filter(
+            AIDecisionLog.account_id == account_id,
+            AIDecisionLog.exchange == "binance",
+            AIDecisionLog.hyperliquid_environment == "mainnet",
+            AIDecisionLog.created_at >= today_start
+        ).scalar() or 0
+
+        program_count = db.query(func.count(ProgramExecutionLog.id)).filter(
+            ProgramExecutionLog.account_id == account_id,
+            ProgramExecutionLog.exchange == "binance",
+            ProgramExecutionLog.environment == "mainnet",
+            ProgramExecutionLog.created_at >= today_start
+        ).scalar() or 0
+
+        used = ai_count + program_count
+        remaining = max(0, self._daily_quota_limit - used)
+        exceeded = used >= self._daily_quota_limit
+
+        return exceeded, {"used": used, "limit": self._daily_quota_limit, "remaining": remaining}
 
     def on_signal_triggered(
         self,
@@ -271,7 +314,6 @@ class ProgramExecutionService:
                 if wallet_address:  # wallet_address here is actually API key presence indicator
                     try:
                         from services.binance_trading_client import BinanceTradingClient
-                        from database.models import BinanceWallet
                         from utils.encryption import decrypt_private_key
 
                         binance_wallet = db.query(BinanceWallet).filter(
@@ -281,6 +323,31 @@ class ProgramExecutionService:
                         ).first()
 
                         if binance_wallet:
+                            # Check daily quota for mainnet non-rebate accounts
+                            if (environment or "mainnet") == "mainnet" and binance_wallet.rebate_working is False:
+                                quota_exceeded, quota_info = self._check_binance_daily_quota(db, account.id)
+                                if quota_exceeded:
+                                    logger.warning(
+                                        f"[ProgramExecution] Binding {binding_id} skipped - "
+                                        f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})"
+                                    )
+                                    # Log quota exceeded execution
+                                    quota_log = ProgramExecutionLog(
+                                        binding_id=binding.id,
+                                        account_id=account.id,
+                                        program_id=program.id if program else None,
+                                        program_name=program.name if program else None,
+                                        trigger_type=trigger_type,
+                                        trigger_symbol=symbol,
+                                        success=False,
+                                        error_message=f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})",
+                                        exchange="binance",
+                                        environment=environment or "mainnet"
+                                    )
+                                    db.add(quota_log)
+                                    db.commit()
+                                    return
+
                             api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
                             secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
                             trading_client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")

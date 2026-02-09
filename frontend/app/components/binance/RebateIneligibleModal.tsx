@@ -7,13 +7,14 @@
 
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { X, ExternalLink, Crown, UserPlus, Zap } from 'lucide-react'
+import { X, ExternalLink, Crown, UserPlus, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from 'react-i18next'
 
 interface RebateIneligibleModalProps {
   isOpen: boolean
   onClose: () => void
+  onConfirmLimited: () => void
   rebateInfo?: {
     rebate_working: boolean
     is_new_user: boolean
@@ -35,6 +36,7 @@ const BinanceLogo = () => (
 export default function RebateIneligibleModal({
   isOpen,
   onClose,
+  onConfirmLimited,
   rebateInfo
 }: RebateIneligibleModalProps) {
   const { t } = useTranslation()
@@ -49,8 +51,9 @@ export default function RebateIneligibleModal({
     window.open('https://www.binance.com/en/join?ref=HYPERSVIP', '_blank')
   }
 
-  const handleHyperliquid = () => {
-    window.open('https://app.hyperliquid.xyz/join/HYPERSVIP', '_blank')
+  const handleContinueLimited = () => {
+    onConfirmLimited()
+    onClose()
   }
 
   return createPortal(
@@ -114,7 +117,7 @@ export default function RebateIneligibleModal({
                   {t('binance.subscribePremium', 'Subscribe to Premium')}
                 </span>
                 <p className="text-sm text-muted-foreground mt-1 flex-1">
-                  {t('binance.subscribeDescription', 'Unlock all features and enjoy zero service fees')}
+                  {t('binance.subscribeDescription', 'Unlimited automated trades, unlock all features')}
                 </p>
                 <div className="flex items-center gap-1 text-xs text-primary mt-2">
                   <ExternalLink className="h-3 w-3" />
@@ -138,7 +141,7 @@ export default function RebateIneligibleModal({
                   {t('binance.registerNew', 'Register New Account')}
                 </span>
                 <p className="text-sm text-muted-foreground mt-1 flex-1">
-                  {t('binance.registerDescription', 'For users who have NOT completed KYC. Register with our referral link to get 5% fee rebate.')}
+                  {t('binance.registerDescription', 'For users who have NOT completed KYC. Unlimited trades + 5% fee rebate.')}
                 </p>
                 <div className="flex items-center gap-1 text-xs text-yellow-600 mt-2">
                   <ExternalLink className="h-3 w-3" />
@@ -147,26 +150,25 @@ export default function RebateIneligibleModal({
               </div>
             </button>
 
-            {/* Option 3: Trade on Hyperliquid */}
+            {/* Option 3: Continue with limited quota */}
             <button
-              onClick={handleHyperliquid}
+              onClick={handleContinueLimited}
               className="p-4 border rounded-lg hover:bg-muted/50 transition-colors text-left group"
             >
               <div className="flex flex-col h-full">
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg group-hover:bg-green-200 dark:group-hover:bg-green-900/50 transition-colors">
-                    <Zap className="h-5 w-5 text-green-600" />
+                  <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg group-hover:bg-slate-200 dark:group-hover:bg-slate-700 transition-colors">
+                    <Clock className="h-5 w-5 text-slate-600 dark:text-slate-400" />
                   </div>
                 </div>
                 <span className="font-semibold">
-                  {t('binance.tradeHyperliquid', 'Trade on Hyperliquid')}
+                  {t('binance.continueLimited', 'Continue with Limit')}
                 </span>
                 <p className="text-sm text-muted-foreground mt-1 flex-1">
-                  {t('binance.hyperliquidDescription', 'Use our #1 DEX integration with no KYC required and lower fees.')}
+                  {t('binance.continueLimitedDescription', 'This account is limited to 20 automated trades per day (AI Trader + Program). Subscribe or register with referral for unlimited.')}
                 </p>
-                <div className="flex items-center gap-1 text-xs text-green-600 mt-2">
-                  <ExternalLink className="h-3 w-3" />
-                  <span>hyperliquid.xyz</span>
+                <div className="flex items-center gap-1 text-xs text-slate-500 mt-2">
+                  <span>{t('binance.continueLimitedButton', 'I understand')}</span>
                 </div>
               </div>
             </button>

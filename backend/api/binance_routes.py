@@ -11,10 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from datetime import datetime, timedelta
 import logging
 
 from database.connection import get_db
-from database.models import Account, BinanceWallet
+from database.models import Account, BinanceWallet, User, UserSubscription, AIDecisionLog, ProgramExecutionLog
 from utils.encryption import encrypt_private_key, decrypt_private_key
 from services.binance_trading_client import BinanceTradingClient
 from services.hyperliquid_environment import get_global_trading_mode
@@ -48,6 +49,23 @@ def _clear_client_cache(account_id: int = None, environment: str = None):
         _client_cache.pop(cache_key, None)
     else:
         _client_cache.clear()
+
+
+def _is_premium_user(db: Session) -> bool:
+    """Check if current logged-in user is a premium member"""
+    try:
+        subscription = db.query(UserSubscription).join(User).filter(
+            User.username != 'default',
+            UserSubscription.subscription_type == 'premium'
+        ).first()
+        return subscription is not None
+    except Exception as e:
+        logger.warning(f"Failed to check premium status: {e}")
+        return False
+
+
+# Daily quota constants
+DAILY_QUOTA_LIMIT = 20
 
 
 # Request/Response Models
@@ -111,18 +129,24 @@ async def setup_wallet(
         raise HTTPException(status_code=400, detail=f"Invalid credentials: {e}")
 
     # For mainnet, check rebate eligibility
-    rebate_info = None
+    rebate_working = None
     if request.environment == "mainnet":
         rebate_info = test_client.check_rebate_eligibility()
+        rebate_working = rebate_info.get("rebate_working", False)
+
         if not rebate_info.get("eligible", False):
-            # Return special response for frontend to handle
-            return {
-                "success": False,
-                "error_code": "REBATE_INELIGIBLE",
-                "message": "Account not eligible for API rebate",
-                "rebate_info": rebate_info,
-                "environment": request.environment
-            }
+            # Check if user is premium - premium users can proceed without rebate
+            is_premium = _is_premium_user(db)
+            if not is_premium:
+                # Return special response for frontend to handle
+                return {
+                    "success": False,
+                    "error_code": "REBATE_INELIGIBLE",
+                    "message": "Account not eligible for API rebate",
+                    "rebate_info": rebate_info,
+                    "environment": request.environment
+                }
+            # Premium user - proceed with binding, rebate_working=False
 
     # Encrypt credentials
     api_key_encrypted = encrypt_private_key(request.api_key)
@@ -141,6 +165,8 @@ async def setup_wallet(
         existing.max_leverage = request.max_leverage
         existing.default_leverage = request.default_leverage
         existing.is_active = "true"
+        if request.environment == "mainnet":
+            existing.rebate_working = rebate_working
         _clear_client_cache(account_id, request.environment)
     else:
         # Create new wallet
@@ -151,7 +177,8 @@ async def setup_wallet(
             secret_key_encrypted=secret_key_encrypted,
             max_leverage=request.max_leverage,
             default_leverage=request.default_leverage,
-            is_active="true"
+            is_active="true",
+            rebate_working=rebate_working if request.environment == "mainnet" else None
         )
         db.add(wallet)
 
@@ -640,3 +667,151 @@ async def check_rebate_eligibility(
     except Exception as e:
         logger.error(f"Failed to check rebate eligibility: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class ConfirmLimitedBindingRequest(BaseModel):
+    """Request model for confirming limited binding"""
+    environment: str = Field("mainnet", pattern="^mainnet$")
+    api_key: str = Field(..., min_length=10, alias="apiKey")
+    secret_key: str = Field(..., min_length=10, alias="secretKey")
+    max_leverage: int = Field(20, ge=1, le=125, alias="maxLeverage")
+    default_leverage: int = Field(1, ge=1, le=125, alias="defaultLeverage")
+
+    class Config:
+        populate_by_name = True
+
+
+@router.post("/accounts/{account_id}/confirm-limited-binding")
+async def confirm_limited_binding(
+    account_id: int,
+    request: ConfirmLimitedBindingRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm binding for non-rebate mainnet account with daily quota limit.
+    Called when user chooses "Continue with limited quota" in RebateIneligibleModal.
+    """
+    # Verify account exists
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # Validate credentials
+    try:
+        test_client = BinanceTradingClient(
+            api_key=request.api_key,
+            secret_key=request.secret_key,
+            environment="mainnet"
+        )
+        balance = test_client.get_balance()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid credentials: {e}")
+
+    # Encrypt credentials
+    api_key_encrypted = encrypt_private_key(request.api_key)
+    secret_key_encrypted = encrypt_private_key(request.secret_key)
+
+    # Check if wallet exists
+    existing = db.query(BinanceWallet).filter(
+        BinanceWallet.account_id == account_id,
+        BinanceWallet.environment == "mainnet"
+    ).first()
+
+    if existing:
+        existing.api_key_encrypted = api_key_encrypted
+        existing.secret_key_encrypted = secret_key_encrypted
+        existing.max_leverage = request.max_leverage
+        existing.default_leverage = request.default_leverage
+        existing.is_active = "true"
+        existing.rebate_working = False  # Explicitly set to False
+        _clear_client_cache(account_id, "mainnet")
+    else:
+        wallet = BinanceWallet(
+            account_id=account_id,
+            environment="mainnet",
+            api_key_encrypted=api_key_encrypted,
+            secret_key_encrypted=secret_key_encrypted,
+            max_leverage=request.max_leverage,
+            default_leverage=request.default_leverage,
+            is_active="true",
+            rebate_working=False
+        )
+        db.add(wallet)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Binance mainnet wallet configured with daily quota limit",
+        "environment": "mainnet",
+        "balance": balance,
+        "quota_limited": True
+    }
+
+
+@router.get("/accounts/{account_id}/daily-quota")
+async def get_daily_quota(account_id: int, db: Session = Depends(get_db)):
+    """
+    Get daily quota usage for Binance mainnet non-rebate accounts.
+
+    Returns:
+        - limited: False if not subject to quota (rebate account, premium, or no mainnet wallet)
+        - used: Number of decisions/executions today
+        - limit: Maximum allowed per day (20)
+        - remaining: Remaining quota
+    """
+    # Check if mainnet wallet exists
+    mainnet_wallet = db.query(BinanceWallet).filter(
+        BinanceWallet.account_id == account_id,
+        BinanceWallet.environment == "mainnet",
+        BinanceWallet.is_active == "true"
+    ).first()
+
+    # No mainnet wallet - not limited
+    if not mainnet_wallet:
+        return {"limited": False, "used": 0, "limit": DAILY_QUOTA_LIMIT, "remaining": DAILY_QUOTA_LIMIT}
+
+    # Rebate working - not limited
+    if mainnet_wallet.rebate_working is True:
+        return {"limited": False, "used": 0, "limit": DAILY_QUOTA_LIMIT, "remaining": DAILY_QUOTA_LIMIT}
+
+    # Check premium status
+    if _is_premium_user(db):
+        return {"limited": False, "used": 0, "limit": DAILY_QUOTA_LIMIT, "remaining": DAILY_QUOTA_LIMIT}
+
+    # Calculate today's usage (use local server time for reset)
+    # Database stores UTC time, so convert local midnight to UTC for comparison
+    from sqlalchemy import func
+    import time
+    from datetime import timedelta
+
+    local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    # Convert local midnight to UTC (time.timezone is negative for east of UTC)
+    utc_offset_seconds = -time.timezone  # e.g., +28800 for UTC+8
+    today_start_utc = local_today_start - timedelta(seconds=utc_offset_seconds)
+
+    # Count AIDecisionLog entries
+    ai_count = db.query(func.count(AIDecisionLog.id)).filter(
+        AIDecisionLog.account_id == account_id,
+        AIDecisionLog.exchange == "binance",
+        AIDecisionLog.hyperliquid_environment == "mainnet",
+        AIDecisionLog.created_at >= today_start_utc
+    ).scalar() or 0
+
+    # Count ProgramExecutionLog entries
+    program_count = db.query(func.count(ProgramExecutionLog.id)).filter(
+        ProgramExecutionLog.account_id == account_id,
+        ProgramExecutionLog.exchange == "binance",
+        ProgramExecutionLog.environment == "mainnet",
+        ProgramExecutionLog.created_at >= today_start_utc
+    ).scalar() or 0
+
+    used = ai_count + program_count
+    remaining = max(0, DAILY_QUOTA_LIMIT - used)
+
+    return {
+        "limited": True,
+        "used": used,
+        "limit": DAILY_QUOTA_LIMIT,
+        "remaining": remaining
+    }

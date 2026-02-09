@@ -1367,12 +1367,22 @@
     "rebateIneligibleMessage": "该账户已绑定其他推荐关系，无法享受本平台的交易优惠。",
     "rebateIneligibleOptions": "您可以选择以下方式之一继续：",
     "subscribePremium": "订阅会员",
-    "subscribeDescription": "解锁全部功能，享受零服务费",
+    "subscribeDescription": "无限次自动交易，解锁全部功能",
     "registerNew": "注册新账户",
-    "registerDescription": "适用于尚未完成 KYC 实名认证的币安用户。通过推荐链接注册可享 5% 手续费返还。",
-    "tradeHyperliquid": "在 Hyperliquid 交易",
-    "hyperliquidDescription": "使用我们的 #1 去中心化交易所，无需 KYC，费用更低。",
+    "registerDescription": "币安新用户？通过推荐链接注册，无限次交易 + 5% 返佣。",
+    "continueLimited": "继续使用（有限制）",
+    "continueLimitedDescription": "当前账户每日限 20 次自动交易（含 AI Trader 和 Program）。如需更多，请订阅或注册返佣账户。",
+    "continueLimitedButton": "我知道了",
     "supportTip": "订阅会员或通过推荐链接注册，可以更好地支持平台发展。团队发展不易，望请理解。",
     "rebateNote": "仅未绑定推荐关系的账户可用于 AI 交易"
+  },
+  "quota": {
+    "executionQuota": "执行配额",
+    "dailyQuota": "每日配额",
+    "upgradeUnlimited": "升级无限制",
+    "upgradeTitle": "升级无限制",
+    "currentUsage": "当前使用",
+    "perDay": "每天",
+    "upgradeOptions": "选择以下选项解锁无限次自动交易："
   }
 }

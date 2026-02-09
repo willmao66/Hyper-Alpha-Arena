@@ -607,6 +607,9 @@ class BinanceWallet(Base):
     max_leverage = Column(Integer, nullable=False, default=20)
     default_leverage = Column(Integer, nullable=False, default=1)
     is_active = Column(String(10), nullable=False, default="true")
+    # Binance API broker rebate eligibility status (mainnet only)
+    # True: eligible for rebate, False: not eligible (daily quota limit applies)
+    rebate_working = Column(Boolean, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()

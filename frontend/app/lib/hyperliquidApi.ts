@@ -539,6 +539,18 @@ export async function getBinanceSummary(accountId: number): Promise<BinanceSumma
   return response.json();
 }
 
+export interface BinanceDailyQuota {
+  limited: boolean;
+  used: number;
+  limit: number;
+  remaining: number;
+}
+
+export async function getBinanceDailyQuota(accountId: number): Promise<BinanceDailyQuota> {
+  const response = await apiRequest(`${BINANCE_API_BASE}/accounts/${accountId}/daily-quota`);
+  return response.json();
+}
+
 export async function getBinanceRateLimit(accountId: number): Promise<{
   success: boolean;
   rate_limit: {

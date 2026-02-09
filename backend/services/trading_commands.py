@@ -7,7 +7,8 @@ from decimal import Decimal
 from typing import Dict, Optional, Tuple, List, Iterable, Any
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
+from datetime import datetime
 
 from database.connection import SessionLocal
 from database.models import (
@@ -15,6 +16,10 @@ from database.models import (
     Account,
     CRYPTO_MIN_COMMISSION,
     CRYPTO_COMMISSION_RATE,
+    AIDecisionLog,
+    ProgramExecutionLog,
+    User,
+    UserSubscription,
 )
 from services.asset_calculator import calc_positions_value
 from services.market_data import get_last_price
@@ -37,6 +42,58 @@ logger = logging.getLogger(__name__)
 
 AI_TRADING_SYMBOLS: List[str] = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"]
 ORACLE_PRICE_DEVIATION_LIMIT_PERCENT = 1.0
+
+# Daily quota limit for Binance mainnet non-rebate accounts
+BINANCE_DAILY_QUOTA_LIMIT = 20
+
+
+def _is_premium_user(db: Session) -> bool:
+    """Check if current logged-in user is a premium member"""
+    try:
+        subscription = db.query(UserSubscription).join(User).filter(
+            User.username != 'default',
+            UserSubscription.subscription_type == 'premium'
+        ).first()
+        return subscription is not None
+    except Exception as e:
+        logger.warning(f"Failed to check premium status: {e}")
+        return False
+
+
+def _check_binance_daily_quota(db: Session, account_id: int) -> Tuple[bool, Dict[str, int]]:
+    """
+    Check if Binance mainnet daily quota is exceeded for an account.
+
+    Returns:
+        Tuple of (exceeded: bool, info: dict with used/limit/remaining)
+    """
+    # Check premium status first
+    if _is_premium_user(db):
+        return False, {"used": 0, "limit": BINANCE_DAILY_QUOTA_LIMIT, "remaining": BINANCE_DAILY_QUOTA_LIMIT}
+
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Count AIDecisionLog entries
+    ai_count = db.query(func.count(AIDecisionLog.id)).filter(
+        AIDecisionLog.account_id == account_id,
+        AIDecisionLog.exchange == "binance",
+        AIDecisionLog.hyperliquid_environment == "mainnet",
+        AIDecisionLog.created_at >= today_start
+    ).scalar() or 0
+
+    # Count ProgramExecutionLog entries
+    program_count = db.query(func.count(ProgramExecutionLog.id)).filter(
+        ProgramExecutionLog.account_id == account_id,
+        ProgramExecutionLog.exchange == "binance",
+        ProgramExecutionLog.environment == "mainnet",
+        ProgramExecutionLog.created_at >= today_start
+    ).scalar() or 0
+
+    used = ai_count + program_count
+    remaining = max(0, BINANCE_DAILY_QUOTA_LIMIT - used)
+    exceeded = used >= BINANCE_DAILY_QUOTA_LIMIT
+
+    return exceeded, {"used": used, "limit": BINANCE_DAILY_QUOTA_LIMIT, "remaining": remaining}
 
 
 def _enforce_price_bounds(
@@ -1256,6 +1313,16 @@ def place_ai_driven_binance_order(
                 )
                 continue
 
+            # Check daily quota for mainnet non-rebate accounts
+            if wallet.environment == "mainnet" and wallet.rebate_working is False:
+                quota_exceeded, quota_info = _check_binance_daily_quota(db, account.id)
+                if quota_exceeded:
+                    logger.warning(
+                        f"AI Trader '{account.name}' (ID: {account.id}) skipped - "
+                        f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})"
+                    )
+                    continue
+
             # Decrypt API credentials
             from utils.encryption import decrypt_private_key
             api_key = decrypt_private_key(wallet.api_key_encrypted)
@@ -1269,7 +1336,10 @@ def place_ai_driven_binance_order(
             )
 
             # Build decision_kwargs for tracking (same as Hyperliquid)
-            decision_kwargs = {"wallet_id": wallet.id, "exchange": "binance"}
+            # Note: BinanceWallet has no wallet_address field (unlike HyperliquidWallet),
+            # so we use wallet.id as identifier. The key must be "wallet_address" to match
+            # save_ai_decision() function signature.
+            decision_kwargs = {"wallet_address": str(wallet.id), "exchange": "binance"}
 
             # Get tracking fields for decision analysis
             try:
@@ -1421,19 +1491,19 @@ def _execute_binance_decision(
     # 1. Validate operation type
     if operation not in ["buy", "sell", "hold", "close"]:
         logger.warning(f"[BINANCE] Invalid operation '{operation}' from AI for {account.name}")
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
+        save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
         return
 
     # 2. Handle HOLD operation
     if operation == "hold":
         logger.info(f"[BINANCE] AI decided to HOLD for {account.name} - no action taken")
-        save_ai_decision(db, account, decision, portfolio, executed=True, exchange="binance", **decision_kwargs)
+        save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
         return
 
     # 3. Validate symbol
     if not symbol:
         logger.warning(f"[BINANCE] No symbol provided in decision for {account.name}")
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
+        save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
         return
 
     # 4. Validate leverage range
@@ -1448,7 +1518,7 @@ def _execute_binance_decision(
     price = prices.get(symbol, 0)
     if not price or price <= 0:
         logger.warning(f"[BINANCE] Invalid price for {symbol} for {account.name}")
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
+        save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
         return
 
     order_result = None
@@ -1458,7 +1528,7 @@ def _execute_binance_decision(
             # 6. Validate target_portion
             if target_portion <= 0 or target_portion > 1:
                 logger.warning(f"[BINANCE] Invalid target_portion {target_portion} from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
+                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                 return
 
             # 7. Calculate quantity: margin * leverage / price
@@ -1490,7 +1560,7 @@ def _execute_binance_decision(
             # Validate target_portion
             if target_portion <= 0 or target_portion > 1:
                 logger.warning(f"[BINANCE] Invalid target_portion {target_portion} from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
+                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                 return
 
             # Calculate quantity
@@ -1530,7 +1600,7 @@ def _execute_binance_decision(
                 )
             else:
                 logger.info(f"[BINANCE] No position to close for {symbol}")
-                save_ai_decision(db, account, decision, portfolio, executed=True, exchange="binance", **decision_kwargs)
+                save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
             return
 
         # 9. Save decision with order IDs for attribution
@@ -1558,7 +1628,7 @@ def _execute_binance_decision(
 
     except Exception as e:
         logger.error(f"[BINANCE] Error executing {operation} for {symbol}: {e}", exc_info=True)
-        save_ai_decision(db, account, decision, portfolio, executed=False, exchange="binance", **decision_kwargs)
+        save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
 
 
 BINANCE_TRADE_JOB_ID = "binance_ai_trade"

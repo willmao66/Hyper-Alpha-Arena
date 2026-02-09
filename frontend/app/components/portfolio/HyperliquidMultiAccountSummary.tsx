@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TrendingUp, AlertTriangle, Eye, Zap } from 'lucide-react'
-import { getHyperliquidBalance, getWalletRateLimit, getTradingStats, getBinanceTradingStats, TradingStats, getBinanceSummary } from '@/lib/hyperliquidApi'
+import { getHyperliquidBalance, getWalletRateLimit, getTradingStats, getBinanceTradingStats, TradingStats, getBinanceSummary, getBinanceDailyQuota } from '@/lib/hyperliquidApi'
 import { getModelLogo } from './logoAssets'
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid'
 import type { HyperliquidBalance } from '@/lib/types/hyperliquid'
@@ -18,6 +18,7 @@ import {
   getCacheTimestamp,
 } from '@/lib/cacheUtils'
 import TraderDetailModal from './TraderDetailModal'
+import QuotaUpgradeModal from '@/components/binance/QuotaUpgradeModal'
 
 // Position type from parent component
 export interface Position {
@@ -52,6 +53,12 @@ interface AccountBalance {
   rateLimitUpdated: number | null
   tradingStats: TradingStats | null
   tradingStatsUpdated: number | null
+  quota?: {
+    limited: boolean
+    used: number
+    limit: number
+    remaining: number
+  } | null
 }
 
 interface HyperliquidMultiAccountSummaryProps {
@@ -101,6 +108,8 @@ export default function HyperliquidMultiAccountSummary({
   const [globalLastUpdate, setGlobalLastUpdate] = useState<string | null>(null)
   const [selectedTraderForModal, setSelectedTraderForModal] = useState<AccountBalance | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isQuotaModalOpen, setIsQuotaModalOpen] = useState(false)
+  const [selectedQuotaAccount, setSelectedQuotaAccount] = useState<AccountBalance | null>(null)
 
   // Filter accounts based on selectedAccount - memoized to prevent infinite loops
   const filteredAccounts = useMemo(() => {
@@ -152,6 +161,17 @@ export default function HyperliquidMultiAccountSummary({
             balance = await getHyperliquidBalance(acc.account_id)
           }
 
+          // Fetch daily quota for Binance mainnet accounts
+          let quota = null
+          if (exchange === 'binance' && environment === 'mainnet') {
+            try {
+              const quotaData = await getBinanceDailyQuota(acc.account_id)
+              if (quotaData.limited) {
+                quota = quotaData
+              }
+            } catch (e) { /* ignore quota fetch errors */ }
+          }
+
           const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment, exchange)
           const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment, exchange)
           return {
@@ -165,6 +185,7 @@ export default function HyperliquidMultiAccountSummary({
             rateLimitUpdated: rateLimit ? Date.now() : getCacheTimestamp(apiUsageCacheKey),
             tradingStats: getCachedData<TradingStats>(statsCacheKey),
             tradingStatsUpdated: getCacheTimestamp(statsCacheKey),
+            quota,
           }
         } catch (error: any) {
           return {
@@ -398,17 +419,31 @@ export default function HyperliquidMultiAccountSummary({
                     </span>
                   </div>
                 </div>
-                {account.balance && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-[10px] h-6 px-2"
-                    onClick={() => handleViewDetails(account)}
-                  >
-                    <Eye className="w-3 h-3 mr-1" />
-                    {t('common.details', 'Details')}
-                  </Button>
-                )}
+                <div className="flex items-center gap-2">
+                  {/* Quota upgrade button for Binance mainnet limited accounts */}
+                  {account.quota && account.quota.limited && (
+                    <button
+                      onClick={() => {
+                        setSelectedQuotaAccount(account)
+                        setIsQuotaModalOpen(true)
+                      }}
+                      className="px-2 py-1 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-200 rounded text-[10px] font-medium transition-colors"
+                    >
+                      {account.quota.remaining}/{account.quota.limit} · {t('quota.upgradeUnlimited', 'Upgrade')}
+                    </button>
+                  )}
+                  {account.balance && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-[10px] h-6 px-2"
+                      onClick={() => handleViewDetails(account)}
+                    >
+                      <Eye className="w-3 h-3 mr-1" />
+                      {t('common.details', 'Details')}
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {/* Error state */}
@@ -537,6 +572,13 @@ export default function HyperliquidMultiAccountSummary({
           environment={environment}
         />
       )}
+
+      {/* Quota Upgrade Modal */}
+      <QuotaUpgradeModal
+        isOpen={isQuotaModalOpen}
+        onClose={() => setIsQuotaModalOpen(false)}
+        quota={selectedQuotaAccount?.quota || undefined}
+      />
     </div>
   )
 }
