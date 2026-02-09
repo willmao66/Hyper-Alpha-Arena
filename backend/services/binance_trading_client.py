@@ -1225,3 +1225,43 @@ class BinanceTradingClient:
 
         logger.info(f"[BINANCE] Retrieved {len(fills)} user fills")
         return fills
+
+    def check_rebate_eligibility(self) -> Dict[str, Any]:
+        """
+        Check if the user is eligible for API broker rebate.
+
+        Uses Binance API endpoint: GET /fapi/v1/apiReferral/ifNewUser
+
+        Returns:
+            Dict with:
+                - eligible: True if both rebateWorking and ifNewUser are True
+                - rebate_working: User has no prior referral and VIP < 3
+                - is_new_user: User registered after broker joined program
+                - raw_response: Original API response
+        """
+        try:
+            result = self._request("GET", "/fapi/v1/apiReferral/ifNewUser", {}, signed=True)
+
+            rebate_working = result.get("rebateWorking", False)
+            is_new_user = result.get("ifNewUser", False)
+
+            logger.info(
+                f"[BINANCE] Rebate eligibility check: "
+                f"rebateWorking={rebate_working}, ifNewUser={is_new_user}"
+            )
+
+            return {
+                "eligible": rebate_working and is_new_user,
+                "rebate_working": rebate_working,
+                "is_new_user": is_new_user,
+                "raw_response": result
+            }
+        except Exception as e:
+            logger.error(f"[BINANCE] Failed to check rebate eligibility: {e}")
+            # Return ineligible on error to be safe
+            return {
+                "eligible": False,
+                "rebate_working": False,
+                "is_new_user": False,
+                "error": str(e)
+            }

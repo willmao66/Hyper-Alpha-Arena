@@ -36,7 +36,8 @@
     "collectionDaysHint": "Hyperliquid 资金流数据已累计采集 {{days}} 天",
     "binanceCollectionDaysHint": "币安资金流数据已累计采集 {{days}} 天",
     "error": "错误",
-    "keyboardHintCtrlEnter": "按 Ctrl+Enter（Mac 上为 Cmd+Enter）发送"
+    "keyboardHintCtrlEnter": "按 Ctrl+Enter（Mac 上为 Cmd+Enter）发送",
+    "recommended": "推荐"
   },
   "regime": {
     "noConfig": "未找到配置",
@@ -1331,5 +1332,15 @@
       "connectionLost": "连接中断，正在重新加载已保存的进度...",
       "toolCallsDetail": "工具调用详情 ({{count}} 轮)"
     }
+  },
+  "binance": {
+    "rebateCheck": "账户验证",
+    "rebateIneligibleMessage": "该账户已绑定其他推荐关系，无法享受本平台的交易优惠。",
+    "rebateIneligibleOptions": "您可以选择以下方式之一继续：",
+    "subscribePremium": "订阅会员",
+    "subscribeDescription": "解锁全部功能，享受零服务费",
+    "registerNew": "注册新账户",
+    "registerDescription": "使用我们的邀请链接注册新的币安账户，享受 5% 手续费返还",
+    "rebateNote": "仅未绑定推荐关系的账户可用于 AI 交易"
   }
 }

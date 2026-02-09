@@ -841,10 +841,12 @@ export default function ProgramTrader() {
                         <span className="font-medium capitalize">{b.exchange || 'hyperliquid'}</span>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">{t('programTrader.wallets')}:</span>{' '}
-                        {b.wallets.length > 0 ? b.wallets.map(w => (
-                          <span key={w.address} className="font-mono text-xs" title={w.address}>
-                            {w.environment}: {w.address.slice(0, 6)}...{w.address.slice(-4)}
+                        <span className="text-muted-foreground">
+                          {(b.exchange || 'hyperliquid') === 'binance' ? t('programTrader.apiKey', 'API Key') : t('programTrader.wallets')}:
+                        </span>{' '}
+                        {b.wallets.length > 0 ? b.wallets.map((w, idx) => (
+                          <span key={w.address + idx} className="font-mono text-xs" title={w.address}>
+                            {w.environment}: {(b.exchange || 'hyperliquid') === 'binance' ? w.address : `${w.address.slice(0, 6)}...${w.address.slice(-4)}`}
                           </span>
                         )) : <span className="text-muted-foreground">{t('programTrader.noWallet')}</span>}
                       </div>

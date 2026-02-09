@@ -12,6 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useTranslation } from 'react-i18next'
 import HyperliquidWalletSection from './HyperliquidWalletSection'
 import BinanceWalletSection from './BinanceWalletSection'
+import ExchangeIcon from '@/components/exchange/ExchangeIcon'
 import { getAccountWallet } from '@/lib/hyperliquidApi'
 
 interface ExchangeWalletsPanelProps {
@@ -162,7 +163,7 @@ export default function ExchangeWalletsPanel({
               ) : (
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
               )}
-              <Wallet className="h-4 w-4 text-muted-foreground" />
+              <ExchangeIcon exchangeId={exchangeKey as 'hyperliquid' | 'binance'} size={16} />
               <span className="font-medium text-sm">{exchangeName}</span>
             </div>
             {renderStatusBadges(exchangeStatus)}

@@ -266,16 +266,38 @@ def _binding_to_response(binding: AccountProgramBinding, db: Session) -> Binding
         except:
             pass
 
-    # Query wallets for this AI Trader
-    from database.models import HyperliquidWallet
+    # Query wallets for this AI Trader based on exchange type
+    from database.models import HyperliquidWallet, BinanceWallet
+    from utils.encryption import decrypt_private_key
     wallets = []
-    wallet_rows = db.query(HyperliquidWallet).filter(
-        HyperliquidWallet.account_id == binding.account_id,
-        HyperliquidWallet.is_active == "true"
-    ).all()
-    for w in wallet_rows:
-        if w.wallet_address:
-            wallets.append(WalletInfo(environment=w.environment, address=w.wallet_address))
+    exchange = binding.exchange or "hyperliquid"
+
+    if exchange == "binance":
+        # For Binance, show masked API Key (first 4 and last 4 chars)
+        binance_wallets = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == binding.account_id,
+            BinanceWallet.is_active == "true"
+        ).all()
+        for w in binance_wallets:
+            if w.api_key_encrypted:
+                try:
+                    api_key = decrypt_private_key(w.api_key_encrypted)
+                    if len(api_key) >= 8:
+                        masked_key = f"{api_key[:4]}...{api_key[-4:]}"
+                    else:
+                        masked_key = "****"
+                except:
+                    masked_key = "****"
+                wallets.append(WalletInfo(environment=w.environment, address=masked_key))
+    else:
+        # For Hyperliquid, show wallet address
+        wallet_rows = db.query(HyperliquidWallet).filter(
+            HyperliquidWallet.account_id == binding.account_id,
+            HyperliquidWallet.is_active == "true"
+        ).all()
+        for w in wallet_rows:
+            if w.wallet_address:
+                wallets.append(WalletInfo(environment=w.environment, address=w.wallet_address))
 
     return BindingResponse(
         id=binding.id,

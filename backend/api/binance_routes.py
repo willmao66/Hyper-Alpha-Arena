@@ -90,6 +90,9 @@ async def setup_wallet(
     """
     Setup Binance Futures wallet for an account.
     Encrypts and stores API credentials.
+
+    For mainnet, checks rebate eligibility first. If not eligible,
+    returns error code 'REBATE_INELIGIBLE' for frontend to show options.
     """
     # Verify account exists
     account = db.query(Account).filter(Account.id == account_id).first()
@@ -106,6 +109,20 @@ async def setup_wallet(
         balance = test_client.get_balance()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid credentials: {e}")
+
+    # For mainnet, check rebate eligibility
+    rebate_info = None
+    if request.environment == "mainnet":
+        rebate_info = test_client.check_rebate_eligibility()
+        if not rebate_info.get("eligible", False):
+            # Return special response for frontend to handle
+            return {
+                "success": False,
+                "error_code": "REBATE_INELIGIBLE",
+                "message": "Account not eligible for API rebate",
+                "rebate_info": rebate_info,
+                "environment": request.environment
+            }
 
     # Encrypt credentials
     api_key_encrypted = encrypt_private_key(request.api_key)
@@ -567,4 +584,59 @@ async def get_binance_trading_stats(
         raise
     except Exception as e:
         logger.error(f"Failed to get Binance trading stats for account {account_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/check-rebate-eligibility")
+async def check_rebate_eligibility(
+    api_key: str,
+    secret_key: str,
+    environment: str = "mainnet"
+):
+    """
+    Check if a Binance account is eligible for API broker rebate.
+
+    This endpoint can be called before wallet setup to pre-check eligibility.
+
+    Args:
+        api_key: Binance API key
+        secret_key: Binance secret key
+        environment: 'testnet' or 'mainnet' (default mainnet)
+
+    Returns:
+        {
+            "eligible": bool,
+            "rebate_working": bool,  # No prior referral and VIP < 3
+            "is_new_user": bool,     # Registered after broker joined
+            "message": str
+        }
+    """
+    try:
+        client = BinanceTradingClient(
+            api_key=api_key,
+            secret_key=secret_key,
+            environment=environment
+        )
+
+        # Verify credentials first
+        try:
+            client.get_balance()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid credentials: {e}")
+
+        # Check rebate eligibility
+        result = client.check_rebate_eligibility()
+
+        return {
+            "success": True,
+            "eligible": result.get("eligible", False),
+            "rebate_working": result.get("rebate_working", False),
+            "is_new_user": result.get("is_new_user", False),
+            "message": "Eligible for rebate" if result.get("eligible") else "Not eligible for rebate"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to check rebate eligibility: {e}")
         raise HTTPException(status_code=500, detail=str(e))

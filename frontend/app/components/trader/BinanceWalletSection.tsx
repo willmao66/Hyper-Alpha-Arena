@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Wallet, Eye, EyeOff, CheckCircle, RefreshCw, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import RebateIneligibleModal from '@/components/binance/RebateIneligibleModal'
 
 interface BinanceWalletSectionProps {
   accountId: number
@@ -70,6 +71,10 @@ export default function BinanceWalletSection({
   const [mainnetSecretKey, setMainnetSecretKey] = useState('')
   const [mainnetMaxLeverage, setMainnetMaxLeverage] = useState(20)
   const [mainnetDefaultLeverage, setMainnetDefaultLeverage] = useState(1)
+
+  // Rebate ineligible modal state
+  const [showRebateModal, setShowRebateModal] = useState(false)
+  const [rebateInfo, setRebateInfo] = useState<{ rebate_working: boolean; is_new_user: boolean } | undefined>()
 
   useEffect(() => {
     loadWalletInfo()
@@ -182,7 +187,16 @@ export default function BinanceWalletSection({
         })
       })
 
-      if (res.ok) {
+      const data = await res.json()
+
+      // Check for rebate ineligible response (mainnet only)
+      if (data.error_code === 'REBATE_INELIGIBLE') {
+        setRebateInfo(data.rebate_info)
+        setShowRebateModal(true)
+        return
+      }
+
+      if (res.ok && data.success !== false) {
         toast.success(`Binance ${environment} configured`)
         if (environment === 'testnet') {
           setTestnetApiKey('')
@@ -196,15 +210,7 @@ export default function BinanceWalletSection({
         await loadWalletInfo()
         onWalletConfigured?.()
       } else {
-        let errorMsg = 'Failed to configure'
-        try {
-          const err = await res.json()
-          errorMsg = err.detail || errorMsg
-        } catch {
-          if (res.status === 502 || res.status === 500) {
-            errorMsg = 'Server error. Please check API Key and Secret Key format.'
-          }
-        }
+        let errorMsg = data.detail || data.message || 'Failed to configure'
         toast.error(errorMsg)
       }
     } catch (error) {
@@ -436,6 +442,13 @@ export default function BinanceWalletSection({
         mainnetDefaultLeverage, setMainnetDefaultLeverage,
         showMainnetKey, setShowMainnetKey, savingMainnet, testingMainnet
       )}
+
+      {/* Rebate Ineligible Modal */}
+      <RebateIneligibleModal
+        isOpen={showRebateModal}
+        onClose={() => setShowRebateModal(false)}
+        rebateInfo={rebateInfo}
+      />
     </div>
   )
 }

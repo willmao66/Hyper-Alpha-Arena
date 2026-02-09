@@ -33,7 +33,8 @@
     "more": "more",
     "saving": "Saving...",
     "loadMore": "Load More",
-    "keyboardHintCtrlEnter": "Press Ctrl+Enter (Cmd+Enter on Mac) to send"
+    "keyboardHintCtrlEnter": "Press Ctrl+Enter (Cmd+Enter on Mac) to send",
+    "recommended": "Recommended"
   },
   "regime": {
     "noConfig": "No configuration found",
@@ -1312,5 +1313,15 @@
       "connectionLost": "Connection lost. Reloading saved progress...",
       "toolCallsDetail": "Tool Calls Detail ({{count}} rounds)"
     }
+  },
+  "binance": {
+    "rebateCheck": "Account Verification",
+    "rebateIneligibleMessage": "This account is already linked to another referral relationship and cannot enjoy the trading benefits of this platform.",
+    "rebateIneligibleOptions": "You can choose one of the following options to continue:",
+    "subscribePremium": "Subscribe to Premium",
+    "subscribeDescription": "Unlock all features and enjoy zero service fees",
+    "registerNew": "Register New Account",
+    "registerDescription": "Use our referral link to register a new Binance account and get 5% fee rebate",
+    "rebateNote": "Only accounts without prior referral bindings can be used for AI trading"
   }
 }
