@@ -87,7 +87,7 @@ export function ExchangeProvider({ children }: ExchangeProviderProps) {
       logo: '/static/binance_logo.svg',
       description: '#1 Global CEX by Volume',
       features: ['KYC Required', 'High Liquidity', 'Testnet Available'],
-      referralLink: 'https://accounts.maxweb.red/register?ref=HYPERVIP',
+      referralLink: 'https://www.binance.com/en/join?ref=HYPERSVIP',
       buttonText: 'Register First',
       buttonVariant: 'outline'
     },

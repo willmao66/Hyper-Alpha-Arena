@@ -1369,7 +1369,10 @@
     "subscribePremium": "订阅会员",
     "subscribeDescription": "解锁全部功能，享受零服务费",
     "registerNew": "注册新账户",
-    "registerDescription": "使用我们的邀请链接注册新的币安账户，享受 5% 手续费返还",
+    "registerDescription": "适用于尚未完成 KYC 实名认证的币安用户。通过推荐链接注册可享 5% 手续费返还。",
+    "tradeHyperliquid": "在 Hyperliquid 交易",
+    "hyperliquidDescription": "使用我们的 #1 去中心化交易所，无需 KYC，费用更低。",
+    "supportTip": "订阅会员或通过推荐链接注册，可以更好地支持平台发展。团队发展不易，望请理解。",
     "rebateNote": "仅未绑定推荐关系的账户可用于 AI 交易"
   }
 }

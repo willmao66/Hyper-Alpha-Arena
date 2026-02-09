@@ -1350,7 +1350,10 @@
     "subscribePremium": "Subscribe to Premium",
     "subscribeDescription": "Unlock all features and enjoy zero service fees",
     "registerNew": "Register New Account",
-    "registerDescription": "Use our referral link to register a new Binance account and get 5% fee rebate",
+    "registerDescription": "For Binance users who have NOT completed KYC verification. Register with our referral link to get 5% fee rebate.",
+    "tradeHyperliquid": "Trade on Hyperliquid",
+    "hyperliquidDescription": "Use our #1 DEX integration with no KYC required and lower fees.",
+    "supportTip": "Subscribing to Premium or registering through our referral links helps support platform development. Your understanding means a lot to our team.",
     "rebateNote": "Only accounts without prior referral bindings can be used for AI trading"
   }
 }

@@ -7,7 +7,7 @@
 
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { X, ExternalLink, Crown, UserPlus } from 'lucide-react'
+import { X, ExternalLink, Crown, UserPlus, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from 'react-i18next'
 
@@ -47,6 +47,10 @@ export default function RebateIneligibleModal({
 
   const handleRegisterNew = () => {
     window.open('https://www.binance.com/en/join?ref=HYPERSVIP', '_blank')
+  }
+
+  const handleHyperliquid = () => {
+    window.open('https://app.hyperliquid.xyz/join/HYPERSVIP', '_blank')
   }
 
   return createPortal(
@@ -91,59 +95,88 @@ export default function RebateIneligibleModal({
             )}
           </p>
 
-          <div className="flex gap-4">
+          <div className="grid grid-cols-3 gap-4">
             {/* Option 1: Subscribe - Recommended */}
             <button
               onClick={handleSubscribe}
-              className="flex-1 p-4 border-2 border-primary rounded-lg hover:bg-primary/5 transition-colors text-left group"
+              className="p-4 border-2 border-primary rounded-lg hover:bg-primary/5 transition-colors text-left group"
             >
-              <div className="flex items-start gap-3">
-                <div className="p-2 bg-primary/10 rounded-lg group-hover:bg-primary/20 transition-colors">
-                  <Crown className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">
-                      {t('binance.subscribePremium', 'Subscribe to Premium')}
-                    </span>
-                    <span className="text-xs px-2 py-0.5 bg-primary text-primary-foreground rounded-full">
-                      {t('common.recommended', 'Recommended')}
-                    </span>
+              <div className="flex flex-col h-full">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 bg-primary/10 rounded-lg group-hover:bg-primary/20 transition-colors">
+                    <Crown className="h-5 w-5 text-primary" />
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {t(
-                      'binance.subscribeDescription',
-                      'Unlock all features and enjoy zero service fees'
-                    )}
-                  </p>
+                  <span className="text-xs px-2 py-0.5 bg-primary text-primary-foreground rounded-full">
+                    {t('common.recommended', 'Recommended')}
+                  </span>
                 </div>
-                <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-1" />
+                <span className="font-semibold">
+                  {t('binance.subscribePremium', 'Subscribe to Premium')}
+                </span>
+                <p className="text-sm text-muted-foreground mt-1 flex-1">
+                  {t('binance.subscribeDescription', 'Unlock all features and enjoy zero service fees')}
+                </p>
+                <div className="flex items-center gap-1 text-xs text-primary mt-2">
+                  <ExternalLink className="h-3 w-3" />
+                  <span>akooi.com</span>
+                </div>
               </div>
             </button>
 
-            {/* Option 2: Register new account */}
+            {/* Option 2: Register new account (unverified only) */}
             <button
               onClick={handleRegisterNew}
-              className="flex-1 p-4 border rounded-lg hover:bg-muted/50 transition-colors text-left group"
+              className="p-4 border rounded-lg hover:bg-muted/50 transition-colors text-left group"
             >
-              <div className="flex items-start gap-3">
-                <div className="p-2 bg-muted rounded-lg group-hover:bg-muted/80 transition-colors">
-                  <UserPlus className="h-5 w-5 text-muted-foreground" />
+              <div className="flex flex-col h-full">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 bg-muted rounded-lg group-hover:bg-muted/80 transition-colors">
+                    <UserPlus className="h-5 w-5 text-muted-foreground" />
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <span className="font-semibold">
-                    {t('binance.registerNew', 'Register New Account')}
-                  </span>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {t(
-                      'binance.registerDescription',
-                      'Use our referral link to register a new Binance account and get 5% fee rebate'
-                    )}
-                  </p>
+                <span className="font-semibold">
+                  {t('binance.registerNew', 'Register New Account')}
+                </span>
+                <p className="text-sm text-muted-foreground mt-1 flex-1">
+                  {t('binance.registerDescription', 'For users who have NOT completed KYC. Register with our referral link to get 5% fee rebate.')}
+                </p>
+                <div className="flex items-center gap-1 text-xs text-yellow-600 mt-2">
+                  <ExternalLink className="h-3 w-3" />
+                  <span>binance.com</span>
                 </div>
-                <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-1" />
               </div>
             </button>
+
+            {/* Option 3: Trade on Hyperliquid */}
+            <button
+              onClick={handleHyperliquid}
+              className="p-4 border rounded-lg hover:bg-muted/50 transition-colors text-left group"
+            >
+              <div className="flex flex-col h-full">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg group-hover:bg-green-200 dark:group-hover:bg-green-900/50 transition-colors">
+                    <Zap className="h-5 w-5 text-green-600" />
+                  </div>
+                </div>
+                <span className="font-semibold">
+                  {t('binance.tradeHyperliquid', 'Trade on Hyperliquid')}
+                </span>
+                <p className="text-sm text-muted-foreground mt-1 flex-1">
+                  {t('binance.hyperliquidDescription', 'Use our #1 DEX integration with no KYC required and lower fees.')}
+                </p>
+                <div className="flex items-center gap-1 text-xs text-green-600 mt-2">
+                  <ExternalLink className="h-3 w-3" />
+                  <span>hyperliquid.xyz</span>
+                </div>
+              </div>
+            </button>
+          </div>
+
+          {/* Footer tip */}
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <p className="text-xs text-blue-700 dark:text-blue-300 text-center">
+              💡 {t('binance.supportTip', 'Subscribing to Premium or registering through our referral links helps support platform development.')}
+            </p>
           </div>
         </div>
 
