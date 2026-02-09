@@ -1269,7 +1269,7 @@ def place_ai_driven_binance_order(
             )
 
             # Build decision_kwargs for tracking (same as Hyperliquid)
-            decision_kwargs = {"wallet_address": wallet.wallet_address, "exchange": "binance"}
+            decision_kwargs = {"wallet_id": wallet.id, "exchange": "binance"}
 
             # Get tracking fields for decision analysis
             try:
