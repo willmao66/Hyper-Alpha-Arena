@@ -269,13 +269,17 @@ def _binding_to_response(binding: AccountProgramBinding, db: Session) -> Binding
     # Query wallets for this AI Trader based on exchange type
     from database.models import HyperliquidWallet, BinanceWallet
     from utils.encryption import decrypt_private_key
+    from services.hyperliquid_environment import get_global_trading_mode
+
     wallets = []
     exchange = binding.exchange or "hyperliquid"
+    environment = get_global_trading_mode(db)
 
     if exchange == "binance":
         # For Binance, show masked API Key (first 4 and last 4 chars)
         binance_wallets = db.query(BinanceWallet).filter(
             BinanceWallet.account_id == binding.account_id,
+            BinanceWallet.environment == environment,
             BinanceWallet.is_active == "true"
         ).all()
         for w in binance_wallets:
@@ -293,6 +297,7 @@ def _binding_to_response(binding: AccountProgramBinding, db: Session) -> Binding
         # For Hyperliquid, show wallet address
         wallet_rows = db.query(HyperliquidWallet).filter(
             HyperliquidWallet.account_id == binding.account_id,
+            HyperliquidWallet.environment == environment,
             HyperliquidWallet.is_active == "true"
         ).all()
         for w in wallet_rows:

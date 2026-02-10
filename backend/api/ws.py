@@ -335,11 +335,11 @@ async def _send_snapshot_optimized(db: Session, account_id: int):
             for d in ai_decisions
         ],
         # Asset curves only included occasionally (every minute)
-        "timestamp": datetime.now().timestamp()
+        "timestamp": datetime.utcnow().timestamp()
     }
-    
+
     # Only include expensive asset curve data every 60 seconds
-    current_second = int(datetime.now().timestamp()) % 60
+    current_second = int(datetime.utcnow().timestamp()) % 60
     if current_second < 10:  # First 10 seconds of each minute
         try:
             response_data["all_asset_curves"] = get_all_asset_curves_data(db, "1h")

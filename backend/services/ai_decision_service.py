@@ -837,7 +837,9 @@ def _build_prompt_context(
                     from utils.encryption import decrypt_private_key
 
                     binance_wallet = db_session.query(BinanceWallet).filter(
-                        BinanceWallet.account_id == account.id
+                        BinanceWallet.account_id == account.id,
+                        BinanceWallet.environment == environment,
+                        BinanceWallet.is_active == "true"
                     ).first()
 
                     if binance_wallet and binance_wallet.api_key_encrypted:

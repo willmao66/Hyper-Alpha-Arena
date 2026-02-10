@@ -145,7 +145,7 @@ class BinanceAdapter(BaseExchangeAdapter):
 
     def _parse_orderbook(self, raw_data: dict, symbol: str) -> UnifiedOrderbook:
         """Parse Binance orderbook response to unified format."""
-        timestamp = raw_data.get("E", int(datetime.now().timestamp() * 1000))
+        timestamp = raw_data.get("E", int(datetime.utcnow().timestamp() * 1000))
         bids = raw_data.get("bids", [])
         asks = raw_data.get("asks", [])
 
@@ -220,7 +220,7 @@ class BinanceAdapter(BaseExchangeAdapter):
         return UnifiedOpenInterest(
             exchange="binance",
             symbol=symbol,
-            timestamp=int(datetime.now().timestamp() * 1000),
+            timestamp=int(datetime.utcnow().timestamp() * 1000),
             open_interest=Decimal(str(raw_data["openInterest"])),
         )
 

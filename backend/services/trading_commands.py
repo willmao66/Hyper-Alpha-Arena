@@ -8,7 +8,8 @@ from typing import Dict, Optional, Tuple, List, Iterable, Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
 from database.connection import SessionLocal
 from database.models import (
@@ -71,14 +72,18 @@ def _check_binance_daily_quota(db: Session, account_id: int) -> Tuple[bool, Dict
     if _is_premium_user(db):
         return False, {"used": 0, "limit": BINANCE_DAILY_QUOTA_LIMIT, "remaining": BINANCE_DAILY_QUOTA_LIMIT}
 
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # Convert local midnight to UTC for database query
+    # Database stores created_at in UTC, so we need to compare with UTC time
+    local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_offset_seconds = -time.timezone  # time.timezone is seconds west of UTC
+    today_start_utc = local_today_start - timedelta(seconds=utc_offset_seconds)
 
     # Count AIDecisionLog entries
     ai_count = db.query(func.count(AIDecisionLog.id)).filter(
         AIDecisionLog.account_id == account_id,
         AIDecisionLog.exchange == "binance",
         AIDecisionLog.hyperliquid_environment == "mainnet",
-        AIDecisionLog.created_at >= today_start
+        AIDecisionLog.created_at >= today_start_utc
     ).scalar() or 0
 
     # Count ProgramExecutionLog entries
@@ -86,7 +91,7 @@ def _check_binance_daily_quota(db: Session, account_id: int) -> Tuple[bool, Dict
         ProgramExecutionLog.account_id == account_id,
         ProgramExecutionLog.exchange == "binance",
         ProgramExecutionLog.environment == "mainnet",
-        ProgramExecutionLog.created_at >= today_start
+        ProgramExecutionLog.created_at >= today_start_utc
     ).scalar() or 0
 
     used = ai_count + program_count
@@ -1301,9 +1306,18 @@ def place_ai_driven_binance_order(
     for account in accounts:
         db = SessionLocal()
         try:
-            # Check Binance wallet configuration
+            # Get global trading mode (same as Hyperliquid)
+            from services.hyperliquid_environment import get_global_trading_mode
+            environment = get_global_trading_mode(db)
+            if not environment:
+                logger.warning(f"AI Trader '{account.name}' skipped - No trading environment configured")
+                continue
+
+            # Check Binance wallet configuration for the current environment
             wallet = db.query(BinanceWallet).filter(
-                BinanceWallet.account_id == account.id
+                BinanceWallet.account_id == account.id,
+                BinanceWallet.environment == environment,
+                BinanceWallet.is_active == "true"
             ).first()
 
             if not wallet or not wallet.api_key_encrypted or not wallet.secret_key_encrypted:
@@ -1312,16 +1326,6 @@ def place_ai_driven_binance_order(
                     f"Binance wallet not configured."
                 )
                 continue
-
-            # Check daily quota for mainnet non-rebate accounts
-            if wallet.environment == "mainnet" and wallet.rebate_working is False:
-                quota_exceeded, quota_info = _check_binance_daily_quota(db, account.id)
-                if quota_exceeded:
-                    logger.warning(
-                        f"AI Trader '{account.name}' (ID: {account.id}) skipped - "
-                        f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})"
-                    )
-                    continue
 
             # Decrypt API credentials
             from utils.encryption import decrypt_private_key
@@ -1436,7 +1440,8 @@ def place_ai_driven_binance_order(
                     available_balance=available_balance,
                     max_leverage=wallet.max_leverage or 20,
                     default_leverage=wallet.default_leverage or 5,
-                    decision_kwargs=decision_kwargs
+                    decision_kwargs=decision_kwargs,
+                    wallet=wallet
                 )
 
         except Exception as e:
@@ -1458,6 +1463,7 @@ def _execute_binance_decision(
     max_leverage: int = 20,
     default_leverage: int = 5,
     decision_kwargs: Optional[Dict[str, Any]] = None,
+    wallet=None,
 ) -> None:
     """
     Execute a single AI decision on Binance.
@@ -1499,6 +1505,20 @@ def _execute_binance_decision(
         logger.info(f"[BINANCE] AI decided to HOLD for {account.name} - no action taken")
         save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
         return
+
+    # 2.5 Check daily quota for mainnet non-rebate accounts BEFORE executing trade
+    if wallet and wallet.environment == "mainnet" and wallet.rebate_working is False:
+        quota_exceeded, quota_info = _check_binance_daily_quota(db, account.id)
+        if quota_exceeded:
+            logger.warning(
+                f"[BINANCE] AI Trader '{account.name}' quota exceeded - "
+                f"Decision recorded but NOT executed ({quota_info['used']}/{quota_info['limit']})"
+            )
+            # Save decision with executed=False and quota exceeded reason
+            decision["_quota_exceeded"] = True
+            decision["_quota_info"] = quota_info
+            save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
+            return
 
     # 3. Validate symbol
     if not symbol:
@@ -1596,7 +1616,7 @@ def _execute_binance_decision(
                 save_ai_decision(
                     db, account, decision, portfolio, executed=True,
                     hyperliquid_order_id=str(result.get("order_id")) if result.get("order_id") else None,
-                    exchange="binance", **decision_kwargs
+                    **decision_kwargs
                 )
             else:
                 logger.info(f"[BINANCE] No position to close for {symbol}")
@@ -1614,7 +1634,7 @@ def _execute_binance_decision(
                 hyperliquid_order_id=str(order_result.get("order_id")) if order_result.get("order_id") else None,
                 tp_order_id=str(order_result.get("tp_order_id")) if order_result.get("tp_order_id") else None,
                 sl_order_id=str(order_result.get("sl_order_id")) if order_result.get("sl_order_id") else None,
-                exchange="binance", **decision_kwargs
+                **decision_kwargs
             )
 
             if executed:

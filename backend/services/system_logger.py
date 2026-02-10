@@ -51,7 +51,7 @@ class SystemLogCollector:
             details: 详细信息字典
         """
         entry = LogEntry(
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.utcnow().isoformat(),
             level=level,
             category=category,
             message=message,
