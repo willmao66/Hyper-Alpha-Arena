@@ -11,8 +11,22 @@ Architecture:
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List, Tuple
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Ensure datetime is timezone-aware UTC.
+
+    Database stores UTC time in 'timestamp without time zone' columns.
+    The naive datetime from DB is already UTC, just missing the timezone marker.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 from sqlalchemy import func
 
@@ -73,20 +87,23 @@ class ProgramExecutionService:
         if self._is_premium_user(db):
             return False, {"used": 0, "limit": self._daily_quota_limit, "remaining": self._daily_quota_limit}
 
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        # Convert local midnight to UTC for database query
+        local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        utc_offset_seconds = -time.timezone
+        today_start_utc = local_today_start - timedelta(seconds=utc_offset_seconds)
 
         ai_count = db.query(func.count(AIDecisionLog.id)).filter(
             AIDecisionLog.account_id == account_id,
             AIDecisionLog.exchange == "binance",
             AIDecisionLog.hyperliquid_environment == "mainnet",
-            AIDecisionLog.created_at >= today_start
+            AIDecisionLog.created_at >= today_start_utc
         ).scalar() or 0
 
         program_count = db.query(func.count(ProgramExecutionLog.id)).filter(
             ProgramExecutionLog.account_id == account_id,
             ProgramExecutionLog.exchange == "binance",
             ProgramExecutionLog.environment == "mainnet",
-            ProgramExecutionLog.created_at >= today_start
+            ProgramExecutionLog.created_at >= today_start_utc
         ).scalar() or 0
 
         used = ai_count + program_count
@@ -178,7 +195,7 @@ class ProgramExecutionService:
                     "account_id": binding.account_id,
                     "program_id": binding.program_id,
                     "trigger_interval": binding.trigger_interval,
-                    "last_trigger_at": binding.last_trigger_at,
+                    "last_trigger_at": _as_utc(binding.last_trigger_at),
                     "signal_pool_ids": json.loads(binding.signal_pool_ids) if binding.signal_pool_ids else [],
                 }
 
@@ -323,31 +340,6 @@ class ProgramExecutionService:
                         ).first()
 
                         if binance_wallet:
-                            # Check daily quota for mainnet non-rebate accounts
-                            if (environment or "mainnet") == "mainnet" and binance_wallet.rebate_working is False:
-                                quota_exceeded, quota_info = self._check_binance_daily_quota(db, account.id)
-                                if quota_exceeded:
-                                    logger.warning(
-                                        f"[ProgramExecution] Binding {binding_id} skipped - "
-                                        f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})"
-                                    )
-                                    # Log quota exceeded execution
-                                    quota_log = ProgramExecutionLog(
-                                        binding_id=binding.id,
-                                        account_id=account.id,
-                                        program_id=program.id if program else None,
-                                        program_name=program.name if program else None,
-                                        trigger_type=trigger_type,
-                                        trigger_symbol=symbol,
-                                        success=False,
-                                        error_message=f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})",
-                                        exchange="binance",
-                                        environment=environment or "mainnet"
-                                    )
-                                    db.add(quota_log)
-                                    db.commit()
-                                    return
-
                             api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
                             secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
                             trading_client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")
@@ -673,6 +665,15 @@ class ProgramExecutionService:
                 logger.info(f"[ProgramExecution] Updated log {log_id} with order failure status")
                 return
 
+            # Handle quota exceeded - decision was recorded but not executed
+            if isinstance(order_result, dict) and order_result.get('quota_exceeded'):
+                quota_info = order_result.get('quota_info', {})
+                log.success = True  # Strategy execution was successful
+                log.error_message = f"Executed: NO - Daily quota exceeded ({quota_info.get('used', 0)}/{quota_info.get('limit', 20)})"
+                db.commit()
+                logger.info(f"[ProgramExecution] Updated log {log_id} with quota exceeded status")
+                return
+
             # Extract order IDs from result
             order_id = order_result.get('order_id')
             tp_order_id = order_result.get('tp_order_id')
@@ -764,6 +765,22 @@ class ProgramExecutionService:
         # Validate decision
         positions_dict = {}
         environment = get_global_trading_mode(db)
+
+        # Check daily quota for Binance mainnet non-rebate accounts BEFORE executing trade
+        if exchange == "binance" and (environment or "mainnet") == "mainnet":
+            binance_wallet = db.query(BinanceWallet).filter(
+                BinanceWallet.account_id == binding.account_id,
+                BinanceWallet.environment == (environment or "mainnet"),
+                BinanceWallet.is_active == "true"
+            ).first()
+            if binance_wallet and binance_wallet.rebate_working is False:
+                quota_exceeded, quota_info = self._check_binance_daily_quota(db, binding.account_id)
+                if quota_exceeded:
+                    logger.warning(
+                        f"[ProgramExecution] Binding {binding.id} quota exceeded - "
+                        f"Decision recorded but NOT executed ({quota_info['used']}/{quota_info['limit']})"
+                    )
+                    return {"quota_exceeded": True, "quota_info": quota_info}
 
         # Use provided trading_client or create one based on exchange
         client = trading_client

@@ -32,12 +32,16 @@ STRATEGY_REFRESH_INTERVAL = 60.0  # seconds
 
 
 def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
-    """Ensure stored timestamps are timezone-aware UTC."""
+    """Ensure stored timestamps are timezone-aware UTC.
+
+    Note: Database stores UTC time in 'timestamp without time zone' columns.
+    The naive datetime from DB is already UTC, just missing the timezone marker.
+    """
     if dt is None:
         return None
     if dt.tzinfo is None:
-        local_tz = datetime.now().astimezone().tzinfo
-        return dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
+        # Database stores UTC time, so treat naive datetime as UTC
+        return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
 
