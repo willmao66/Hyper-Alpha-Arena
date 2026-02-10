@@ -1618,6 +1618,35 @@ def _execute_binance_decision(
                     hyperliquid_order_id=str(result.get("order_id")) if result.get("order_id") else None,
                     **decision_kwargs
                 )
+                # Save HyperliquidTrade record (consistent with Hyperliquid)
+                try:
+                    from database.snapshot_connection import SnapshotSessionLocal
+                    from database.snapshot_models import HyperliquidTrade
+                    from decimal import Decimal
+
+                    snapshot_db = SnapshotSessionLocal()
+                    try:
+                        trade_record = HyperliquidTrade(
+                            account_id=account.id,
+                            environment=environment,
+                            wallet_address=f"binance_{account.id}",
+                            symbol=symbol,
+                            side="close",
+                            quantity=Decimal(str(result.get('executed_qty', 0))),
+                            price=Decimal(str(result.get('avg_price', 0))),
+                            leverage=1,
+                            order_id=str(result.get('order_id', '')),
+                            order_status=result.get('status', 'filled'),
+                            trade_value=Decimal(str(result.get('executed_qty', 0))) * Decimal(str(result.get('avg_price', 0))),
+                            fee=Decimal('0')
+                        )
+                        snapshot_db.add(trade_record)
+                        snapshot_db.commit()
+                        logger.info(f"[BINANCE] Close trade record saved for {account.name}")
+                    finally:
+                        snapshot_db.close()
+                except Exception as trade_err:
+                    logger.warning(f"Failed to save Binance close trade record: {trade_err}")
             else:
                 logger.info(f"[BINANCE] No position to close for {symbol}")
                 save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
@@ -1643,6 +1672,35 @@ def _execute_binance_decision(
                     f"order_id={order_result.get('order_id')} "
                     f"tp_id={order_result.get('tp_order_id')} sl_id={order_result.get('sl_order_id')}"
                 )
+                # Save HyperliquidTrade record (consistent with Hyperliquid)
+                try:
+                    from database.snapshot_connection import SnapshotSessionLocal
+                    from database.snapshot_models import HyperliquidTrade
+                    from decimal import Decimal
+
+                    snapshot_db = SnapshotSessionLocal()
+                    try:
+                        trade_record = HyperliquidTrade(
+                            account_id=account.id,
+                            environment=environment,
+                            wallet_address=f"binance_{account.id}",
+                            symbol=symbol,
+                            side=operation,
+                            quantity=Decimal(str(order_result.get('filled_qty', 0))),
+                            price=Decimal(str(order_result.get('avg_price', 0))),
+                            leverage=leverage,
+                            order_id=str(order_result.get('order_id', '')),
+                            order_status=status,
+                            trade_value=Decimal(str(order_result.get('filled_qty', 0))) * Decimal(str(order_result.get('avg_price', 0))),
+                            fee=Decimal('0')
+                        )
+                        snapshot_db.add(trade_record)
+                        snapshot_db.commit()
+                        logger.info(f"[BINANCE] Trade record saved for {account.name}")
+                    finally:
+                        snapshot_db.close()
+                except Exception as trade_err:
+                    logger.warning(f"Failed to save Binance trade record: {trade_err}")
             else:
                 logger.warning(f"[BINANCE] {operation.upper()} order failed: {order_result}")
 

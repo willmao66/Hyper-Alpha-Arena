@@ -547,6 +547,7 @@ def get_completed_trades(
     trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
     wallet_address: Optional[str] = Query(None),
     symbol: Optional[str] = Query(None),
+    exchange: Optional[str] = Query(None, regex="^(hyperliquid|binance)$"),
     db: Session = Depends(get_db),
 ):
     """Return recent trades across all AI accounts, filtered by trading mode."""
@@ -818,6 +819,14 @@ def get_completed_trades(
         all_trades = list(main_trades.values()) + other_trades
         all_trades.sort(key=lambda t: t.get("trade_time") or "", reverse=True)
 
+        # Filter by exchange if specified
+        if exchange:
+            if exchange == "hyperliquid":
+                # Include trades with exchange=hyperliquid or NULL (legacy data)
+                all_trades = [t for t in all_trades if t.get("exchange") in ("hyperliquid", None)]
+            else:
+                all_trades = [t for t in all_trades if t.get("exchange") == exchange]
+
         return {
             "generated_at": datetime.utcnow().isoformat(),
             "accounts": list(accounts_meta.values()),
@@ -906,6 +915,7 @@ def get_model_chat(
     include_snapshots: bool = Query(False, description="Include prompt/reasoning/decision snapshots (heavy data)"),
     symbol: Optional[str] = Query(None),
     ids: Optional[str] = Query(None, description="Comma-separated list of decision IDs to fetch"),
+    exchange: Optional[str] = Query(None, regex="^(hyperliquid|binance)$"),
     db: Session = Depends(get_db),
 ):
     """Return recent AI decision logs as chat-style summaries, filtered by trading mode."""
@@ -951,6 +961,16 @@ def get_model_chat(
                 AIDecisionLog.hyperliquid_environment == trading_mode,
                 AIDecisionLog.hyperliquid_environment.isnot(None)
             )
+
+    # Filter by exchange
+    if exchange:
+        if exchange == "hyperliquid":
+            # Include hyperliquid or NULL (legacy data)
+            query = query.filter(
+                (AIDecisionLog.exchange == "hyperliquid") | (AIDecisionLog.exchange == None)
+            )
+        else:
+            query = query.filter(AIDecisionLog.exchange == exchange)
 
     decision_rows = query.limit(limit).all()
 

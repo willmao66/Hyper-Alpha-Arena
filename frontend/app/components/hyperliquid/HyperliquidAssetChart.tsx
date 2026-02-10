@@ -61,6 +61,7 @@ interface HyperliquidAssetChartProps {
   selectedAccount?: number | 'all'
   trades?: TradeMarker[]
   selectedSymbol?: string | null
+  selectedExchange?: 'all' | 'hyperliquid' | 'binance'
 }
 
 export default function HyperliquidAssetChart({
@@ -70,6 +71,7 @@ export default function HyperliquidAssetChart({
   selectedAccount,
   trades,
   selectedSymbol,
+  selectedExchange,
 }: HyperliquidAssetChartProps) {
   const [data, setData] = useState<HyperliquidAssetData[]>([])
   const [loading, setLoading] = useState(true)
@@ -157,6 +159,13 @@ export default function HyperliquidAssetChart({
   const { chartData, accountsData, yAxisDomain, baseline } = useMemo(() => {
     if (!data.length) return { chartData: [], accountsData: [], yAxisDomain: [0, 1000], baseline: 1000 }
 
+    // Filter data by selected exchange
+    const filteredData = selectedExchange && selectedExchange !== 'all'
+      ? data.filter(item => (item.exchange || 'hyperliquid') === selectedExchange)
+      : data
+
+    if (!filteredData.length) return { chartData: [], accountsData: [], yAxisDomain: [0, 1000], baseline: 1000 }
+
     // Group by timestamp and create chart points
     const timeGroups = new Map<number, any>()
     // Key: "accountId_exchange" to support same account on multiple exchanges
@@ -168,7 +177,7 @@ export default function HyperliquidAssetChart({
       logo: { src: string; alt: string; color?: string }
     }>()
 
-    data.forEach(item => {
+    filteredData.forEach(item => {
       if (!timeGroups.has(item.timestamp)) {
         timeGroups.set(item.timestamp, {
           timestamp: item.timestamp,
@@ -213,7 +222,7 @@ export default function HyperliquidAssetChart({
       chartData[0][accountsData[0].curveKey] || 1000 : 1000
 
     // Calculate Y-axis domain with smart padding
-    const allValues = data.map(item => item.total_assets).filter(val => typeof val === 'number')
+    const allValues = filteredData.map(item => item.total_assets).filter(val => typeof val === 'number')
 
     if (allValues.length === 0) return { chartData, accountsData, yAxisDomain: [0, 1000], baseline }
 
@@ -233,7 +242,7 @@ export default function HyperliquidAssetChart({
       yAxisDomain: [Math.max(0, minValue - padding), maxValue + padding],
       baseline
     }
-  }, [data])
+  }, [data, selectedExchange])
 
   // Process trade markers - snap to nearest 5-minute bucket
   const tradeMarkers = useMemo(() => {
@@ -249,6 +258,7 @@ export default function HyperliquidAssetChart({
       price?: number
       chartIndex: number
       account_id: number
+      exchange?: string
     }> = []
 
     trades.forEach(trade => {
@@ -257,6 +267,9 @@ export default function HyperliquidAssetChart({
       if (selectedAccount && selectedAccount !== 'all' && trade.account_id !== selectedAccount) return
       // Filter by selected symbol
       if (selectedSymbol && trade.symbol !== selectedSymbol) return
+      // Filter by selected exchange
+      const tradeExchange = trade.exchange || 'hyperliquid'
+      if (selectedExchange && selectedExchange !== 'all' && tradeExchange !== selectedExchange) return
 
       // Convert trade_time ISO string to Unix timestamp
       const tradeTs = Math.floor(new Date(trade.trade_time + (trade.trade_time.includes('Z') ? '' : 'Z')).getTime() / 1000)
@@ -282,13 +295,14 @@ export default function HyperliquidAssetChart({
           symbol: trade.symbol,
           price: trade.price,
           chartIndex: nearestIdx,
-          account_id: trade.account_id
+          account_id: trade.account_id,
+          exchange: trade.exchange
         })
       }
     })
 
     return markers
-  }, [trades, chartData, selectedAccount, selectedSymbol])
+  }, [trades, chartData, selectedAccount, selectedSymbol, selectedExchange])
 
   // Trade marker colors matching Modelchat
   const getTradeMarkerStyle = (side: string) => {

@@ -1443,6 +1443,7 @@ def list_executions(
     environment: Optional[str] = Query(None, regex="^(testnet|mainnet)$"),
     before: Optional[str] = Query(None, description="ISO timestamp for pagination, returns logs before this time"),
     limit: int = Query(50, le=200),
+    exchange: Optional[str] = Query(None, regex="^(hyperliquid|binance)$"),
     db: Session = Depends(get_db)
 ):
     """List program execution logs for Feed display."""
@@ -1458,6 +1459,14 @@ def list_executions(
         from datetime import datetime
         before_dt = datetime.fromisoformat(before.replace('Z', '+00:00'))
         query = query.filter(ProgramExecutionLog.created_at < before_dt)
+    if exchange:
+        if exchange == "hyperliquid":
+            # Include hyperliquid or NULL (legacy data)
+            query = query.filter(
+                (ProgramExecutionLog.exchange == "hyperliquid") | (ProgramExecutionLog.exchange == None)
+            )
+        else:
+            query = query.filter(ProgramExecutionLog.exchange == exchange)
 
     logs = query.order_by(ProgramExecutionLog.created_at.desc()).limit(limit).all()
 

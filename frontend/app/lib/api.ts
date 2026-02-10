@@ -549,13 +549,14 @@ export interface ArenaTradesResponse {
   trades: ArenaTrade[]
 }
 
-export async function getArenaTrades(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string, symbol?: string }): Promise<ArenaTradesResponse> {
+export async function getArenaTrades(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string, symbol?: string, exchange?: string }): Promise<ArenaTradesResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
   if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
   if (params?.wallet_address) search.append('wallet_address', params.wallet_address)
   if (params?.symbol) search.append('symbol', params.symbol)
+  if (params?.exchange) search.append('exchange', params.exchange)
   const query = search.toString()
   const response = await apiRequest(`/arena/trades${query ? `?${query}` : ''}`)
   return response.json()
@@ -632,7 +633,7 @@ export interface ArenaModelChatResponse {
   entries: ArenaModelChatEntry[]
 }
 
-export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string; before_time?: string, symbol?: string }): Promise<ArenaModelChatResponse> {
+export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string; before_time?: string, symbol?: string, exchange?: string }): Promise<ArenaModelChatResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
@@ -640,6 +641,7 @@ export async function getArenaModelChat(params?: { limit?: number; account_id?: 
   if (params?.wallet_address) search.append('wallet_address', params.wallet_address)
   if (params?.before_time) search.append('before_time', params.before_time)
   if (params?.symbol) search.append('symbol', params.symbol)
+  if (params?.exchange) search.append('exchange', params.exchange)
   const query = search.toString()
   const response = await apiRequest(`/arena/model-chat${query ? `?${query}` : ''}`)
   return response.json()
@@ -714,6 +716,7 @@ export async function getProgramExecutions(params?: {
   environment?: 'testnet' | 'mainnet'
   limit?: number
   before?: string
+  exchange?: string
 }): Promise<ProgramExecutionLog[]> {
   const search = new URLSearchParams()
   if (params?.account_id) search.append('account_id', params.account_id.toString())
@@ -721,6 +724,7 @@ export async function getProgramExecutions(params?: {
   if (params?.environment) search.append('environment', params.environment)
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.before) search.append('before', params.before)
+  if (params?.exchange) search.append('exchange', params.exchange)
   const query = search.toString()
   const response = await apiRequest(`/programs/executions/${query ? `?${query}` : ''}`)
   return response.json()

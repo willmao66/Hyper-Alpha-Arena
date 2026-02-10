@@ -35,6 +35,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
   const [chartRefreshKey, setChartRefreshKey] = useState(0)
   const [selectedAccount, setSelectedAccount] = useState<number | 'all'>('all')
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
+  const [selectedExchange, setSelectedExchange] = useState<'all' | 'hyperliquid' | 'binance'>('all')
   const [tradeMarkers, setTradeMarkers] = useState<TradeMarker[]>([])
   const environment = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
 
@@ -115,6 +116,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
               selectedAccount={selectedAccount}
               trades={tradeMarkers}
               selectedSymbol={selectedSymbol}
+              selectedExchange={selectedExchange}
             />
           ) : (
             <div className="bg-card border border-border rounded-lg h-full flex items-center justify-center">
@@ -140,6 +142,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
             selectedAccount={selectedAccount}
             onSelectedAccountChange={setSelectedAccount}
             onSelectedSymbolChange={setSelectedSymbol}
+            onSelectedExchangeChange={setSelectedExchange}
             onPageChange={onPageChange}
           />
         </div>

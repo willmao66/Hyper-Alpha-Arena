@@ -510,6 +510,7 @@
     "filter": "筛选",
     "allTraders": "全部交易员",
     "allSymbols": "全部交易对",
+    "allExchanges": "全部交易所",
     "completedTrades": "已完成交易",
     "modelChat": "AI决策",
     "program": "程序执行",

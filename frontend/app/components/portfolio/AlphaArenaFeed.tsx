@@ -47,6 +47,7 @@ interface AlphaArenaFeedProps {
   walletAddress?: string
   onPageChange?: (page: string) => void
   onSelectedSymbolChange?: (symbol: string | null) => void
+  onSelectedExchangeChange?: (exchange: 'all' | 'hyperliquid' | 'binance') => void
 }
 
 type FeedTab = 'trades' | 'model-chat' | 'positions' | 'program'
@@ -82,6 +83,7 @@ export default function AlphaArenaFeed({
   walletAddress,
   onPageChange,
   onSelectedSymbolChange,
+  onSelectedExchangeChange,
 }: AlphaArenaFeedProps) {
   const { t } = useTranslation()
   const { getData, updateData } = useArenaData()
@@ -132,6 +134,9 @@ export default function AlphaArenaFeed({
   const [symbolOptions, setSymbolOptions] = useState<string[]>([])
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
 
+  // Exchange filter state
+  const [selectedExchange, setSelectedExchange] = useState<'all' | 'hyperliquid' | 'binance'>('all')
+
   // Dashboard visibility config dialog
   const [showVisibilityConfig, setShowVisibilityConfig] = useState(false)
   const [visibilityAccounts, setVisibilityAccounts] = useState<TradingAccount[]>([])
@@ -161,6 +166,22 @@ export default function AlphaArenaFeed({
     const walletKey = walletAddress ? walletAddress.toLowerCase() : 'nowallet'
     return `${accountKey}_${tradingMode}_${walletKey}`
   }, [activeAccount, tradingMode, walletAddress])
+
+  // Filter data by selected exchange (frontend filtering)
+  const filteredTrades = useMemo(() => {
+    if (selectedExchange === 'all') return trades
+    return trades.filter(t => (t.exchange || 'hyperliquid') === selectedExchange)
+  }, [trades, selectedExchange])
+
+  const filteredModelChat = useMemo(() => {
+    if (selectedExchange === 'all') return modelChat
+    return modelChat.filter(m => (m.exchange || 'hyperliquid') === selectedExchange)
+  }, [modelChat, selectedExchange])
+
+  const filteredProgramLogs = useMemo(() => {
+    if (selectedExchange === 'all') return programLogs
+    return programLogs.filter(p => (p.exchange || 'hyperliquid') === selectedExchange)
+  }, [programLogs, selectedExchange])
 
   // Initialize from global state on mount or account change
   useEffect(() => {
@@ -316,12 +337,14 @@ export default function AlphaArenaFeed({
       setLoadingTrades(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const symbol = selectedSymbol || undefined
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const tradeRes = await getArenaTrades({
         limit: DEFAULT_LIMIT,
         account_id: accountId,
         trading_mode: tradingMode,
         wallet_address: walletAddress,
         symbol: symbol,
+        exchange: exchange,
       })
       const newTrades = tradeRes.trades || []
       setTrades(newTrades)
@@ -345,7 +368,7 @@ export default function AlphaArenaFeed({
       setLoadingTrades(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, selectedSymbol])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, selectedSymbol, selectedExchange])
 
   // Helper function to merge and deduplicate model chat entries
   const mergeModelChatData = useCallback((existing: ArenaModelChatEntry[], newData: ArenaModelChatEntry[]) => {
@@ -372,12 +395,14 @@ export default function AlphaArenaFeed({
       setLoadingModelChat(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const symbol = selectedSymbol || undefined
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const chatRes = await getArenaModelChat({
         limit: MODEL_CHAT_LIMIT,
         account_id: accountId,
         trading_mode: tradingMode,
         wallet_address: walletAddress,
         symbol: symbol,
+        exchange: exchange,
       })
       const newModelChat = chatRes.entries || []
 
@@ -418,7 +443,7 @@ export default function AlphaArenaFeed({
       return null
     }
 
-  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, mergeModelChatData, selectedSymbol])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, mergeModelChatData, selectedSymbol, selectedExchange])
 
   // Load more model chat entries (lazy loading)
   const loadMoreModelChat = useCallback(async () => {
@@ -438,12 +463,14 @@ export default function AlphaArenaFeed({
       }
 
       const accountId = activeAccount === 'all' ? undefined : activeAccount
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const chatRes = await getArenaModelChat({
         limit: MODEL_CHAT_LIMIT,
         account_id: accountId,
         trading_mode: tradingMode,
         wallet_address: walletAddress,
         before_time: beforeTime,
+        exchange: exchange,
       })
 
       const newEntries = chatRes.entries || []
@@ -461,7 +488,7 @@ export default function AlphaArenaFeed({
       console.error('[AlphaArenaFeed] Failed to load more model chat:', err)
       setIsLoadingMoreModelChat(false)
     }
-  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, hasMoreModelChat, isLoadingMoreModelChat, mergeModelChatData, selectedSymbol])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, hasMoreModelChat, isLoadingMoreModelChat, mergeModelChatData, selectedSymbol, selectedExchange])
 
   const loadPositionsData = useCallback(async () => {
     try {
@@ -502,7 +529,8 @@ export default function AlphaArenaFeed({
       if (!backgroundRefresh) setLoadingProgram(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
-      const logs = await getProgramExecutions({ account_id: accountId, environment: env, limit: 50 })
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
+      const logs = await getProgramExecutions({ account_id: accountId, environment: env, limit: 50, exchange: exchange })
       setProgramLogs(logs)
       setHasMoreProgram(logs.length >= 50)
       if (!backgroundRefresh) setLoadingProgram(false)
@@ -512,7 +540,7 @@ export default function AlphaArenaFeed({
       if (!backgroundRefresh) setLoadingProgram(false)
       return null
     }
-  }, [activeAccount, tradingMode])
+  }, [activeAccount, tradingMode, selectedExchange])
 
   // Load more program logs (lazy loading)
   const loadMoreProgramData = useCallback(async () => {
@@ -523,11 +551,13 @@ export default function AlphaArenaFeed({
       const oldestLog = programLogs[programLogs.length - 1]
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const moreLogs = await getProgramExecutions({
         account_id: accountId,
         environment: env,
         limit: 50,
-        before: oldestLog.created_at
+        before: oldestLog.created_at,
+        exchange: exchange,
       })
 
       if (moreLogs.length === 0) {
@@ -541,7 +571,7 @@ export default function AlphaArenaFeed({
     } finally {
       setIsLoadingMoreProgram(false)
     }
-  }, [activeAccount, tradingMode, programLogs, hasMoreProgram, isLoadingMoreProgram])
+  }, [activeAccount, tradingMode, programLogs, hasMoreProgram, isLoadingMoreProgram, selectedExchange])
 
   // Copy program log content (decision or error based on success status)
   const handleCopyProgramLog = async (log: ProgramExecutionLog) => {
@@ -693,6 +723,17 @@ export default function AlphaArenaFeed({
   const handleSymbolFilterChange = (symbol: string | null) => {
     setSelectedSymbol(symbol)
     onSelectedSymbolChange?.(symbol)
+  }
+
+  const handleExchangeFilterChange = (exchange: 'all' | 'hyperliquid' | 'binance') => {
+    setSelectedExchange(exchange)
+    onSelectedExchangeChange?.(exchange)
+    // Reload data with new exchange filter
+    Promise.allSettled([
+      loadTradesData(),
+      loadModelChatData(false),
+      loadProgramData()
+    ])
   }
 
   // Dashboard visibility config handlers
@@ -913,6 +954,15 @@ export default function AlphaArenaFeed({
               </option>
             ))}
           </select>
+          <select
+            value={selectedExchange}
+            onChange={(e) => handleExchangeFilterChange(e.target.value as 'all' | 'hyperliquid' | 'binance')}
+            className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground"
+          >
+            <option value="all">{t('feed.allExchanges', 'All Exchanges')}</option>
+            <option value="hyperliquid">Hyperliquid</option>
+            <option value="binance">Binance</option>
+          </select>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleRefreshClick} disabled={loadingTrades || loadingModelChat || loadingPositions}>
@@ -1059,12 +1109,12 @@ export default function AlphaArenaFeed({
                   </DialogContent>
                 </Dialog>
 
-                {loadingTrades && trades.length === 0 ? (
+                {loadingTrades && filteredTrades.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.loadingTrades', 'Loading trades...')}</div>
-                ) : trades.length === 0 ? (
+                ) : filteredTrades.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.noTrades', 'No recent trades found.')}</div>
                 ) : (
-                  trades.map((trade) => {
+                  filteredTrades.map((trade) => {
                     const modelLogo = getModelLogo(trade.account_name || trade.model)
                     const isNew = !seenTradeIds.current.has(trade.trade_id)
                     if (!seenTradeIds.current.has(trade.trade_id)) {
@@ -1206,13 +1256,13 @@ export default function AlphaArenaFeed({
               </TabsContent>
 
               <TabsContent value="model-chat" className="flex-1 h-0 overflow-y-auto mt-0 p-4 space-y-3">
-                {loadingModelChat && modelChat.length === 0 ? (
+                {loadingModelChat && filteredModelChat.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.loadingModelChat', 'Loading model chat...')}</div>
-                ) : modelChat.length === 0 ? (
+                ) : filteredModelChat.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.noModelChat', 'No recent AI commentary.')}</div>
                 ) : (
                   <>
-                  {modelChat.map((entry) => {
+                  {filteredModelChat.map((entry) => {
                     const isExpanded = expandedChat === entry.id
                     const modelLogo = getModelLogo(entry.account_name || entry.model)
                     const isNew = !seenDecisionIds.current.has(entry.id)
@@ -1610,12 +1660,12 @@ export default function AlphaArenaFeed({
               </TabsContent>
 
               <TabsContent value="program" className="flex-1 h-0 overflow-y-auto mt-0 p-4 space-y-3">
-                {loadingProgram && programLogs.length === 0 ? (
+                {loadingProgram && filteredProgramLogs.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.loadingProgram', 'Loading program executions...')}</div>
-                ) : programLogs.length === 0 ? (
+                ) : filteredProgramLogs.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.noProgram', 'No program executions yet.')}</div>
                 ) : (
-                  programLogs.map((log) => {
+                  filteredProgramLogs.map((log) => {
                     const isExpanded = expandedProgramLog === log.id
                     const iconColors = getProgramIconColors(log.program_id)
                     return (
