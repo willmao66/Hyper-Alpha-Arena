@@ -544,6 +544,7 @@ export interface BinanceDailyQuota {
   used: number;
   limit: number;
   remaining: number;
+  reset_at?: number;
 }
 
 export async function getBinanceDailyQuota(accountId: number): Promise<BinanceDailyQuota> {

@@ -18,6 +18,7 @@ interface QuotaUpgradeModalProps {
     used: number
     limit: number
     remaining: number
+    reset_at?: number
   }
 }
 
@@ -79,7 +80,12 @@ export default function QuotaUpgradeModal({
           {quota && (
             <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
               <p className="text-sm text-amber-800 dark:text-amber-200">
-                {t('quota.currentUsage', 'Current usage')}: {quota.used}/{quota.limit} {t('quota.perDay', 'per day')}
+                {t('quota.remainingQuota', 'Remaining')}: {quota.remaining}/{quota.limit} {t('quota.perDay', 'per day')}
+                {quota.reset_at && (
+                  <span className="ml-2 text-xs opacity-75">
+                    ({t('quota.resetAt', 'Resets at')} {new Date(quota.reset_at * 1000).toLocaleString()})
+                  </span>
+                )}
               </p>
             </div>
           )}

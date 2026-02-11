@@ -58,6 +58,7 @@ interface AccountBalance {
     used: number
     limit: number
     remaining: number
+    reset_at?: number
   } | null
 }
 
@@ -428,8 +429,15 @@ export default function HyperliquidMultiAccountSummary({
                         setIsQuotaModalOpen(true)
                       }}
                       className="px-2 py-1 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-200 rounded text-[10px] font-medium transition-colors"
+                      title={account.quota.reset_at ? `Resets at ${new Date(account.quota.reset_at * 1000).toLocaleString()}` : undefined}
                     >
-                      {account.quota.remaining}/{account.quota.limit} · {t('quota.upgradeUnlimited', 'Upgrade')}
+                      {account.quota.remaining}/{account.quota.limit}
+                      {account.quota.reset_at && (
+                        <span className="ml-1 opacity-75">
+                          · Reset at {new Date(account.quota.reset_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                      <span className="ml-1">· Upgrade</span>
                     </button>
                   )}
                   {account.balance && (
