@@ -72,11 +72,8 @@ def _check_binance_daily_quota(db: Session, account_id: int) -> Tuple[bool, Dict
     if _is_premium_user(db):
         return False, {"used": 0, "limit": BINANCE_DAILY_QUOTA_LIMIT, "remaining": BINANCE_DAILY_QUOTA_LIMIT}
 
-    # Convert local midnight to UTC for database query
-    # Database stores created_at in UTC, so we need to compare with UTC time
-    local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    utc_offset_seconds = -time.timezone  # time.timezone is seconds west of UTC
-    today_start_utc = local_today_start - timedelta(seconds=utc_offset_seconds)
+    # Use UTC midnight for quota reset
+    today_start_utc = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Count AIDecisionLog entries
     ai_count = db.query(func.count(AIDecisionLog.id)).filter(
@@ -1628,7 +1625,7 @@ def _execute_binance_decision(
                     try:
                         trade_record = HyperliquidTrade(
                             account_id=account.id,
-                            environment=environment,
+                            environment=wallet.environment if wallet else "mainnet",
                             wallet_address=f"binance_{account.id}",
                             symbol=symbol,
                             side="close",
@@ -1682,7 +1679,7 @@ def _execute_binance_decision(
                     try:
                         trade_record = HyperliquidTrade(
                             account_id=account.id,
-                            environment=environment,
+                            environment=wallet.environment if wallet else "mainnet",
                             wallet_address=f"binance_{account.id}",
                             symbol=symbol,
                             side=operation,

@@ -512,7 +512,8 @@ class BinanceTradingClient:
         order_type: str = "STOP_MARKET",
         reduce_only: bool = True,
         working_type: str = "MARK_PRICE",
-        client_algo_id: Optional[str] = None
+        client_algo_id: Optional[str] = None,
+        price: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Place a stop-loss or take-profit order using Algo Order API.
@@ -525,10 +526,11 @@ class BinanceTradingClient:
             side: 'BUY' or 'SELL'
             quantity: Order quantity
             stop_price: Trigger price
-            order_type: 'STOP_MARKET' or 'TAKE_PROFIT_MARKET'
+            order_type: 'STOP_MARKET', 'TAKE_PROFIT_MARKET', 'STOP', or 'TAKE_PROFIT'
             reduce_only: Only reduce position (default True for SL/TP)
             working_type: 'MARK_PRICE' or 'CONTRACT_PRICE'
             client_algo_id: Custom ID for order association (e.g., 'TP_123' or 'SL_123')
+            price: Limit price for STOP/TAKE_PROFIT orders (required for limit types)
 
         Returns:
             Order result dict with algo_id for tracking
@@ -548,6 +550,13 @@ class BinanceTradingClient:
             "triggerPrice": str(rounded_stop),
             "workingType": working_type,
         }
+
+        # For limit-type orders (STOP, TAKE_PROFIT), price is required
+        # Default to trigger price if not specified (方案B: price = triggerPrice)
+        if order_type.upper() in ("STOP", "TAKE_PROFIT"):
+            limit_price = price if price else stop_price
+            rounded_price = self._round_price(limit_price, precision["tick_size"])
+            params["price"] = str(rounded_price)
 
         if client_algo_id:
             params["clientAlgoId"] = client_algo_id
@@ -1205,15 +1214,40 @@ class BinanceTradingClient:
                 - time: Execution timestamp (milliseconds)
                 - closedPnl: Realized PnL
                 - fee: Commission fee
+                - main_order_id: For TP/SL orders, the main order ID they belong to
+                - order_type: "tp", "sl", or "main"
         """
         params = {"limit": limit}
         raw_trades = self._request("GET", "/fapi/v1/userTrades", params, signed=True)
 
+        # Get order info to map orderId -> clientOrderId for TP/SL detection
+        # TP/SL orders triggered from Algo orders have clientOrderId like "TP_123" or "SL_123"
+        order_info = {}
+        try:
+            all_orders = self._request("GET", "/fapi/v1/allOrders", {"limit": limit}, signed=True)
+            for o in all_orders:
+                order_info[str(o.get("orderId", ""))] = o.get("clientOrderId", "")
+        except Exception as e:
+            logger.warning(f"[BINANCE] Failed to get order info for TP/SL detection: {e}")
+
         fills = []
         for t in raw_trades:
+            order_id = str(t.get("orderId", ""))
+            client_order_id = order_info.get(order_id, "")
+
+            # Detect TP/SL orders by clientOrderId pattern (e.g., "TP_12345" or "SL_12345")
+            main_order_id = None
+            order_type = "main"
+            if client_order_id.startswith("TP_"):
+                main_order_id = client_order_id[3:]  # Extract main order ID after "TP_"
+                order_type = "tp"
+            elif client_order_id.startswith("SL_"):
+                main_order_id = client_order_id[3:]  # Extract main order ID after "SL_"
+                order_type = "sl"
+
             # Convert Binance format to unified format (compatible with Hyperliquid)
             fills.append({
-                "oid": str(t.get("orderId", "")),
+                "oid": order_id,
                 "coin": self._to_internal_symbol(t.get("symbol", "")),
                 "side": "B" if t.get("side") == "BUY" else "A",
                 "px": str(t.get("price", "0")),
@@ -1221,6 +1255,8 @@ class BinanceTradingClient:
                 "time": t.get("time", 0),
                 "closedPnl": str(t.get("realizedPnl", "0")),
                 "fee": str(t.get("commission", "0")),
+                "main_order_id": main_order_id,
+                "order_type": order_type,
             })
 
         logger.info(f"[BINANCE] Retrieved {len(fills)} user fills")

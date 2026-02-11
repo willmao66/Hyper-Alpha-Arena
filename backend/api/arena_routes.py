@@ -24,6 +24,7 @@ from database.models import (
     AccountStrategyConfig,
     PromptTemplate,
     TradingProgram,
+    BinanceWallet,
 )
 from database.snapshot_models import HyperliquidTrade
 from services.asset_calculator import calc_positions_value
@@ -686,6 +687,39 @@ def get_completed_trades(
             pools = db.query(SignalPool).filter(SignalPool.id.in_(program_log_signal_pool_ids)).all()
             signal_pool_map = {p.id: p.pool_name for p in pools}
 
+        # For Binance: build mapping from triggered order ID to main order ID
+        # Binance TP/SL orders have two IDs:
+        # 1. Algo Order ID (stored in sl_order_id/tp_order_id) - e.g., 1000000012523017
+        # 2. Triggered Order ID (in HyperliquidTrade) - e.g., 12165552060
+        # We need to map triggered order IDs to main order IDs for proper nesting
+        binance_triggered_sl_to_main = {}  # triggered_order_id -> main_order_id
+        binance_triggered_tp_to_main = {}  # triggered_order_id -> main_order_id
+
+        # Get Binance wallets to fetch order info
+        bn_wallets = db.query(BinanceWallet).filter(BinanceWallet.is_active == "true").all()
+        if bn_wallets:
+            from services.binance_trading_client import BinanceTradingClient
+            from utils.encryption import decrypt_private_key
+
+            for wallet in bn_wallets:
+                try:
+                    api_key = decrypt_private_key(wallet.api_key_encrypted)
+                    secret_key = decrypt_private_key(wallet.secret_key_encrypted)
+                    client = BinanceTradingClient(api_key, secret_key, wallet.environment)
+                    fills = client.get_user_fills(limit=500)
+
+                    for fill in fills:
+                        main_order_id = fill.get("main_order_id")
+                        if main_order_id:
+                            triggered_oid = fill.get("oid")
+                            order_type = fill.get("order_type")
+                            if order_type == "sl":
+                                binance_triggered_sl_to_main[triggered_oid] = main_order_id
+                            elif order_type == "tp":
+                                binance_triggered_tp_to_main[triggered_oid] = main_order_id
+                except Exception as e:
+                    logger.warning(f"Failed to get Binance fills for TP/SL mapping: {e}")
+
         # First pass: build trade objects and separate main orders from sl/tp orders
         main_trades: Dict[str, dict] = {}  # order_id -> trade dict
         sl_trades: Dict[str, dict] = {}    # order_id -> trade dict (to be nested)
@@ -780,6 +814,15 @@ def get_completed_trades(
                 # This is a take-profit order from Program Trader
                 trade_dict["order_type"] = "tp"
                 tp_trades[order_id_str] = trade_dict
+            # Check Binance triggered TP/SL orders (triggered order ID != algo order ID)
+            elif order_id_str and order_id_str in binance_triggered_sl_to_main:
+                # This is a Binance triggered stop-loss order
+                trade_dict["order_type"] = "sl"
+                sl_trades[order_id_str] = trade_dict
+            elif order_id_str and order_id_str in binance_triggered_tp_to_main:
+                # This is a Binance triggered take-profit order
+                trade_dict["order_type"] = "tp"
+                tp_trades[order_id_str] = trade_dict
             else:
                 # Not linked to any decision (manual trade or unknown)
                 trade_dict["signal_trigger_id"] = None
@@ -790,9 +833,13 @@ def get_completed_trades(
                 other_trades.append(trade_dict)
 
         # Second pass: nest SL/TP trades under their main orders
-        # Check both AIDecisionLog and ProgramExecutionLog mappings
+        # Check AIDecisionLog, ProgramExecutionLog, and Binance triggered order mappings
         for sl_order_id, sl_trade in sl_trades.items():
-            main_order_id = sl_to_main.get(sl_order_id) or program_sl_to_main.get(sl_order_id)
+            main_order_id = (
+                sl_to_main.get(sl_order_id) or
+                program_sl_to_main.get(sl_order_id) or
+                binance_triggered_sl_to_main.get(sl_order_id)
+            )
             if main_order_id and main_order_id in main_trades:
                 main_trades[main_order_id]["related_orders"].append({
                     "type": "sl",
@@ -804,7 +851,11 @@ def get_completed_trades(
                 })
 
         for tp_order_id, tp_trade in tp_trades.items():
-            main_order_id = tp_to_main.get(tp_order_id) or program_tp_to_main.get(tp_order_id)
+            main_order_id = (
+                tp_to_main.get(tp_order_id) or
+                program_tp_to_main.get(tp_order_id) or
+                binance_triggered_tp_to_main.get(tp_order_id)
+            )
             if main_order_id and main_order_id in main_trades:
                 main_trades[main_order_id]["related_orders"].append({
                     "type": "tp",
@@ -1481,6 +1532,10 @@ def _process_fills_for_environment(
         "fills": [],
     })
 
+    # For Binance: build mapping from main_order_id to TP/SL order_ids
+    # This allows us to match TP/SL fills to the decision that created them
+    binance_tpsl_to_main = {}  # TP/SL order_id -> main_order_id
+
     for fill in fills:
         oid = str(fill.get("oid", ""))
         if not oid:
@@ -1492,6 +1547,10 @@ def _process_fills_for_environment(
         order_aggregates[oid]["total_fee"] += fee
         order_aggregates[oid]["total_pnl"] += closed_pnl
         order_aggregates[oid]["fills"].append(fill)
+
+        # For Binance TP/SL orders, record the mapping to main order
+        if exchange == "binance" and fill.get("main_order_id"):
+            binance_tpsl_to_main[oid] = fill.get("main_order_id")
 
     result["unique_orders"] = len(order_aggregates)
 
@@ -1544,6 +1603,15 @@ def _process_fills_for_environment(
             if oid:
                 order_to_decision[str(oid)] = decision
 
+    # For Binance: also map triggered order IDs to their decisions
+    # Binance TP/SL triggered orders have different IDs than the algo order IDs stored in decision
+    if exchange == "binance":
+        for triggered_oid, main_oid in binance_tpsl_to_main.items():
+            # Find the decision that has this main_order_id
+            decision = order_to_decision.get(main_oid)
+            if decision and triggered_oid not in order_to_decision:
+                order_to_decision[triggered_oid] = decision
+
     # Also build order_id -> program_log mapping for Program Trader orders
     from database.models import ProgramExecutionLog
     program_logs = db.query(ProgramExecutionLog).filter(
@@ -1556,6 +1624,13 @@ def _process_fills_for_environment(
         for oid in [pl.hyperliquid_order_id, pl.tp_order_id, pl.sl_order_id]:
             if oid:
                 order_to_program_log[str(oid)] = pl
+
+    # For Binance: also map triggered order IDs to their program logs
+    if exchange == "binance":
+        for triggered_oid, main_oid in binance_tpsl_to_main.items():
+            pl = order_to_program_log.get(main_oid)
+            if pl and triggered_oid not in order_to_program_log:
+                order_to_program_log[triggered_oid] = pl
 
     # Create missing HyperliquidTrade records for resting orders that later filled
     # Check both AIDecisionLog and ProgramExecutionLog
@@ -1592,8 +1667,17 @@ def _process_fills_for_environment(
             continue
 
         avg_price = total_value / total_qty
-        fill_side = fills_list[0].get("side", "B")
-        side = "buy" if fill_side == "B" else "sell"
+
+        # Determine side from decision/program_log operation, NOT from exchange fill side
+        # Exchange returns B/S (buy/sell), but we want to preserve the original operation (buy/sell/close)
+        if decision:
+            side = decision.operation.lower() if decision.operation else "sell"
+        elif program_log:
+            side = program_log.decision_action.lower() if program_log.decision_action else "sell"
+        else:
+            # Fallback to exchange side (should not reach here due to earlier check)
+            fill_side = fills_list[0].get("side", "B")
+            side = "buy" if fill_side == "B" else "sell"
 
         # Parse trade time
         trade_time = None
@@ -1657,6 +1741,18 @@ def _process_fills_for_environment(
                     agg = order_aggregates[order_id_str]
                     total_pnl += agg["total_pnl"]
                     matched_order_ids.add(order_id_str)
+
+        # For Binance: also check TP/SL orders that triggered and created new order IDs
+        # The triggered order's clientOrderId contains the main order ID (e.g., "SL_12345")
+        if exchange == "binance" and decision.hyperliquid_order_id:
+            main_oid = str(decision.hyperliquid_order_id)
+            for tpsl_oid, linked_main_oid in binance_tpsl_to_main.items():
+                if linked_main_oid == main_oid and tpsl_oid not in matched_order_ids:
+                    if tpsl_oid in order_aggregates:
+                        agg = order_aggregates[tpsl_oid]
+                        total_pnl += agg["total_pnl"]
+                        matched_order_ids.add(tpsl_oid)
+                        logger.info(f"[Binance] Matched TP/SL order {tpsl_oid} to main order {main_oid}, pnl={agg['total_pnl']}, total_pnl={total_pnl}")
 
         # If matched any order, mark as synced (even if PnL is 0 for opening trades)
         if matched_order_ids:
@@ -1728,6 +1824,17 @@ def _process_fills_for_environment(
                     agg = order_aggregates[order_id_str]
                     total_pnl += agg["total_pnl"]
                     matched_order_ids.add(order_id_str)
+
+        # For Binance: also check TP/SL orders that triggered and created new order IDs
+        if exchange == "binance" and program_log.hyperliquid_order_id:
+            main_oid = str(program_log.hyperliquid_order_id)
+            for tpsl_oid, linked_main_oid in binance_tpsl_to_main.items():
+                if linked_main_oid == main_oid and tpsl_oid not in matched_order_ids:
+                    if tpsl_oid in order_aggregates:
+                        agg = order_aggregates[tpsl_oid]
+                        total_pnl += agg["total_pnl"]
+                        matched_order_ids.add(tpsl_oid)
+                        logger.info(f"[Binance] Matched TP/SL order {tpsl_oid} to program main order {main_oid}")
 
         if matched_order_ids:
             program_log.realized_pnl = total_pnl
