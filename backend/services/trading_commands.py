@@ -41,7 +41,7 @@ from services.hyperliquid_symbol_service import (
 
 logger = logging.getLogger(__name__)
 
-AI_TRADING_SYMBOLS: List[str] = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"]
+AI_TRADING_SYMBOLS: List[str] = ["BTC"]  # Paper trading deprecated, keep minimal
 ORACLE_PRICE_DEVIATION_LIMIT_PERCENT = 1.0
 
 # Daily quota limit for Binance mainnet non-rebate accounts
