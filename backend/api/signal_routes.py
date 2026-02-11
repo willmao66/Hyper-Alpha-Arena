@@ -184,6 +184,20 @@ def delete_signal(signal_id: int, db: Session = Depends(get_db)):
 def create_pool(payload: SignalPoolCreate, db: Session = Depends(get_db)):
     """Create a new signal pool"""
     import json
+
+    # Validate that all signals belong to the same exchange as the pool
+    if payload.signal_ids:
+        result = db.execute(text("""
+            SELECT id, exchange FROM signal_definitions WHERE id = ANY(:ids)
+        """), {"ids": payload.signal_ids})
+        for row in result.fetchall():
+            signal_exchange = row[1] or "hyperliquid"
+            if signal_exchange != payload.exchange:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Signal {row[0]} belongs to {signal_exchange}, but pool is for {payload.exchange}"
+                )
+
     result = db.execute(text("""
         INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic, exchange)
         VALUES (:name, :signal_ids, :symbols, :enabled, :logic, :exchange)
@@ -239,6 +253,28 @@ def get_pool(pool_id: int, db: Session = Depends(get_db)):
 def update_pool(pool_id: int, payload: SignalPoolUpdate, db: Session = Depends(get_db)):
     """Update a signal pool"""
     import json
+
+    # Get current pool exchange if not being updated
+    target_exchange = payload.exchange
+    if target_exchange is None:
+        current = db.execute(text("SELECT exchange FROM signal_pools WHERE id = :id"), {"id": pool_id}).fetchone()
+        if current:
+            target_exchange = current[0] or "hyperliquid"
+
+    # Validate that all signals belong to the same exchange as the pool
+    signal_ids_to_check = payload.signal_ids
+    if signal_ids_to_check and target_exchange:
+        result = db.execute(text("""
+            SELECT id, exchange FROM signal_definitions WHERE id = ANY(:ids)
+        """), {"ids": signal_ids_to_check})
+        for row in result.fetchall():
+            signal_exchange = row[1] or "hyperliquid"
+            if signal_exchange != target_exchange:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Signal {row[0]} belongs to {signal_exchange}, but pool is for {target_exchange}"
+                )
+
     updates = []
     params = {"id": pool_id}
     if payload.pool_name is not None:

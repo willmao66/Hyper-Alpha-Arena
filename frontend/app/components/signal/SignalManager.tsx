@@ -1696,7 +1696,14 @@ export default function SignalManager() {
             </div>
             <div>
               <Label>{t('signals.dialog.exchangeLabel', 'Exchange')}</Label>
-              <Select value={poolForm.exchange} onValueChange={v => setPoolForm(prev => ({ ...prev, exchange: v }))}>
+              <Select value={poolForm.exchange} onValueChange={v => {
+                // Clear signals that don't match the new exchange
+                const matchingSignalIds = poolForm.signal_ids.filter(id => {
+                  const signal = signals.find(s => s.id === id)
+                  return signal?.exchange === v
+                })
+                setPoolForm(prev => ({ ...prev, exchange: v, signal_ids: matchingSignalIds }))
+              }}>
                 <SelectTrigger>
                   <SelectValue>
                     <span className="flex items-center gap-2">
@@ -1740,15 +1747,27 @@ export default function SignalManager() {
             <div>
               <Label>{t('signals.dialog.signalsLabel', 'Signals')}</Label>
               <div className="space-y-2 mt-2 max-h-40 overflow-y-auto">
-                {signals.map(signal => (
-                  <div key={signal.id} className="flex items-center gap-2">
-                    <Switch
-                      checked={poolForm.signal_ids.includes(signal.id)}
-                      onCheckedChange={() => toggleSignalInPool(signal.id)}
-                    />
-                    <span className="text-sm">{signal.signal_name}</span>
-                  </div>
-                ))}
+                {signals.map(signal => {
+                  const isMatchingExchange = signal.exchange === poolForm.exchange
+                  const isDisabled = !isMatchingExchange
+                  return (
+                    <div key={signal.id} className={`flex items-center gap-2 ${isDisabled ? 'opacity-50' : ''}`}>
+                      <Switch
+                        checked={poolForm.signal_ids.includes(signal.id)}
+                        onCheckedChange={() => toggleSignalInPool(signal.id)}
+                        disabled={isDisabled}
+                      />
+                      <span className="text-sm flex items-center gap-1.5">
+                        {signal.signal_name}
+                        {isDisabled && (
+                          <span className="inline-flex items-center" title={`${signal.exchange} signal`}>
+                            {signal.exchange === 'binance' ? <BinanceLogo /> : <HyperliquidLogo />}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
             <div>

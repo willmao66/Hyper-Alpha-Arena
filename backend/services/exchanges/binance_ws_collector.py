@@ -244,6 +244,26 @@ class BinanceWSCollector:
         finally:
             db.close()
 
+        # Run signal detection for Binance pools after data flush
+        self._run_signal_detection()
+
+    def _run_signal_detection(self):
+        """Run signal detection for Binance pools only"""
+        try:
+            from services.signal_detection_service import signal_detection_service
+
+            for symbol in self.symbols:
+                # Binance detection doesn't need market_data context, queries DB directly
+                market_data = {}
+                triggered = signal_detection_service.detect_signals(
+                    symbol, market_data, exchange="binance"
+                )
+                if triggered:
+                    logger.info(f"Binance pools triggered for {symbol}: {[p['pool_name'] for p in triggered]}")
+
+        except Exception as e:
+            logger.error(f"Error in Binance signal detection: {e}", exc_info=True)
+
     def _save_aggregated_trades(self, db, agg: SymbolAggregator):
         """Save aggregated trade data to database"""
         try:

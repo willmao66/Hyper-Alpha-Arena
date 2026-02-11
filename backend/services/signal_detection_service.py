@@ -128,10 +128,17 @@ class SignalDetectionService:
             self._trigger_callbacks.remove(callback)
             logger.info(f"Signal trigger callback unregistered: {callback.__name__ if hasattr(callback, '__name__') else callback}")
 
-    def detect_signals(self, symbol: str, market_data: Dict[str, Any]) -> List[dict]:
+    def detect_signals(
+        self, symbol: str, market_data: Dict[str, Any], exchange: str = None
+    ) -> List[dict]:
         """
         Detect triggered signals for a symbol based on current market data.
         Returns list of triggered pools (edge-triggered at pool level).
+
+        Args:
+            symbol: Trading symbol (e.g., "BTC")
+            market_data: Current market data context
+            exchange: Filter by exchange ("hyperliquid", "binance", or None for all)
 
         Pool-level logic:
         - OR: Pool triggers when ANY signal condition is met (and pool was not active)
@@ -147,6 +154,7 @@ class SignalDetectionService:
             relevant_pools = [
                 pool for pool in self._signal_pools_cache
                 if pool.get("enabled") and symbol in pool.get("symbols", [])
+                and (exchange is None or pool.get("exchange", "hyperliquid") == exchange)
             ]
 
             if not relevant_pools:
@@ -306,6 +314,10 @@ class SignalDetectionService:
         was_active = pool_state.is_active
         should_trigger = pool_condition_met and not was_active
 
+        # DEBUG LOG: Edge detection state (only when state changes or trigger happens)
+        if should_trigger or (pool_condition_met != was_active):
+            print(f"[EdgeDetect] pool={pool_id}:{pool_name} symbol={symbol} was_active={was_active} pool_met={pool_condition_met} trigger={should_trigger}", flush=True)
+
         # Update pool state
         pool_state.is_active = pool_condition_met
         pool_state.signal_conditions_met = signals_met
@@ -371,6 +383,9 @@ class SignalDetectionService:
             return None
 
         condition_met = self._evaluate_condition(current_value, operator, threshold)
+
+        # DEBUG LOG: Standard signal condition check (all exchanges, all metrics)
+        print(f"[SignalCheck] signal={signal_id} symbol={symbol} metric={metric} exchange={exchange} period={time_window} value={current_value:.6f} op={operator} thresh={threshold} met={condition_met}", flush=True)
 
         return {
             "signal_id": signal_id,
@@ -520,7 +535,12 @@ class SignalDetectionService:
 
             db = SessionLocal()
             try:
-                return get_indicator_value(db, symbol, indicator_type, period, exchange=exchange)
+                from datetime import datetime
+                current_time_ms = int(datetime.utcnow().timestamp() * 1000)
+                value = get_indicator_value(db, symbol, indicator_type, period, current_time_ms=current_time_ms, exchange=exchange)
+                # DEBUG LOG: Record the exact timestamp used for indicator calculation
+                print(f"[MetricValue] symbol={symbol} metric={metric} exchange={exchange} period={period} ts={current_time_ms} value={value}", flush=True)
+                return value
             finally:
                 db.close()
 
@@ -604,6 +624,10 @@ class SignalDetectionService:
                 elif actual_ratio <= 1 / ratio_threshold:
                     condition_met = True
                     actual_direction = "sell"
+
+        # DEBUG LOG: Taker volume condition check (all exchanges)
+        ratio_str = f"{actual_ratio:.4f}" if actual_ratio else "N/A"
+        print(f"[TakerCheck] signal={signal_id} symbol={symbol} exchange={exchange} period={period} ts={current_time_ms} buy={buy:.2f} sell={sell:.2f} ratio={ratio_str} met={condition_met}", flush=True)
 
         return {
             "signal_id": signal_id,

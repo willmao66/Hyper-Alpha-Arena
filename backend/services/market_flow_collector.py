@@ -623,7 +623,7 @@ class MarketFlowCollector:
             logger.error(f"Database error in flush: {e}")
 
     def _run_signal_detection(self):
-        """Run signal detection for all subscribed symbols"""
+        """Run signal detection for all subscribed symbols (Hyperliquid only)"""
         try:
             from services.signal_detection_service import signal_detection_service
 
@@ -634,8 +634,10 @@ class MarketFlowCollector:
                     "orderbook": self.latest_orderbook.get(symbol, {}),
                 }
 
-                # Detect signals (returns pool triggers now)
-                triggered = signal_detection_service.detect_signals(symbol, market_data)
+                # Detect signals for Hyperliquid pools only
+                triggered = signal_detection_service.detect_signals(
+                    symbol, market_data, exchange="hyperliquid"
+                )
                 if triggered:
                     logger.info(f"Pools triggered for {symbol}: {[p['pool_name'] for p in triggered]}")
 
