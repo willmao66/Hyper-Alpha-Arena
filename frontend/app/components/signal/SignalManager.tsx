@@ -932,7 +932,6 @@ export default function SignalManager() {
 
       // Fetch triggers based on whether it's a pool or signal preview
       let triggerData
-      const previewExchange = previewPool?.exchange || previewSignal?.exchange || 'hyperliquid'
       if (previewPool) {
         const triggerRes = await fetch(
           `/api/signals/pool-backtest/${previewPool.id}?symbol=${previewSymbol}&kline_min_ts=${klineMinTs}&kline_max_ts=${klineMaxTs}`
