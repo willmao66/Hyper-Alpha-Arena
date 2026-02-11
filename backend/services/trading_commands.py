@@ -1623,18 +1623,25 @@ def _execute_binance_decision(
 
                     snapshot_db = SnapshotSessionLocal()
                     try:
+                        # Use Binance official fields, fallback to market price if 0
+                        filled_qty = float(result.get('filled_qty', 0))
+                        avg_price_val = float(result.get('avg_price', 0))
+                        # For close, use filled_qty or position size from result
+                        trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal('0')
+                        trade_price = Decimal(str(avg_price_val)) if avg_price_val > 0 else Decimal(str(price))
+
                         trade_record = HyperliquidTrade(
                             account_id=account.id,
                             environment=wallet.environment if wallet else "mainnet",
                             wallet_address=f"binance_{account.id}",
                             symbol=symbol,
                             side="close",
-                            quantity=Decimal(str(result.get('executed_qty', 0))),
-                            price=Decimal(str(result.get('avg_price', 0))),
+                            quantity=trade_qty,
+                            price=trade_price,
                             leverage=1,
                             order_id=str(result.get('order_id', '')),
                             order_status=result.get('status', 'filled'),
-                            trade_value=Decimal(str(result.get('executed_qty', 0))) * Decimal(str(result.get('avg_price', 0))),
+                            trade_value=trade_qty * trade_price,
                             fee=Decimal('0')
                         )
                         snapshot_db.add(trade_record)
@@ -1677,18 +1684,25 @@ def _execute_binance_decision(
 
                     snapshot_db = SnapshotSessionLocal()
                     try:
+                        # Use Binance official fields, fallback to decision values if 0
+                        filled_qty = float(order_result.get('filled_qty', 0))
+                        avg_price = float(order_result.get('avg_price', 0))
+                        # If Binance returns 0 (MARKET order not yet filled), use decision values
+                        trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal(str(quantity))
+                        trade_price = Decimal(str(avg_price)) if avg_price > 0 else Decimal(str(price))
+
                         trade_record = HyperliquidTrade(
                             account_id=account.id,
                             environment=wallet.environment if wallet else "mainnet",
                             wallet_address=f"binance_{account.id}",
                             symbol=symbol,
                             side=operation,
-                            quantity=Decimal(str(order_result.get('filled_qty', 0))),
-                            price=Decimal(str(order_result.get('avg_price', 0))),
+                            quantity=trade_qty,
+                            price=trade_price,
                             leverage=leverage,
                             order_id=str(order_result.get('order_id', '')),
                             order_status=status,
-                            trade_value=Decimal(str(order_result.get('filled_qty', 0))) * Decimal(str(order_result.get('avg_price', 0))),
+                            trade_value=trade_qty * trade_price,
                             fee=Decimal('0')
                         )
                         snapshot_db.add(trade_record)

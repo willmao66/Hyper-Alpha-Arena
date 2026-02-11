@@ -87,10 +87,8 @@ class ProgramExecutionService:
         if self._is_premium_user(db):
             return False, {"used": 0, "limit": self._daily_quota_limit, "remaining": self._daily_quota_limit}
 
-        # Convert local midnight to UTC for database query
-        local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        utc_offset_seconds = -time.timezone
-        today_start_utc = local_today_start - timedelta(seconds=utc_offset_seconds)
+        # Use UTC midnight for quota reset
+        today_start_utc = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
         ai_count = db.query(func.count(AIDecisionLog.id)).filter(
             AIDecisionLog.account_id == account_id,
@@ -414,7 +412,7 @@ class ProgramExecutionService:
                 if log_id and op != "hold":
                     self._update_log_with_order(
                         db, log_id, order_result, binding, result.decision,
-                        wallet_address, environment or "mainnet"
+                        wallet_address, environment or "mainnet", exchange=exchange
                     )
 
         except Exception as e:
@@ -649,7 +647,8 @@ class ProgramExecutionService:
         binding: AccountProgramBinding,
         decision,
         wallet_address: str,
-        environment: str
+        environment: str,
+        exchange: str = "hyperliquid"
     ):
         """Update execution log with order IDs and create HyperliquidTrade if filled."""
         try:
@@ -693,7 +692,7 @@ class ProgramExecutionService:
             order_status = order_result.get('status')
             if order_status == 'filled':
                 self._create_hyperliquid_trade(
-                    binding, decision, order_result, wallet_address, environment
+                    binding, decision, order_result, wallet_address, environment, exchange
                 )
 
         except Exception as e:
@@ -705,9 +704,10 @@ class ProgramExecutionService:
         decision,
         order_result: dict,
         wallet_address: str,
-        environment: str
+        environment: str,
+        exchange: str = "hyperliquid"
     ):
-        """Create HyperliquidTrade record for filled orders (same as trading_commands.py)."""
+        """Create HyperliquidTrade record for filled orders."""
         try:
             from database.snapshot_connection import SnapshotSessionLocal
             from database.snapshot_models import HyperliquidTrade
@@ -718,6 +718,21 @@ class ProgramExecutionService:
             order_status = order_result.get('status')
             leverage = decision.leverage if hasattr(decision, 'leverage') else 1
 
+            # Use different field names based on exchange
+            if exchange == "binance":
+                # Binance uses filled_qty, avg_price
+                filled_qty = float(order_result.get('filled_qty', 0))
+                avg_price = float(order_result.get('avg_price', 0))
+                # Fallback to decision values if Binance returns 0
+                decision_qty = float(decision.quantity) if hasattr(decision, 'quantity') else 0
+                decision_price = float(decision.price) if hasattr(decision, 'price') else 0
+                trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal(str(decision_qty))
+                trade_price = Decimal(str(avg_price)) if avg_price > 0 else Decimal(str(decision_price))
+            else:
+                # Hyperliquid uses filled_amount, average_price
+                trade_qty = Decimal(str(order_result.get('filled_amount', 0)))
+                trade_price = Decimal(str(order_result.get('average_price', 0)))
+
             snapshot_db = SnapshotSessionLocal()
             try:
                 trade_record = HyperliquidTrade(
@@ -726,12 +741,12 @@ class ProgramExecutionService:
                     wallet_address=wallet_address,
                     symbol=decision.symbol,
                     side=op,
-                    quantity=Decimal(str(order_result.get('filled_amount', 0))),
-                    price=Decimal(str(order_result.get('average_price', 0))),
+                    quantity=trade_qty,
+                    price=trade_price,
                     leverage=leverage,
                     order_id=order_id,
                     order_status=order_status,
-                    trade_value=Decimal(str(order_result.get('filled_amount', 0))) * Decimal(str(order_result.get('average_price', 0))),
+                    trade_value=trade_qty * trade_price,
                     fee=Decimal(str(order_result.get('fee', 0)))
                 )
                 snapshot_db.add(trade_record)

@@ -1572,6 +1572,8 @@ def _process_fills_for_environment(
 
     # Collect existing trade order_ids for deduplication
     existing_trade_order_ids = {str(t.order_id) for t in trades if t.order_id}
+    # For Binance: also build order_id -> trade mapping for updates
+    existing_trades_by_order_id = {str(t.order_id): t for t in trades if t.order_id}
 
     # Helper function to get order trigger time from Hyperliquid API (only for Hyperliquid)
     def get_order_trigger_time(account_id: int, order_id: str) -> Optional[datetime]:
@@ -1633,10 +1635,15 @@ def _process_fills_for_environment(
                 order_to_program_log[triggered_oid] = pl
 
     # Create missing HyperliquidTrade records for resting orders that later filled
+    # For Binance: also update existing records with official fill data
     # Check both AIDecisionLog and ProgramExecutionLog
     for oid, agg in order_aggregates.items():
-        if oid in existing_trade_order_ids:
-            continue  # Already exists
+        existing_trade = existing_trades_by_order_id.get(oid) if exchange == "binance" else None
+
+        # For Hyperliquid: skip if already exists
+        # For Binance: allow update of existing records
+        if oid in existing_trade_order_ids and exchange != "binance":
+            continue  # Already exists (Hyperliquid only)
 
         # Try to find source: AIDecisionLog or ProgramExecutionLog
         decision = order_to_decision.get(oid)
@@ -1700,6 +1707,19 @@ def _process_fills_for_environment(
             wallet_address = program_log.wallet_address
             symbol = program_log.decision_symbol or fills_list[0].get("coin", "")
             source_info = f"program_log {program_log.id}"
+
+        # For Binance: update existing record with official fill data
+        if existing_trade and exchange == "binance":
+            existing_trade.quantity = total_qty
+            existing_trade.price = avg_price
+            existing_trade.trade_value = total_value
+            existing_trade.fee = agg["total_fee"]
+            existing_trade.order_status = "filled"
+            if trade_time:
+                existing_trade.trade_time = trade_time
+            result["trades_updated"] += 1
+            logger.info(f"Updated HyperliquidTrade for Binance order {oid} with official fill data")
+            continue
 
         # Create new HyperliquidTrade record
         new_trade = HyperliquidTrade(
