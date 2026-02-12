@@ -320,13 +320,9 @@ export default function StrategyPanel({
   }, [samplingInterval, resetMessages])
 
   return (
-    <Card className="h-full flex flex-col">
-      <CardHeader>
-        <CardTitle>{t('strategy.title', 'Strategy Configuration')}</CardTitle>
-        <CardDescription>{t('strategy.description', 'Configure trigger parameters and Hyperliquid watchlist')}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex-1 overflow-hidden">
-        <Tabs defaultValue="strategy" className="flex flex-col h-full">
+    <div className="h-full flex flex-col">
+      <p className="text-sm text-muted-foreground mb-4">{t('strategy.description', 'Configure trigger parameters and Hyperliquid watchlist')}</p>
+      <Tabs defaultValue="strategy" className="flex flex-col h-full flex-1 overflow-hidden">
           <TabsList className="grid grid-cols-3 max-w-2xl mb-4">
             <TabsTrigger value="strategy">{t('strategy.aiStrategy', 'AI Strategy')}</TabsTrigger>
             <TabsTrigger value="watchlist">{t('strategy.symbolWatchlist', 'Symbol Watchlist')}</TabsTrigger>
@@ -576,7 +572,6 @@ export default function StrategyPanel({
             )}
           </TabsContent>
         </Tabs>
-      </CardContent>
-    </Card>
+    </div>
   )
 }
