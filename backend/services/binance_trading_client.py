@@ -375,6 +375,9 @@ class BinanceTradingClient:
             isolated_margin = float(pos.get("isolatedMargin", 0))
             leverage_type = "isolated" if isolated_margin > 0 else "cross"
 
+            # Determine side from position amount (positive=Long, negative=Short)
+            side = "Long" if position_amt > 0 else "Short"
+
             positions.append({
                 # Unified fields (Hyperliquid-compatible)
                 "coin": symbol,
@@ -386,6 +389,7 @@ class BinanceTradingClient:
                 "liquidation_px": float(pos.get("liquidationPrice", 0)),
                 "margin_used": initial_margin,
                 "leverage_type": leverage_type,
+                "side": side,  # Added: position direction for compatibility
                 # Additional Binance-specific fields (for reference)
                 "symbol": symbol,  # Alias for coin
                 "mark_price": float(pos.get("markPrice", 0)),
@@ -773,11 +777,12 @@ class BinanceTradingClient:
             side_raw = o.get("side", "").upper()
             side = "Buy" if side_raw == "BUY" else "Sell"
             reduce_only = o.get("reduceOnly", False)
-            # Determine direction: Buy+reduceOnly=Close Long, Sell+reduceOnly=Close Short
+            # Determine direction: Buy+reduceOnly=Close Short (buying to close short position)
+            # Sell+reduceOnly=Close Long (selling to close long position)
             if side == "Buy":
-                direction = "Close Long" if reduce_only else "Open Long"
+                direction = "Close Short" if reduce_only else "Open Long"
             else:
-                direction = "Close Short" if reduce_only else "Open Short"
+                direction = "Close Long" if reduce_only else "Open Short"
 
             # Determine order type from orderType field (TAKE_PROFIT/STOP)
             order_type_raw = o.get("orderType", "")

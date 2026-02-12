@@ -32,7 +32,7 @@ import { getModelLogo, getProgramIconColors } from './logoAssets'
 import FlipNumber from './FlipNumber'
 import HighlightWrapper from './HighlightWrapper'
 import { formatDateTime } from '@/lib/dateTime'
-import { Loader2, Settings, ChevronDown, ChevronRight } from 'lucide-react'
+import { Loader2, Settings, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import { copyToClipboard } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -98,6 +98,7 @@ export default function AlphaArenaFeed({
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [copiedSections, setCopiedSections] = useState<Record<string, boolean>>({})
   const [manualRefreshKey, setManualRefreshKey] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [loadingTrades, setLoadingTrades] = useState(false)
   const [loadingModelChat, setLoadingModelChat] = useState(false)
   const [loadingPositions, setLoadingPositions] = useState(false)
@@ -716,8 +717,11 @@ export default function AlphaArenaFeed({
     return allTraderOptions.sort((a, b) => a.name.localeCompare(b.name))
   }, [allTraderOptions])
 
-  const handleRefreshClick = () => {
+  const handleRefreshClick = async () => {
+    setIsRefreshing(true)
     setManualRefreshKey((key) => key + 1)
+    // Keep spinning for at least 500ms for visual feedback
+    setTimeout(() => setIsRefreshing(false), 500)
   }
 
   const handleSymbolFilterChange = (symbol: string | null) => {
@@ -924,7 +928,7 @@ export default function AlphaArenaFeed({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('feed.filter', 'Filter')}</span>
           <select
             value={activeAccount === 'all' ? '' : activeAccount}
@@ -932,12 +936,12 @@ export default function AlphaArenaFeed({
               const value = e.target.value
               handleAccountFilterChange(value ? Number(value) : 'all')
             }}
-            className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground"
+            className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground max-w-[120px]"
           >
             <option value="">{t('feed.allTraders', 'All Traders')}</option>
             {accountOptions.map((meta) => (
               <option key={meta.account_id} value={meta.account_id}>
-                {meta.name}{meta.model ? ` (${meta.model})` : ''}
+                {meta.name}
               </option>
             ))}
           </select>
@@ -965,8 +969,8 @@ export default function AlphaArenaFeed({
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleRefreshClick} disabled={loadingTrades || loadingModelChat || loadingPositions}>
-            {t('common.refresh', 'Refresh')}
+          <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={handleRefreshClick} disabled={isRefreshing || loadingTrades || loadingModelChat || loadingPositions} title={t('common.refresh', 'Refresh')}>
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           </Button>
           <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={handleOpenVisibilityConfig} title={t('feed.configureVisibility', 'Configure Dashboard Visibility')}>
             <Settings className="h-4 w-4" />

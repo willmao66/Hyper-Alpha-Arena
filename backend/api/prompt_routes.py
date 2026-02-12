@@ -388,9 +388,15 @@ def _generate_single_preview(
         from services.binance_trading_client import BinanceTradingClient
         from database.models import BinanceWallet
         from utils.encryption import decrypt_private_key
+        from services.hyperliquid_environment import get_global_trading_mode
+
+        # Get global trading environment (same as Hyperliquid)
+        binance_environment = get_global_trading_mode(db)
 
         binance_wallet = db.query(BinanceWallet).filter(
-            BinanceWallet.account_id == account.id
+            BinanceWallet.account_id == account.id,
+            BinanceWallet.environment == binance_environment,
+            BinanceWallet.is_active == "true"
         ).first()
 
         if not binance_wallet or not binance_wallet.api_key_encrypted:
@@ -399,7 +405,7 @@ def _generate_single_preview(
                 "accountName": account.name,
                 "exchange": exchange,
                 "symbols": requested_symbols if requested_symbols else [],
-                "filledPrompt": "Binance wallet not configured for this account",
+                "filledPrompt": f"Binance {binance_environment} wallet not configured for this account",
             }
 
         api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
@@ -408,9 +414,9 @@ def _generate_single_preview(
         client = BinanceTradingClient(
             api_key=api_key,
             secret_key=secret_key,
-            environment=binance_wallet.environment or "testnet"
+            environment=binance_environment
         )
-        environment = binance_wallet.environment or "testnet"
+        environment = binance_environment
 
         account_state = client.get_account_state(db)
         positions = client.get_positions()

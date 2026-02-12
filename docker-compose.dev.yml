@@ -48,7 +48,6 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - /etc/localtime:/etc/localtime:ro
       - ./backend/api:/app/backend/api
       - ./backend/backtest:/app/backend/backtest
       - ./backend/config:/app/backend/config

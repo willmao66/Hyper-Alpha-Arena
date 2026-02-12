@@ -779,16 +779,10 @@ async def get_daily_quota(account_id: int, db: Session = Depends(get_db)):
     if _is_premium_user(db):
         return {"limited": False, "used": 0, "limit": DAILY_QUOTA_LIMIT, "remaining": DAILY_QUOTA_LIMIT}
 
-    # Calculate today's usage (use local server time for reset)
-    # Database stores UTC time, so convert local midnight to UTC for comparison
+    # Use UTC midnight for quota reset
     from sqlalchemy import func
-    import time
-    from datetime import timedelta
 
-    local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    # Convert local midnight to UTC (time.timezone is negative for east of UTC)
-    utc_offset_seconds = -time.timezone  # e.g., +28800 for UTC+8
-    today_start_utc = local_today_start - timedelta(seconds=utc_offset_seconds)
+    today_start_utc = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Count AIDecisionLog entries
     ai_count = db.query(func.count(AIDecisionLog.id)).filter(
@@ -809,9 +803,15 @@ async def get_daily_quota(account_id: int, db: Session = Depends(get_db)):
     used = ai_count + program_count
     remaining = max(0, DAILY_QUOTA_LIMIT - used)
 
+    # Calculate next reset time (next UTC midnight)
+    from datetime import timedelta
+    tomorrow_utc = today_start_utc + timedelta(days=1)
+    reset_timestamp = int(tomorrow_utc.timestamp())
+
     return {
         "limited": True,
         "used": used,
         "limit": DAILY_QUOTA_LIMIT,
-        "remaining": remaining
+        "remaining": remaining,
+        "reset_at": reset_timestamp
     }

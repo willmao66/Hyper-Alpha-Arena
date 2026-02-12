@@ -1173,13 +1173,15 @@ def preview_run_binding(binding_id: int, db: Session = Depends(get_db)):
             from utils.encryption import decrypt_private_key
 
             binance_wallet = db.query(BinanceWalletModel).filter(
-                BinanceWalletModel.account_id == binding.account_id
+                BinanceWalletModel.account_id == binding.account_id,
+                BinanceWalletModel.environment == global_environment,
+                BinanceWalletModel.is_active == "true"
             ).first()
 
             if not binance_wallet or not binance_wallet.api_key_encrypted:
                 return PreviewRunResponse(
                     success=False,
-                    error="Binance wallet not configured for this AI Trader",
+                    error=f"Binance {global_environment} wallet not configured for this AI Trader",
                     execution_time_ms=(time.time() - start_time) * 1000
                 )
 
