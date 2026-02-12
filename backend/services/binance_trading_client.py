@@ -483,7 +483,16 @@ class BinanceTradingClient:
             params["price"] = str(rounded_price)
             params["timeInForce"] = time_in_force
 
-        result = self._request("POST", "/fapi/v1/order", params, signed=True)
+        try:
+            result = self._request("POST", "/fapi/v1/order", params, signed=True)
+        except Exception as e:
+            error_str = str(e)
+            if "-4061" in error_str:
+                raise Exception(
+                    "Position mode mismatch: Your Binance account uses Hedge Mode (dual position). "
+                    "Please switch to One-way Mode: Binance App → Futures → Settings → Position Mode → One-way Mode"
+                )
+            raise
 
         logger.info(
             f"[BINANCE] Order placed: {side} {rounded_qty} {binance_symbol} "

@@ -1375,7 +1375,8 @@
     "continueLimitedDescription": "当前账户每日限 20 次自动交易（含 AI Trader 和 Program）。如需更多，请订阅或注册返佣账户。",
     "continueLimitedButton": "我知道了",
     "supportTip": "订阅会员或通过推荐链接注册，可以更好地支持平台发展。团队发展不易，望请理解。",
-    "rebateNote": "仅未绑定推荐关系的账户可用于 AI 交易"
+    "rebateNote": "仅未绑定推荐关系的账户可用于 AI 交易",
+    "positionModeHint": "需要单向持仓模式。请前往币安 App → 合约 → 设置 → 持仓模式 → 单向持仓"
   },
   "quota": {
     "executionQuota": "执行配额",
@@ -1384,6 +1385,7 @@
     "upgradeTitle": "升级无限制",
     "currentUsage": "当前使用",
     "perDay": "每天",
-    "upgradeOptions": "选择以下选项解锁无限次自动交易："
+    "upgradeOptions": "选择以下选项解锁无限次自动交易：",
+    "resetAt": "重置时间"
   }
 }

@@ -426,10 +426,16 @@ export default function BinanceWalletSection({
         ) : (
           <div className="space-y-3">
             {!wallet && (
-              <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
-                <p className="text-yellow-800">⚠️ No {envName.toLowerCase()} API configured.</p>
+              <div className="p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs">
+                <p className="text-yellow-800 dark:text-yellow-200">⚠️ No {envName.toLowerCase()} API configured.</p>
               </div>
             )}
+
+            <div className="p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs">
+              <p className="text-blue-800 dark:text-blue-200">
+                {t('binance.positionModeHint', 'Requires One-way Position Mode. Go to Binance App → Futures → Settings → Position Mode → One-way Mode')}
+              </p>
+            </div>
 
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">API Key</label>

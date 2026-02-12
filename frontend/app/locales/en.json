@@ -1356,7 +1356,8 @@
     "continueLimitedDescription": "This account is limited to 20 automated trades per day (AI Trader + Program). Subscribe or register with referral for unlimited.",
     "continueLimitedButton": "I understand",
     "supportTip": "Subscribing to Premium or registering through our referral links helps support platform development. Your understanding means a lot to our team.",
-    "rebateNote": "Only accounts without prior referral bindings can be used for AI trading"
+    "rebateNote": "Only accounts without prior referral bindings can be used for AI trading",
+    "positionModeHint": "Requires One-way Position Mode. Go to Binance App → Futures → Settings → Position Mode → One-way Mode"
   },
   "quota": {
     "executionQuota": "Quota",
@@ -1365,6 +1366,7 @@
     "upgradeTitle": "Upgrade for Unlimited",
     "currentUsage": "Current usage",
     "perDay": "per day",
-    "upgradeOptions": "Choose an option to unlock unlimited automated trades:"
+    "upgradeOptions": "Choose an option to unlock unlimited automated trades:",
+    "resetAt": "Resets at"
   }
 }

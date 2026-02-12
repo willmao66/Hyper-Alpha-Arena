@@ -1497,13 +1497,7 @@ def _execute_binance_decision(
         save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
         return
 
-    # 2. Handle HOLD operation
-    if operation == "hold":
-        logger.info(f"[BINANCE] AI decided to HOLD for {account.name} - no action taken")
-        save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
-        return
-
-    # 2.5 Check daily quota for mainnet non-rebate accounts BEFORE executing trade
+    # 2. Check daily quota for mainnet non-rebate accounts BEFORE any execution (including HOLD)
     if wallet and wallet.environment == "mainnet" and wallet.rebate_working is False:
         quota_exceeded, quota_info = _check_binance_daily_quota(db, account.id)
         if quota_exceeded:
@@ -1517,7 +1511,13 @@ def _execute_binance_decision(
             save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
             return
 
-    # 3. Validate symbol
+    # 3. Handle HOLD operation (after quota check)
+    if operation == "hold":
+        logger.info(f"[BINANCE] AI decided to HOLD for {account.name} - no action taken")
+        save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
+        return
+
+    # 4. Validate symbol
     if not symbol:
         logger.warning(f"[BINANCE] No symbol provided in decision for {account.name}")
         save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)

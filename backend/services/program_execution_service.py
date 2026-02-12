@@ -394,11 +394,36 @@ class ProgramExecutionService:
             # Execute strategy
             result = execute_strategy(program.code, market_data, params)
 
+            # Check daily quota for Binance mainnet non-rebate accounts BEFORE logging
+            # This ensures quota exceeded decisions are logged with success=False
+            quota_exceeded = False
+            quota_info = {}
+            if exchange == "binance" and (environment or "mainnet") == "mainnet":
+                binance_wallet = db.query(BinanceWallet).filter(
+                    BinanceWallet.account_id == account.id,
+                    BinanceWallet.environment == (environment or "mainnet"),
+                    BinanceWallet.is_active == "true"
+                ).first()
+                if binance_wallet and binance_wallet.rebate_working is False:
+                    quota_exceeded, quota_info = self._check_binance_daily_quota(db, account.id)
+                    if quota_exceeded:
+                        logger.warning(
+                            f"[ProgramExecution] Binding {binding.id} ({program.name}) quota exceeded - "
+                            f"Decision recorded but NOT executed ({quota_info['used']}/{quota_info['limit']})"
+                        )
+                        # Modify result to indicate quota exceeded
+                        result.success = False
+                        result.error = f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})"
+
             # Log execution with full context for analysis
             log_id = self._log_execution(
                 db, binding, symbol, pool, wallet_address, result, params,
                 data_provider, market_data, environment or "mainnet", trigger_type, exchange
             )
+
+            # If quota exceeded, don't proceed to handle decision (no trading)
+            if quota_exceeded:
+                return
 
             # Handle decision if successful
             if result.success and result.decision:
@@ -667,7 +692,7 @@ class ProgramExecutionService:
             # Handle quota exceeded - decision was recorded but not executed
             if isinstance(order_result, dict) and order_result.get('quota_exceeded'):
                 quota_info = order_result.get('quota_info', {})
-                log.success = True  # Strategy execution was successful
+                log.success = False  # Mark as not executed due to quota
                 log.error_message = f"Executed: NO - Daily quota exceeded ({quota_info.get('used', 0)}/{quota_info.get('limit', 20)})"
                 db.commit()
                 logger.info(f"[ProgramExecution] Updated log {log_id} with quota exceeded status")
@@ -781,21 +806,8 @@ class ProgramExecutionService:
         positions_dict = {}
         environment = get_global_trading_mode(db)
 
-        # Check daily quota for Binance mainnet non-rebate accounts BEFORE executing trade
-        if exchange == "binance" and (environment or "mainnet") == "mainnet":
-            binance_wallet = db.query(BinanceWallet).filter(
-                BinanceWallet.account_id == binding.account_id,
-                BinanceWallet.environment == (environment or "mainnet"),
-                BinanceWallet.is_active == "true"
-            ).first()
-            if binance_wallet and binance_wallet.rebate_working is False:
-                quota_exceeded, quota_info = self._check_binance_daily_quota(db, binding.account_id)
-                if quota_exceeded:
-                    logger.warning(
-                        f"[ProgramExecution] Binding {binding.id} quota exceeded - "
-                        f"Decision recorded but NOT executed ({quota_info['used']}/{quota_info['limit']})"
-                    )
-                    return {"quota_exceeded": True, "quota_info": quota_info}
+        # Note: Quota check is now done in _execute_binding before logging,
+        # so we don't need to check again here.
 
         # Use provided trading_client or create one based on exchange
         client = trading_client
