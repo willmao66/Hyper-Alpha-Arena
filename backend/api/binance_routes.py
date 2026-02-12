@@ -51,14 +51,11 @@ def _clear_client_cache(account_id: int = None, environment: str = None):
         _client_cache.clear()
 
 
-def _is_premium_user_by_account(db: Session, account_id: int) -> bool:
-    """Check if the user who owns this account is a premium member"""
+def _is_premium_user(db: Session) -> bool:
+    """Check if there is a premium member currently logged in"""
     try:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        if not account:
-            return False
-        subscription = db.query(UserSubscription).filter(
-            UserSubscription.user_id == account.user_id,
+        subscription = db.query(UserSubscription).join(User).filter(
+            User.username != 'default',
             UserSubscription.subscription_type == 'premium'
         ).first()
         return subscription is not None
@@ -139,7 +136,7 @@ async def setup_wallet(
 
         if not rebate_info.get("eligible", False):
             # Check if user is premium - premium users can proceed without rebate
-            is_premium = _is_premium_user_by_account(db, account_id)
+            is_premium = _is_premium_user(db)
             if not is_premium:
                 # Return special response for frontend to handle
                 return {
@@ -779,7 +776,7 @@ async def get_daily_quota(account_id: int, db: Session = Depends(get_db)):
         return {"limited": False, "used": 0, "limit": DAILY_QUOTA_LIMIT, "remaining": DAILY_QUOTA_LIMIT}
 
     # Check premium status
-    if _is_premium_user_by_account(db, account_id):
+    if _is_premium_user(db):
         return {"limited": False, "used": 0, "limit": DAILY_QUOTA_LIMIT, "remaining": DAILY_QUOTA_LIMIT}
 
     # Use UTC midnight for quota reset

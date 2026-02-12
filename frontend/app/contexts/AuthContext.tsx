@@ -265,8 +265,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const logout = () => {
-    // Local logout only: clear Arena cookies and state
+  const logout = async () => {
+    // Clear backend membership subscription first
+    try {
+      await fetch('/api/users/clear-membership', { method: 'POST' })
+      console.log('[AuthContext] Backend membership cleared')
+    } catch (e) {
+      console.warn('[AuthContext] Failed to clear backend membership:', e)
+    }
+
+    // Local logout: clear Arena cookies and state
     // Casdoor session remains active, but next login will show account selection
     // because we use prompt=select_account in getSignInUrl()
     Cookies.remove('arena_token')

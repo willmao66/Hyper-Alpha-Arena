@@ -297,3 +297,32 @@ async def sync_membership_info(
             status_code=500,
             detail=f"Failed to sync membership info: {str(e)}"
         )
+
+
+@router.post("/clear-membership")
+async def clear_membership(db: Session = Depends(get_db)):
+    """
+    Clear all membership subscriptions for non-default users.
+    Called when user logs out to ensure premium status is removed.
+    """
+    try:
+        non_default_users = db.query(User).filter(User.username != "default").all()
+        deleted_count = 0
+        for u in non_default_users:
+            deleted = db.query(UserSubscription).filter(
+                UserSubscription.user_id == u.id
+            ).delete()
+            deleted_count += deleted
+
+        db.commit()
+        logger.info(f"Cleared {deleted_count} subscription(s) on logout")
+
+        return {"status": "success", "deleted_count": deleted_count}
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to clear membership: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear membership: {str(e)}"
+        )

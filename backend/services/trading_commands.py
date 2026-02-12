@@ -49,7 +49,7 @@ BINANCE_DAILY_QUOTA_LIMIT = 20
 
 
 def _is_premium_user(db: Session) -> bool:
-    """Check if current logged-in user is a premium member"""
+    """Check if there is a premium member currently logged in"""
     try:
         subscription = db.query(UserSubscription).join(User).filter(
             User.username != 'default',
