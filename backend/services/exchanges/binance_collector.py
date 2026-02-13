@@ -189,9 +189,10 @@ class BinanceCollector:
                     klines = self.adapter.fetch_klines(symbol, "1m", limit=5)
                     if klines:
                         result = persistence.save_klines(klines)
-                        # Also save taker volumes from klines as backup/historical data
-                        # WebSocket provides 15s granularity, REST provides 1m backup
-                        persistence.save_taker_volumes_from_klines(klines)
+                        # NOTE: Removed save_taker_volumes_from_klines() call
+                        # WebSocket collector provides 15s granularity taker data
+                        # REST K-line taker data (1m) was overwriting WebSocket data
+                        # causing backtest vs actual trigger mismatch
                         logger.debug(f"Klines {symbol}: {result}")
                 except Exception as e:
                     logger.error(f"Failed to collect klines for {symbol}: {e}")

@@ -592,9 +592,12 @@ class SignalDetectionService:
         interval_ms = TIMEFRAME_MS[period]
         current_time_ms = int(datetime.utcnow().timestamp() * 1000)
 
+        # For Binance, include debug snapshot for troubleshooting
+        include_debug = (exchange == "binance")
+
         db = SessionLocal()
         try:
-            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange)
+            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange, include_debug)
         finally:
             db.close()
 
@@ -629,7 +632,7 @@ class SignalDetectionService:
         ratio_str = f"{actual_ratio:.4f}" if actual_ratio else "N/A"
         print(f"[TakerCheck] signal={signal_id} symbol={symbol} exchange={exchange} period={period} ts={current_time_ms} buy={buy:.2f} sell={sell:.2f} ratio={ratio_str} met={condition_met}", flush=True)
 
-        return {
+        result = {
             "signal_id": signal_id,
             "signal_name": signal_def.get("signal_name"),
             "metric": "taker_volume",
@@ -641,7 +644,15 @@ class SignalDetectionService:
             "ratio": actual_ratio,
             "ratio_threshold": ratio_threshold,
             "volume_threshold": volume_threshold,
+            "time_window": time_window,
+            "exchange": exchange,
         }
+
+        # Include debug snapshot for Binance
+        if include_debug and "debug_snapshot" in taker_data:
+            result["debug_snapshot"] = taker_data["debug_snapshot"]
+
+        return result
 
     def _log_pool_trigger(self, trigger_result: dict) -> int | None:
         """Log pool trigger to database and return the trigger_log_id."""
@@ -676,13 +687,28 @@ class SignalDetectionService:
                         base["operator"] = s.get("operator")
                     return base
 
-                trigger_value_json = json.dumps({
+                # Build trigger value data
+                trigger_value_data = {
                     "logic": trigger_result["logic"],
                     "signals_triggered": [
                         _format_signal_for_log(s)
                         for s in trigger_result["signals_triggered"]
                     ],
-                })
+                }
+
+                # Add debug snapshots for Binance triggers (for troubleshooting)
+                debug_snapshots = []
+                for s in trigger_result["signals_triggered"]:
+                    if "debug_snapshot" in s:
+                        debug_snapshots.append({
+                            "signal_id": s["signal_id"],
+                            "signal_name": s["signal_name"],
+                            "snapshot": s["debug_snapshot"]
+                        })
+                if debug_snapshots:
+                    trigger_value_data["debug_snapshots"] = debug_snapshots
+
+                trigger_value_json = json.dumps(trigger_value_data)
 
                 # Determine the most common time_window from triggered signals
                 time_windows = [

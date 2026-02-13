@@ -284,12 +284,13 @@ def _get_cvd_data(
 
 def _get_taker_data(
     db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
-    exchange: str = "hyperliquid"
+    exchange: str = "hyperliquid", include_debug: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
     Get Taker Buy/Sell Volume data.
 
     Returns buy volume, sell volume, and buy/sell ratio.
+    If include_debug=True (for Binance), includes debug_snapshot for troubleshooting.
     """
     lookback_ms = interval_ms * 10
     start_time = current_time_ms - lookback_ms
@@ -341,7 +342,7 @@ def _get_taker_data(
     last_5_ratios = ratios[-5:] if len(ratios) >= 5 else ratios
     last_5_volumes = volumes[-5:] if len(volumes) >= 5 else volumes
 
-    return {
+    result = {
         "buy": current_buy,
         "sell": current_sell,
         "ratio": current_ratio,
@@ -349,6 +350,41 @@ def _get_taker_data(
         "volume_last_5": last_5_volumes,
         "period": period
     }
+
+    # Add debug snapshot for Binance troubleshooting
+    if include_debug:
+        # Build buckets summary for debug
+        buckets_debug = {}
+        for ts in sorted_times:
+            bucket = buckets[ts]
+            buckets_debug[str(ts)] = {
+                "buy": float(bucket["buy"]),
+                "sell": float(bucket["sell"]),
+                "total": float(bucket["buy"] + bucket["sell"])
+            }
+
+        result["debug_snapshot"] = {
+            "query_params": {
+                "current_time_ms": current_time_ms,
+                "start_time": start_time,
+                "interval_ms": interval_ms,
+                "exchange": exchange,
+                "symbol": symbol
+            },
+            "records_count": len(records),
+            "records_ts_range": [records[0][0], records[-1][0]] if records else [],
+            "buckets_count": len(buckets),
+            "buckets": buckets_debug,
+            "result_bucket_ts": sorted_times[-1],
+            "result": {
+                "buy": current_buy,
+                "sell": current_sell,
+                "total": current_buy + current_sell,
+                "ratio": current_ratio
+            }
+        }
+
+    return result
 
 
 def _get_oi_data(
