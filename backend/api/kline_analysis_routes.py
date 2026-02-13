@@ -58,6 +58,7 @@ class AIAnalysisRequest(BaseModel):
     user_message: Optional[str] = None
     prompt_snapshot: Optional[str] = None
     selected_flow_indicators: Optional[List[str]] = []
+    exchange: Optional[str] = "hyperliquid"
 
 
 class AIAnalysisResponse(BaseModel):
@@ -136,6 +137,7 @@ async def create_ai_analysis(
             kline_limit=request.kline_limit,
             user_id=user_id,
             selected_flow_indicators=request.selected_flow_indicators or [],
+            exchange=request.exchange or "hyperliquid",
         )
 
         thread_elapsed = time.time() - thread_start

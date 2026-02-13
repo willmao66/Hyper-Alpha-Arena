@@ -60,10 +60,17 @@ SHARED_SIGNAL_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_signal_pools",
-            "description": "Get all configured signal pools and their signal conditions. Returns pool names, logic (AND/OR), monitored symbols, and detailed signal definitions with metric explanations. Use this to understand what triggers the AI Trader.",
+            "description": "Get configured signal pools and their signal conditions. Returns pool names, logic (AND/OR), monitored symbols, exchange, and detailed signal definitions with metric explanations. Use this to understand what triggers the AI Trader.",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "exchange": {
+                        "type": "string",
+                        "enum": ["hyperliquid", "binance", "all"],
+                        "description": "Filter signal pools by exchange. Use 'all' to get pools from all exchanges (default: all)",
+                        "default": "all"
+                    }
+                },
                 "required": []
             }
         }
@@ -72,7 +79,7 @@ SHARED_SIGNAL_TOOLS = [
         "type": "function",
         "function": {
             "name": "run_signal_backtest",
-            "description": "Run a backtest on a signal pool to check trigger frequency and see sample triggers. Returns trigger count, average frequency, and recent trigger examples. Use this to verify if signal thresholds are appropriate.",
+            "description": "Run a backtest on a signal pool to check trigger frequency and see sample triggers. Returns trigger count, average frequency, and recent trigger examples. The backtest uses the exchange configured in the signal pool.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -98,12 +105,13 @@ SHARED_SIGNAL_TOOLS = [
 ]
 
 
-def execute_get_signal_pools(db) -> str:
+def execute_get_signal_pools(db, exchange: str = "all") -> str:
     """
-    Execute get_signal_pools tool - returns all signal pools with explanations.
+    Execute get_signal_pools tool - returns signal pools with explanations.
 
     Args:
         db: SQLAlchemy database session
+        exchange: Filter by exchange ('hyperliquid', 'binance', or 'all')
 
     Returns:
         JSON string with signal pools and metric explanations
@@ -111,11 +119,17 @@ def execute_get_signal_pools(db) -> str:
     from sqlalchemy import text
 
     try:
-        # Get all signal definitions
-        signals_result = db.execute(text("""
-            SELECT id, signal_name, description, trigger_condition, enabled
-            FROM signal_definitions ORDER BY id
-        """))
+        # Get signal definitions (with exchange filter if needed)
+        if exchange and exchange != "all":
+            signals_result = db.execute(text("""
+                SELECT id, signal_name, description, trigger_condition, enabled, exchange
+                FROM signal_definitions WHERE exchange = :exchange ORDER BY id
+            """), {"exchange": exchange})
+        else:
+            signals_result = db.execute(text("""
+                SELECT id, signal_name, description, trigger_condition, enabled, exchange
+                FROM signal_definitions ORDER BY id
+            """))
 
         signals_map = {}
         for row in signals_result:
@@ -127,14 +141,21 @@ def execute_get_signal_pools(db) -> str:
                 "name": row[1],
                 "description": row[2],
                 "condition": trigger_condition,
-                "enabled": row[4]
+                "enabled": row[4],
+                "exchange": row[5] if len(row) > 5 else "hyperliquid"
             }
 
-        # Get all signal pools
-        pools_result = db.execute(text("""
-            SELECT id, pool_name, signal_ids, symbols, enabled, logic
-            FROM signal_pools ORDER BY id
-        """))
+        # Get signal pools (with exchange filter if needed)
+        if exchange and exchange != "all":
+            pools_result = db.execute(text("""
+                SELECT id, pool_name, signal_ids, symbols, enabled, logic, exchange
+                FROM signal_pools WHERE exchange = :exchange ORDER BY id
+            """), {"exchange": exchange})
+        else:
+            pools_result = db.execute(text("""
+                SELECT id, pool_name, signal_ids, symbols, enabled, logic, exchange
+                FROM signal_pools ORDER BY id
+            """))
 
         pools = []
         for row in pools_result:
@@ -144,6 +165,8 @@ def execute_get_signal_pools(db) -> str:
             symbols = row[3]
             if isinstance(symbols, str):
                 symbols = json.loads(symbols)
+
+            pool_exchange = row[6] if len(row) > 6 and row[6] else "hyperliquid"
 
             # Get signal details for this pool
             pool_signals = []
@@ -166,6 +189,7 @@ def execute_get_signal_pools(db) -> str:
             pools.append({
                 "id": row[0],
                 "name": row[1],
+                "exchange": pool_exchange,
                 "logic": row[5] or "OR",
                 "symbols": symbols or [],
                 "enabled": row[4],
@@ -173,13 +197,17 @@ def execute_get_signal_pools(db) -> str:
             })
 
         result = {
+            "exchange_filter": exchange,
             "total_pools": len(pools),
             "pools": pools,
             "note": "Use run_signal_backtest tool to check trigger frequency for a specific pool."
         }
 
         if not pools:
-            result["suggestion"] = "No signal pools configured. Consider creating a signal pool to trigger AI decisions based on market conditions."
+            if exchange and exchange != "all":
+                result["suggestion"] = f"No signal pools configured for {exchange}. Consider creating a signal pool for this exchange."
+            else:
+                result["suggestion"] = "No signal pools configured. Consider creating a signal pool to trigger AI decisions based on market conditions."
 
         return json.dumps(result, indent=2, ensure_ascii=False)
 

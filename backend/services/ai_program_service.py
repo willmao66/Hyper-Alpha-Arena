@@ -58,6 +58,14 @@ def _get_retry_delay(attempt: int) -> float:
 PROGRAM_SYSTEM_PROMPT = """You are an expert Python developer for cryptocurrency trading programs.
 You help users write trading strategy code that runs in a sandboxed environment.
 
+## EXCHANGE SUPPORT
+This system supports multiple exchanges:
+- **hyperliquid**: Hyperliquid perpetual futures (default)
+- **binance**: Binance USDT-M futures
+
+When querying market data or signal pools, specify the `exchange` parameter to get data from the correct source.
+The exchange should match the signal pool's exchange setting that will trigger your strategy.
+
 ## CRITICAL: Query Market Data Before Writing Thresholds
 **IMPORTANT**: Before writing ANY threshold comparisons in your code, you MUST use the `query_market_data` tool to check current market values. Indicator values vary significantly:
 - RSI: 0-100 (oversold <30, overbought >70)
@@ -67,8 +75,8 @@ You help users write trading strategy code that runs in a sandboxed environment.
 - MACD: Typically -1000 to +1000 for BTC
 
 **Example workflow**:
-1. User asks for "RSI oversold strategy"
-2. Call `query_market_data` with symbol="BTC" to see current RSI value (e.g., RSI14=45.2)
+1. User asks for "RSI oversold strategy for Binance"
+2. Call `query_market_data` with symbol="BTC", exchange="binance" to see current RSI value
 3. Now you know the scale and can write appropriate thresholds
 
 ## CODE STRUCTURE (REQUIRED)
@@ -558,7 +566,7 @@ PROGRAM_TOOLS = [
         "type": "function",
         "function": {
             "name": "query_market_data",
-            "description": "Query current market data for a symbol. MUST call this FIRST before writing any threshold comparisons to understand actual indicator value ranges.",
+            "description": "Query current market data for a symbol from specified exchange. MUST call this FIRST before writing any threshold comparisons to understand actual indicator value ranges.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -570,6 +578,11 @@ PROGRAM_TOOLS = [
                         "type": "string",
                         "enum": ["1m", "5m", "15m", "1h", "4h"],
                         "description": "Time period for indicators (default: 1h)"
+                    },
+                    "exchange": {
+                        "type": "string",
+                        "enum": ["hyperliquid", "binance"],
+                        "description": "Exchange to query market data from (default: hyperliquid)"
                     }
                 },
                 "required": ["symbol"]
@@ -1138,16 +1151,38 @@ return Decision(operation="hold", symbol="BTC", reason="No trade condition")
 """
 
 
-def _query_market_data(db: Session, symbol: str, period: str) -> str:
-    """Query current market data for AI to understand indicator value ranges."""
+def _query_market_data(db: Session, symbol: str, period: str, exchange: str = "hyperliquid") -> str:
+    """Query current market data for AI to understand indicator value ranges.
+
+    Args:
+        db: Database session
+        symbol: Trading symbol (e.g., BTC, ETH)
+        period: Time period for indicators (e.g., 1h, 5m)
+        exchange: Exchange to query from ('hyperliquid' or 'binance')
+    """
     try:
         from program_trader.data_provider import DataProvider
-        from services.hyperliquid_market_data import get_last_price_from_hyperliquid
+        import requests
 
-        data_provider = DataProvider(db=db, account_id=0, environment="mainnet")
+        # Get current price based on exchange
+        if exchange == "binance":
+            # Use Binance public API to get price
+            binance_symbol = f"{symbol.upper()}USDT"
+            resp = requests.get(
+                "https://fapi.binance.com/fapi/v1/ticker/price",
+                params={"symbol": binance_symbol},
+                timeout=5
+            )
+            if resp.status_code == 200:
+                price = float(resp.json().get("price", 0))
+            else:
+                price = None
+        else:
+            from services.hyperliquid_market_data import get_last_price_from_hyperliquid
+            price = get_last_price_from_hyperliquid(symbol, "mainnet")
 
-        # Get current price
-        price = get_last_price_from_hyperliquid(symbol, "mainnet")
+        # Create data provider with exchange parameter
+        data_provider = DataProvider(db=db, account_id=0, environment="mainnet", exchange=exchange)
 
         # Get all indicators
         indicators = {}
@@ -1171,6 +1206,7 @@ def _query_market_data(db: Session, symbol: str, period: str) -> str:
         result = {
             "symbol": symbol,
             "period": period,
+            "exchange": exchange,
             "current_price": float(price) if price else None,
             "indicators": indicators,
             "flow_metrics": flow_metrics,
@@ -1352,7 +1388,8 @@ def _execute_tool(
         if tool_name == "query_market_data":
             symbol = arguments.get("symbol", "BTC")
             period = arguments.get("period", "1h")
-            return _query_market_data(db, symbol, period)
+            exchange = arguments.get("exchange", "hyperliquid")
+            return _query_market_data(db, symbol, period, exchange)
 
         elif tool_name == "get_api_docs":
             api_type = arguments.get("api_type", "all")
@@ -1396,7 +1433,8 @@ def _execute_tool(
             })
 
         elif tool_name == "get_signal_pools":
-            return execute_get_signal_pools(db)
+            exchange = arguments.get("exchange", "all")
+            return execute_get_signal_pools(db, exchange)
 
         elif tool_name == "run_signal_backtest":
             pool_id = arguments.get("pool_id")

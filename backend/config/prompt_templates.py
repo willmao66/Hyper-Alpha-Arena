@@ -119,6 +119,7 @@ KLINE_ANALYSIS_PROMPT_TEMPLATE = """You are an expert technical analyst and trad
 
 === ANALYSIS CONTEXT ===
 Symbol: {symbol}
+Exchange: {exchange}
 Timeframe: {period}
 Analysis Time (UTC): {current_time_utc}
 

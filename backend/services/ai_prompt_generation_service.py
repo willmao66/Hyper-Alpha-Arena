@@ -521,7 +521,8 @@ def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str, db: Sess
         elif tool_name == "get_signal_pools":
             if db is None:
                 return json.dumps({"error": "Database session not available"})
-            return execute_get_signal_pools(db)
+            exchange = args.get("exchange", "all")
+            return execute_get_signal_pools(db, exchange)
 
         elif tool_name == "run_signal_backtest":
             if db is None:
