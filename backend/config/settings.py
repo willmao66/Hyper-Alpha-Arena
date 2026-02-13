@@ -49,3 +49,7 @@ class BinanceBrokerConfig(BaseModel):
 BINANCE_BROKER_CONFIG = BinanceBrokerConfig(
     broker_id=os.getenv("BINANCE_BROKER_ID", "")  # Empty if not a broker
 )
+
+# Binance Daily Quota for non-rebate mainnet accounts
+# This limits the number of AI-executed trades per day to prevent excessive API usage
+BINANCE_DAILY_QUOTA_LIMIT = 40

@@ -37,15 +37,13 @@ from services.hyperliquid_symbol_service import (
     get_available_symbol_map as get_hyperliquid_symbol_map,
     get_symbol_display as get_hyperliquid_symbol_display,
 )
+from config.settings import BINANCE_DAILY_QUOTA_LIMIT
 
 
 logger = logging.getLogger(__name__)
 
 AI_TRADING_SYMBOLS: List[str] = ["BTC"]  # Paper trading deprecated, keep minimal
 ORACLE_PRICE_DEVIATION_LIMIT_PERCENT = 1.0
-
-# Daily quota limit for Binance mainnet non-rebate accounts
-BINANCE_DAILY_QUOTA_LIMIT = 20
 
 
 def _is_premium_user(db: Session) -> bool:

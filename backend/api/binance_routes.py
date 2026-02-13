@@ -19,6 +19,7 @@ from database.models import Account, BinanceWallet, User, UserSubscription, AIDe
 from utils.encryption import encrypt_private_key, decrypt_private_key
 from services.binance_trading_client import BinanceTradingClient
 from services.hyperliquid_environment import get_global_trading_mode
+from config.settings import BINANCE_DAILY_QUOTA_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +65,8 @@ def _is_premium_user(db: Session) -> bool:
         return False
 
 
-# Daily quota constants
-DAILY_QUOTA_LIMIT = 40
+# Daily quota uses centralized config
+DAILY_QUOTA_LIMIT = BINANCE_DAILY_QUOTA_LIMIT
 
 
 # Request/Response Models

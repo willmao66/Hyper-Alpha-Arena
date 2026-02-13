@@ -39,6 +39,7 @@ from database.models import (
 from program_trader.executor import execute_strategy
 from program_trader.models import MarketData, ActionType
 from program_trader.data_provider import DataProvider
+from config.settings import BINANCE_DAILY_QUOTA_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class ProgramExecutionService:
         self._binding_states: Dict[int, dict] = {}  # binding_id -> state dict
         self._last_cache_refresh: Optional[datetime] = None
         self._cache_refresh_interval = 60  # Refresh cache every 60 seconds
-        self._daily_quota_limit = 20  # Daily quota for Binance mainnet non-rebate accounts
+        self._daily_quota_limit = BINANCE_DAILY_QUOTA_LIMIT
         logger.info("[ProgramExecution] Service initialized")
 
     def _is_premium_user(self, db) -> bool:
