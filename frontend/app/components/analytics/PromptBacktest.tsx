@@ -57,6 +57,7 @@ interface ModelChatEntry {
 interface PromptBacktestProps {
   accountId: string
   tradingMode?: string
+  exchange?: string
 }
 
 interface SelectedRecord extends ModelChatEntry {
@@ -71,6 +72,7 @@ interface SelectedRecord extends ModelChatEntry {
 export default function PromptBacktest({
   accountId,
   tradingMode = 'all',
+  exchange = 'all',
 }: PromptBacktestProps) {
   const { t } = useTranslation()
 
@@ -123,6 +125,9 @@ export default function PromptBacktest({
       if (tradingMode !== 'all') {
         params.append('trading_mode', tradingMode)
       }
+      if (exchange !== 'all') {
+        params.append('exchange', exchange)
+      }
       if (beforeTime) {
         params.append('before_time', beforeTime)
       }
@@ -147,7 +152,7 @@ export default function PromptBacktest({
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [accountId, tradingMode])
+  }, [accountId, tradingMode, exchange])
 
   // Load more records
   const loadMore = () => {

@@ -177,6 +177,7 @@ def build_base_query(
     end_date: Optional[date],
     environment: Optional[str],
     account_id: Optional[int],
+    exchange: Optional[str] = None,
 ):
     """Build base query with common filters.
 
@@ -199,6 +200,13 @@ def build_base_query(
         query = query.filter(AIDecisionLog.hyperliquid_environment == environment)
     if account_id:
         query = query.filter(AIDecisionLog.account_id == account_id)
+    if exchange and exchange != "all":
+        if exchange == "hyperliquid":
+            query = query.filter(
+                (AIDecisionLog.exchange == "hyperliquid") | (AIDecisionLog.exchange == None)
+            )
+        else:
+            query = query.filter(AIDecisionLog.exchange == exchange)
 
     return query
 
@@ -211,11 +219,12 @@ def get_analytics_summary(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get overall analytics summary (AI Decision + Program Decision combined)."""
     # === AI Decision data ===
-    ai_query = build_base_query(db, start_date, end_date, environment, account_id)
+    ai_query = build_base_query(db, start_date, end_date, environment, account_id, exchange)
     decisions = ai_query.all()
     fee_map = get_fees_for_decisions(decisions)
 
@@ -250,7 +259,7 @@ def get_analytics_summary(
             ai_with_pnl += 1
 
     # === Program Decision data ===
-    prog_query = build_program_base_query(db, start_date, end_date, environment, account_id)
+    prog_query = build_program_base_query(db, start_date, end_date, environment, account_id, exchange)
     prog_logs = prog_query.all()
     prog_fee_map = get_fees_for_program_logs(prog_logs)
 
@@ -335,10 +344,11 @@ def get_analytics_by_strategy(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get analytics grouped by strategy (prompt template)."""
-    query = build_base_query(db, start_date, end_date, environment, account_id)
+    query = build_base_query(db, start_date, end_date, environment, account_id, exchange)
     decisions = query.all()
 
     # Get fees for all decisions
@@ -407,10 +417,11 @@ def get_analytics_by_account(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get analytics grouped by account."""
-    query = build_base_query(db, start_date, end_date, environment, None)
+    query = build_base_query(db, start_date, end_date, environment, None, exchange)
     decisions = query.all()
 
     # Get fees for all decisions
@@ -482,10 +493,11 @@ def get_analytics_by_symbol(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get analytics grouped by trading symbol."""
-    query = build_base_query(db, start_date, end_date, environment, account_id)
+    query = build_base_query(db, start_date, end_date, environment, account_id, exchange)
     decisions = query.all()
 
     # Get fees for all decisions
@@ -543,10 +555,11 @@ def get_analytics_by_operation(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get analytics grouped by operation type (buy/sell/close)."""
-    query = build_base_query(db, start_date, end_date, environment, account_id)
+    query = build_base_query(db, start_date, end_date, environment, account_id, exchange)
     decisions = query.all()
 
     # Get fees for all decisions
@@ -592,10 +605,11 @@ def get_analytics_by_trigger_type(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get analytics grouped by trigger type (signal/scheduled/unknown)."""
-    query = build_base_query(db, start_date, end_date, environment, account_id)
+    query = build_base_query(db, start_date, end_date, environment, account_id, exchange)
     decisions = query.all()
 
     # Get fees for all decisions
@@ -801,6 +815,7 @@ def get_trade_details(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     tag_filter: Optional[str] = Query(None),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
@@ -822,6 +837,13 @@ def get_trade_details(
         query = query.filter(AIDecisionLog.hyperliquid_environment == environment)
     if account_id:
         query = query.filter(AIDecisionLog.account_id == account_id)
+    if exchange and exchange != "all":
+        if exchange == "hyperliquid":
+            query = query.filter(
+                (AIDecisionLog.exchange == "hyperliquid") | (AIDecisionLog.exchange == None)
+            )
+        else:
+            query = query.filter(AIDecisionLog.exchange == exchange)
 
     # Get total count before pagination
     total_count = query.count()
@@ -1414,6 +1436,7 @@ def build_program_base_query(
     end_date: Optional[date],
     environment: Optional[str],
     account_id: Optional[int],
+    exchange: Optional[str] = None,
 ):
     """Build base query for program execution logs with common filters.
 
@@ -1438,6 +1461,15 @@ def build_program_base_query(
     if environment and environment != "all":
         query = query.filter(ProgramExecutionLog.environment == environment)
 
+    # Filter by exchange
+    if exchange and exchange != "all":
+        if exchange == "hyperliquid":
+            query = query.filter(
+                (ProgramExecutionLog.exchange == "hyperliquid") | (ProgramExecutionLog.exchange == None)
+            )
+        else:
+            query = query.filter(ProgramExecutionLog.exchange == exchange)
+
     return query
 
 
@@ -1449,10 +1481,11 @@ def get_program_analytics_summary(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get overall program analytics summary."""
-    query = build_program_base_query(db, start_date, end_date, environment, account_id)
+    query = build_program_base_query(db, start_date, end_date, environment, account_id, exchange)
     logs = query.all()
 
     # Get fees for all logs (PnL is read from log.realized_pnl)
@@ -1515,10 +1548,11 @@ def get_program_analytics_by_symbol(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get program analytics grouped by trading symbol."""
-    query = build_program_base_query(db, start_date, end_date, environment, account_id)
+    query = build_program_base_query(db, start_date, end_date, environment, account_id, exchange)
     logs = query.all()
 
     fee_map = get_fees_for_program_logs(logs)
@@ -1574,10 +1608,11 @@ def get_program_analytics_by_program(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get program analytics grouped by trading program."""
-    query = build_program_base_query(db, start_date, end_date, environment, account_id)
+    query = build_program_base_query(db, start_date, end_date, environment, account_id, exchange)
     logs = query.all()
 
     fee_map = get_fees_for_program_logs(logs)
@@ -1641,10 +1676,11 @@ def get_program_analytics_by_trigger_type(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get program analytics grouped by trigger type."""
-    query = build_program_base_query(db, start_date, end_date, environment, account_id)
+    query = build_program_base_query(db, start_date, end_date, environment, account_id, exchange)
     logs = query.all()
 
     fee_map = get_fees_for_program_logs(logs)
@@ -1679,10 +1715,11 @@ def get_program_analytics_by_operation(
     end_date: Optional[date] = Query(None),
     environment: Optional[str] = Query("all"),
     account_id: Optional[int] = Query(None),
+    exchange: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
     """Get program analytics grouped by operation type."""
-    query = build_program_base_query(db, start_date, end_date, environment, account_id)
+    query = build_program_base_query(db, start_date, end_date, environment, account_id, exchange)
     logs = query.all()
 
     fee_map = get_fees_for_program_logs(logs)

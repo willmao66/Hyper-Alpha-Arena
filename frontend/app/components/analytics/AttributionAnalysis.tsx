@@ -140,6 +140,7 @@ export default function AttributionAnalysis() {
 
   // Filter states
   const [environment, setEnvironment] = useState<string>('mainnet')
+  const [exchange, setExchange] = useState<string>('all')
   const [accountId, setAccountId] = useState<string>('all')
   const [timeRange, setTimeRange] = useState<string>('all')
 
@@ -208,11 +209,12 @@ export default function AttributionAnalysis() {
   // Load data when filters change
   useEffect(() => {
     loadData()
-  }, [environment, accountId, timeRange])
+  }, [environment, exchange, accountId, timeRange])
 
   const buildParams = () => {
     const params = new URLSearchParams()
     params.set('environment', environment)
+    params.set('exchange', exchange)
     if (accountId !== 'all') params.set('account_id', accountId)
 
     // Calculate date range based on timeRange
@@ -289,7 +291,7 @@ export default function AttributionAnalysis() {
     if (activeTab === 'trades') {
       loadTrades(tagFilter)
     }
-  }, [activeTab, tagFilter, environment, accountId, timeRange])
+  }, [activeTab, tagFilter, environment, exchange, accountId, timeRange])
 
   return (
     <div className="flex-1 p-4 space-y-4 overflow-auto">
@@ -344,6 +346,27 @@ export default function AttributionAnalysis() {
               <SelectItem value="week">{t('attribution.thisWeek', 'This Week')}</SelectItem>
               <SelectItem value="month">{t('attribution.thisMonth', 'This Month')}</SelectItem>
               <SelectItem value="all">{t('attribution.allTime', 'All Time')}</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={exchange} onValueChange={setExchange}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('attribution.allExchanges', 'All Exchanges')}</SelectItem>
+              <SelectItem value="hyperliquid">
+                <span className="flex items-center gap-2">
+                  <img src="/static/hyperliquid_logo.svg" alt="" className="w-4 h-4" />
+                  Hyperliquid
+                </span>
+              </SelectItem>
+              <SelectItem value="binance">
+                <span className="flex items-center gap-2">
+                  <img src="/static/binance_logo.svg" alt="" className="w-4 h-4" />
+                  Binance
+                </span>
+              </SelectItem>
             </SelectContent>
           </Select>
 
@@ -835,6 +858,7 @@ export default function AttributionAnalysis() {
             <TabsContent value="backtest" className="mt-4">
               <PromptBacktest
                 accountId={accountId}
+                exchange={exchange}
               />
             </TabsContent>
           </Tabs>
