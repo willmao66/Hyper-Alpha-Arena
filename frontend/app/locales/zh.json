@@ -1372,7 +1372,7 @@
     "registerNew": "注册新账户",
     "registerDescription": "币安新用户？通过推荐链接注册，无限次交易 + 5% 返佣。",
     "continueLimited": "继续使用（有限制）",
-    "continueLimitedDescription": "当前账户每日限 20 次自动交易（含 AI Trader 和 Program）。如需更多，请订阅或注册返佣账户。",
+    "continueLimitedDescription": "当前账户每日限 40 次自动交易（含 AI Trader 和 Program）。如需更多，请订阅或注册返佣账户。",
     "continueLimitedButton": "我知道了",
     "supportTip": "订阅会员或通过推荐链接注册，可以更好地支持平台发展。团队发展不易，望请理解。",
     "rebateNote": "仅未绑定推荐关系的账户可用于 AI 交易",

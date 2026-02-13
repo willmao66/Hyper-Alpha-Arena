@@ -65,7 +65,7 @@ def _is_premium_user(db: Session) -> bool:
 
 
 # Daily quota constants
-DAILY_QUOTA_LIMIT = 20
+DAILY_QUOTA_LIMIT = 40
 
 
 # Request/Response Models

@@ -1353,7 +1353,7 @@
     "registerNew": "Register New Account",
     "registerDescription": "New to Binance? Register with our link for unlimited trades + 5% fee rebate.",
     "continueLimited": "Continue with Limit",
-    "continueLimitedDescription": "This account is limited to 20 automated trades per day (AI Trader + Program). Subscribe or register with referral for unlimited.",
+    "continueLimitedDescription": "This account is limited to 40 automated trades per day (AI Trader + Program). Subscribe or register with referral for unlimited.",
     "continueLimitedButton": "I understand",
     "supportTip": "Subscribing to Premium or registering through our referral links helps support platform development. Your understanding means a lot to our team.",
     "rebateNote": "Only accounts without prior referral bindings can be used for AI trading",
