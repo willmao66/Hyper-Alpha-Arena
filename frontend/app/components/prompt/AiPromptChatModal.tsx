@@ -47,6 +47,7 @@ interface Message {
   statusText?: string
   toolCalls?: ToolCallEntry[]
   toolCallsLog?: ToolCallLogEntry[]
+  reasoningSnapshot?: string | null
 }
 
 interface Conversation {
@@ -140,10 +141,11 @@ export default function AiPromptChatModal({
       if (response.ok) {
         const data = await response.json()
         // Map API fields to frontend format
-        const mappedMessages = (data.messages || []).map((m: Message & { is_complete?: boolean; tool_calls_log?: ToolCallLogEntry[] }) => ({
+        const mappedMessages = (data.messages || []).map((m: Message & { is_complete?: boolean; tool_calls_log?: ToolCallLogEntry[]; reasoning_snapshot?: string }) => ({
           ...m,
           isInterrupted: m.role === 'assistant' && m.is_complete === false,
-          toolCallsLog: m.tool_calls_log || []
+          toolCallsLog: m.tool_calls_log || [],
+          reasoningSnapshot: m.reasoning_snapshot || null
         }))
         setMessages(mappedMessages)
 
@@ -562,11 +564,40 @@ export default function AiPromptChatModal({
                                 <div className="font-medium text-blue-600 dark:text-blue-400 mb-1">
                                   Round {idx + 1}: {entry.tool}
                                 </div>
+                                {entry.args && Object.keys(entry.args).length > 0 && (
+                                  <div className="mb-1">
+                                    {Object.entries(entry.args).map(([key, value]) => (
+                                      <div key={key} className="ml-2">
+                                        {key === 'prompt_text' ? (
+                                          <div>
+                                            <span className="text-muted-foreground">prompt_text:</span>
+                                            <pre className="mt-1 p-2 bg-muted rounded text-xs overflow-x-auto max-h-48 overflow-y-auto">
+                                              <code>{String(value)}</code>
+                                            </pre>
+                                          </div>
+                                        ) : (
+                                          <span className="text-muted-foreground">{key}: {JSON.stringify(value)}</span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                                 <div className="ml-2 text-green-600 dark:text-green-400">
                                   Result: {entry.result.length > 200 ? entry.result.slice(0, 200) + '...' : entry.result}
                                 </div>
                               </div>
                             ))}
+                          </div>
+                        </details>
+                      )}
+                      {/* Reasoning snapshot for loaded messages */}
+                      {!msg.isStreaming && msg.reasoningSnapshot && (
+                        <details className="mt-3 text-xs border rounded-md">
+                          <summary className="px-3 py-2 cursor-pointer bg-muted/50 hover:bg-muted font-medium">
+                            {t('aiPrompt.reasoningProcess', 'Reasoning process')}
+                          </summary>
+                          <div className="p-3 max-h-96 overflow-y-auto">
+                            <pre className="whitespace-pre-wrap text-muted-foreground">{msg.reasoningSnapshot}</pre>
                           </div>
                         </details>
                       )}

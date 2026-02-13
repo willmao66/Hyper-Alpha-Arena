@@ -479,7 +479,7 @@ def _execute_preview_prompt(args: Dict[str, Any], request_id: str) -> str:
 # Tool Execution Functions
 # ============================================================================
 
-def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str, db: Session = None) -> str:
+def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str, db: Session = None, prompt_id: int = None) -> str:
     """Execute a tool and return the result as a string."""
     logger.info(f"[AI Prompt Gen {request_id}] Executing tool: {tool_name}")
 
@@ -546,8 +546,9 @@ def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str, db: Sess
         elif tool_name == "get_prompt_context":
             if db is None:
                 return json.dumps({"error": "Database session not available"})
-            prompt_id = args.get("prompt_id")
-            return execute_get_prompt_context(db, prompt_id)
+            # Use passed prompt_id if args doesn't specify one
+            pid = args.get("prompt_id") or prompt_id
+            return execute_get_prompt_context(db, pid)
 
         elif tool_name == "get_trader_details":
             if db is None:
@@ -666,10 +667,14 @@ def generate_prompt_with_ai_stream(
 
         if not conversation:
             title = user_message[:50] + "..." if len(user_message) > 50 else user_message
-            conversation = AiPromptConversation(user_id=user_id, title=title)
+            conversation = AiPromptConversation(
+                user_id=user_id,
+                prompt_id=prompt_id,
+                title=title
+            )
             db.add(conversation)
             db.flush()
-            logger.info(f"[AI Prompt Gen {request_id}] Created conversation: id={conversation.id}")
+            logger.info(f"[AI Prompt Gen {request_id}] Created conversation: id={conversation.id}, prompt_id={prompt_id}")
 
         # Save user message
         user_msg = AiPromptMessage(
@@ -845,9 +850,9 @@ def generate_prompt_with_ai_stream(
 
                         yield f"data: {json.dumps({'type': 'tool_call', 'name': tool_name, 'args': tool_args})}\n\n"
 
-                        result = execute_tool(tool_name, tool_args, request_id, db)
+                        result = execute_tool(tool_name, tool_args, request_id, db, prompt_id)
                         tool_calls_log.append({
-                            "name": tool_name,
+                            "tool": tool_name,
                             "args": tool_args,
                             "result": result[:500] if len(result) > 500 else result
                         })
@@ -893,6 +898,8 @@ def generate_prompt_with_ai_stream(
                     if reasoning_content:
                         assistant_msg_dict["reasoning_content"] = reasoning_content
                         reasoning_snapshot += f"\n[Round {tool_round}]\n{reasoning_content}"
+                        # Stream reasoning to frontend
+                        yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning_content[:500]})}\n\n"
                     messages.append(assistant_msg_dict)
 
                     for tc in tool_calls:
@@ -906,9 +913,9 @@ def generate_prompt_with_ai_stream(
 
                         yield f"data: {json.dumps({'type': 'tool_call', 'name': tool_name, 'args': tool_args})}\n\n"
 
-                        result = execute_tool(tool_name, tool_args, request_id, db)
+                        result = execute_tool(tool_name, tool_args, request_id, db, prompt_id)
                         tool_calls_log.append({
-                            "name": tool_name,
+                            "tool": tool_name,
                             "args": tool_args,
                             "result": result[:500] if len(result) > 500 else result
                         })
@@ -1035,6 +1042,7 @@ def get_conversation_history(
         result.append({
             "id": conv.id,
             "title": conv.title,
+            "promptId": conv.prompt_id,
             "messageCount": msg_count,
             "createdAt": conv.created_at.isoformat() if conv.created_at else None,
             "updatedAt": conv.updated_at.isoformat() if conv.updated_at else None,
@@ -1069,13 +1077,17 @@ def get_conversation_messages(
             "content": msg.content,
             "promptResult": msg.prompt_result,
             "createdAt": msg.created_at.isoformat() if msg.created_at else None,
+            "is_complete": msg.is_complete if msg.is_complete is not None else True,
         }
         # Include tool_calls_log if present
         if msg.tool_calls_log:
             try:
-                msg_data["toolCallsLog"] = json.loads(msg.tool_calls_log)
+                msg_data["tool_calls_log"] = json.loads(msg.tool_calls_log)
             except:
                 pass
+        # Include reasoning_snapshot if present
+        if msg.reasoning_snapshot:
+            msg_data["reasoning_snapshot"] = msg.reasoning_snapshot
         result.append(msg_data)
 
     return result

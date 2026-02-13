@@ -706,6 +706,7 @@ class AiPromptConversation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    prompt_id = Column(Integer, ForeignKey("prompt_templates.id"), nullable=True, index=True)
     title = Column(String(200), nullable=False, default="New Strategy Prompt")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
     updated_at = Column(
@@ -714,6 +715,7 @@ class AiPromptConversation(Base):
 
     # Relationships
     user = relationship("User")
+    prompt_template = relationship("PromptTemplate")
     messages = relationship(
         "AiPromptMessage",
         back_populates="conversation",
