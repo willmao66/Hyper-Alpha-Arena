@@ -765,6 +765,8 @@ export default function PromptManager() {
         onApplyPrompt={(promptText) => {
           setTemplateDraft(promptText)
         }}
+        promptId={selectedId}
+        promptName={selectedTemplate?.name}
       />
 
       {/* Premium Required Modal */}

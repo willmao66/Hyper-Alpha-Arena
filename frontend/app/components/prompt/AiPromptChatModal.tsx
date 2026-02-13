@@ -63,6 +63,8 @@ interface AiPromptChatModalProps {
   accounts: TradingAccount[]
   accountsLoading: boolean
   onApplyPrompt: (promptText: string) => void
+  promptId?: number | null
+  promptName?: string | null
 }
 
 export default function AiPromptChatModal({
@@ -71,6 +73,8 @@ export default function AiPromptChatModal({
   accounts,
   accountsLoading,
   onApplyPrompt,
+  promptId,
+  promptName,
 }: AiPromptChatModalProps) {
   const { t } = useTranslation()
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
@@ -196,6 +200,7 @@ export default function AiPromptChatModal({
           accountId: selectedAccountId,
           userMessage: userMessage,
           conversationId: currentConversationId,
+          promptId: promptId || undefined,
         }),
       })
 
@@ -397,7 +402,15 @@ export default function AiPromptChatModal({
       >
         <DialogHeader className="px-6 py-4 border-b">
           <div className="flex items-center justify-between">
-            <DialogTitle>{t('aiPrompt.title', 'AI Strategy Prompt Generator')}</DialogTitle>
+            <div className="flex items-center gap-3">
+              <DialogTitle>{t('aiPrompt.title', 'AI Strategy Prompt Generator')}</DialogTitle>
+              {/* Show prompt name badge when editing */}
+              {promptName && (
+                <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded font-medium">
+                  {t('aiPrompt.editing', 'Editing')}: {promptName}
+                </span>
+              )}
+            </div>
             {(accountsLoading || loadingConversations) && (
               <PacmanLoader className="w-8 h-4" />
             )}

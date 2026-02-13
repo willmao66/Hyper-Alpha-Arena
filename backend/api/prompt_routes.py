@@ -605,6 +605,7 @@ class AiChatRequest(BaseModel):
     account_id: int = Field(..., alias="accountId")
     user_message: str = Field(..., alias="userMessage")
     conversation_id: Optional[int] = Field(None, alias="conversationId")
+    prompt_id: Optional[int] = Field(None, alias="promptId")
 
     class Config:
         populate_by_name = True
@@ -652,7 +653,8 @@ def ai_chat(
         account=account,
         user_message=request.user_message,
         conversation_id=request.conversation_id,
-        user_id=user.id
+        user_id=user.id,
+        prompt_id=request.prompt_id
     )
 
     return AiChatResponse(
@@ -696,7 +698,8 @@ def ai_chat_stream(
             account=account,
             user_message=request.user_message,
             conversation_id=request.conversation_id,
-            user_id=user.id
+            user_id=user.id,
+            prompt_id=request.prompt_id
         ),
         media_type="text/event-stream",
         headers={

@@ -27,6 +27,14 @@ from services.ai_shared_tools import (
     execute_get_signal_pools,
     execute_run_signal_backtest
 )
+from services.ai_prompt_shared_tools import (
+    PROMPT_CONTEXT_TOOLS,
+    execute_get_prompt_context,
+    execute_get_trader_details,
+    execute_get_decision_list,
+    execute_get_decision_details,
+    execute_query_market_data
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +182,7 @@ PROMPT_TOOLS = [
             }
         }
     }
-] + SHARED_SIGNAL_TOOLS  # Add shared signal pool tools
+] + PROMPT_CONTEXT_TOOLS + SHARED_SIGNAL_TOOLS  # Add context tools and shared signal pool tools
 
 
 def _convert_tools_to_anthropic(openai_tools: List[Dict]) -> List[Dict]:
@@ -534,6 +542,49 @@ def execute_tool(tool_name: str, args: Dict[str, Any], request_id: str, db: Sess
             hours = args.get("hours", 24)
             return execute_run_signal_backtest(db, pool_id, symbol, hours)
 
+        # New prompt context tools
+        elif tool_name == "get_prompt_context":
+            if db is None:
+                return json.dumps({"error": "Database session not available"})
+            prompt_id = args.get("prompt_id")
+            return execute_get_prompt_context(db, prompt_id)
+
+        elif tool_name == "get_trader_details":
+            if db is None:
+                return json.dumps({"error": "Database session not available"})
+            trader_id = args.get("trader_id")
+            if trader_id is None:
+                return json.dumps({"error": "trader_id is required"})
+            return execute_get_trader_details(db, trader_id)
+
+        elif tool_name == "get_decision_list":
+            if db is None:
+                return json.dumps({"error": "Database session not available"})
+            trader_id = args.get("trader_id")
+            if trader_id is None:
+                return json.dumps({"error": "trader_id is required"})
+            limit = args.get("limit", 10)
+            return execute_get_decision_list(db, trader_id, limit)
+
+        elif tool_name == "get_decision_details":
+            if db is None:
+                return json.dumps({"error": "Database session not available"})
+            decision_ids = args.get("decision_ids")
+            if not decision_ids:
+                return json.dumps({"error": "decision_ids is required"})
+            fields = args.get("fields")
+            return execute_get_decision_details(db, decision_ids, fields)
+
+        elif tool_name == "query_market_data":
+            if db is None:
+                return json.dumps({"error": "Database session not available"})
+            symbol = args.get("symbol")
+            if not symbol:
+                return json.dumps({"error": "symbol is required"})
+            period = args.get("period", "1h")
+            exchange = args.get("exchange", "hyperliquid")
+            return execute_query_market_data(db, symbol, period, exchange)
+
         else:
             return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
@@ -552,6 +603,7 @@ def generate_prompt_with_ai_stream(
     user_message: str,
     conversation_id: Optional[int] = None,
     user_id: int = 1,
+    prompt_id: Optional[int] = None,
 ) -> Generator[str, None, None]:
     """
     Generate trading strategy prompt using AI with SSE streaming.
@@ -575,6 +627,34 @@ def generate_prompt_with_ai_stream(
     try:
         # Load system prompt
         system_prompt = load_system_prompt()
+
+        # Inject current context if prompt_id is provided
+        if prompt_id:
+            context_info = execute_get_prompt_context(db, prompt_id)
+            try:
+                context_data = json.loads(context_info)
+                if context_data.get("success"):
+                    context_section = "\n\n## CURRENT CONTEXT\n"
+                    context_section += f"You are editing prompt ID: {prompt_id}\n"
+                    if context_data.get("prompt"):
+                        p = context_data["prompt"]
+                        context_section += f"- Prompt Name: {p.get('name', 'Unnamed')}\n"
+                        if p.get("content"):
+                            # Truncate if too long
+                            content = p["content"]
+                            if len(content) > 500:
+                                content = content[:500] + "..."
+                            context_section += f"- Current Content:\n```\n{content}\n```\n"
+                    if context_data.get("bound_traders"):
+                        traders = context_data["bound_traders"]
+                        context_section += f"\nThis prompt is bound to {len(traders)} AI Trader(s):\n"
+                        for t in traders[:5]:  # Limit to 5
+                            context_section += f"- {t.get('name')} (ID: {t.get('id')}, Exchange: {t.get('exchange')})\n"
+                    else:
+                        context_section += "\nThis prompt is not bound to any AI Trader yet.\n"
+                    system_prompt += context_section
+            except Exception as e:
+                logger.warning(f"[AI Prompt Gen {request_id}] Failed to inject context: {e}")
 
         # Get or create conversation
         conversation = None
@@ -800,14 +880,20 @@ def generate_prompt_with_ai_stream(
                 message = choice.get("message", {})
                 content = _extract_text_from_message(message.get("content", ""))
                 tool_calls = message.get("tool_calls", [])
+                # DeepSeek Reasoner returns reasoning_content which MUST be included in next request
+                reasoning_content = message.get("reasoning_content", "")
 
                 if tool_calls:
-                    # Process tool calls
-                    messages.append({
+                    # Process tool calls - MUST include reasoning_content for DeepSeek Reasoner
+                    assistant_msg_dict = {
                         "role": "assistant",
                         "content": content,
                         "tool_calls": tool_calls
-                    })
+                    }
+                    if reasoning_content:
+                        assistant_msg_dict["reasoning_content"] = reasoning_content
+                        reasoning_snapshot += f"\n[Round {tool_round}]\n{reasoning_content}"
+                    messages.append(assistant_msg_dict)
 
                     for tc in tool_calls:
                         func = tc.get("function", {})
@@ -883,6 +969,7 @@ def generate_prompt_with_ai(
     user_message: str,
     conversation_id: Optional[int] = None,
     user_id: int = 1,
+    prompt_id: Optional[int] = None,
 ) -> Dict:
     """
     Legacy synchronous version - wraps the streaming version.
@@ -894,7 +981,7 @@ def generate_prompt_with_ai(
     }
 
     try:
-        for event in generate_prompt_with_ai_stream(db, account, user_message, conversation_id, user_id):
+        for event in generate_prompt_with_ai_stream(db, account, user_message, conversation_id, user_id, prompt_id):
             if event.startswith("data: "):
                 data = json.loads(event[6:].strip())
                 event_type = data.get("type")
