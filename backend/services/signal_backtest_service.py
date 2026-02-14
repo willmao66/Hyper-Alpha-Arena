@@ -216,6 +216,13 @@ class SignalBacktestService:
                 db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts, exchange
             )
 
+        # Handle MACD event-based signal
+        if metric == "macd":
+            logger.warning(f"[Backtest] Using MACD event-based signal handler")
+            return self._find_macd_triggers_in_range(
+                db, signal_def, symbol, time_window, kline_min_ts, kline_max_ts, exchange
+            )
+
         # Handle oi USD change signal (special: calculates USD value change)
         if metric == "oi":
             logger.warning(f"[Backtest] Using oi USD change signal handler")
@@ -452,6 +459,126 @@ class SignalBacktestService:
 
             was_active = condition_met
 
+        return triggers
+
+    def _find_macd_triggers_in_range(
+        self, db: Session, signal_def: Dict, symbol: str, time_window: str,
+        kline_min_ts: int = None, kline_max_ts: int = None,
+        exchange: str = "hyperliquid"
+    ) -> List[Dict]:
+        """
+        Find MACD event-based signal triggers.
+        Checks for golden cross, death cross, and other MACD events.
+        """
+        import pandas as pd
+        import pandas_ta as ta
+        from database.models import CryptoKline
+        from sqlalchemy import desc
+
+        condition = signal_def.get("trigger_condition", {})
+        event_types = condition.get("event_types", [])
+
+        if not event_types:
+            logger.warning(f"[Backtest] MACD signal has no event_types configured")
+            return []
+
+        interval_ms = TIMEFRAME_MS.get(time_window, 3600000)  # Default 1h for MACD
+        interval_sec = interval_ms // 1000
+
+        # Convert milliseconds to seconds (CryptoKline.timestamp is in seconds)
+        kline_min_ts_sec = kline_min_ts // 1000 if kline_min_ts else None
+        kline_max_ts_sec = kline_max_ts // 1000 if kline_max_ts else None
+
+        # Load K-line data for MACD calculation
+        query = db.query(CryptoKline).filter(
+            CryptoKline.symbol == symbol,
+            CryptoKline.period == time_window,
+            CryptoKline.exchange == exchange
+        )
+
+        if kline_min_ts_sec:
+            # Need extra data before min_ts for MACD calculation (at least 35 candles)
+            lookback_sec = interval_sec * 50
+            query = query.filter(CryptoKline.timestamp >= kline_min_ts_sec - lookback_sec)
+        if kline_max_ts_sec:
+            query = query.filter(CryptoKline.timestamp <= kline_max_ts_sec)
+
+        rows = query.order_by(CryptoKline.timestamp.asc()).all()
+
+        if not rows or len(rows) < 35:
+            logger.warning(f"[Backtest] Insufficient K-line data for MACD: {len(rows) if rows else 0}")
+            return []
+
+        # Convert to DataFrame
+        kline_data = [{
+            'timestamp': int(row.timestamp),
+            'close': float(row.close_price) if row.close_price else 0.0,
+        } for row in rows]
+
+        df = pd.DataFrame(kline_data)
+        df['close'] = pd.to_numeric(df['close'], errors='coerce')
+
+        # Calculate MACD
+        macd_result = ta.macd(df['close'])
+        if macd_result is None or macd_result.empty:
+            return []
+
+        df['macd'] = macd_result['MACD_12_26_9'].fillna(0)
+        df['signal'] = macd_result['MACDs_12_26_9'].fillna(0)
+        df['histogram'] = macd_result['MACDh_12_26_9'].fillna(0)
+
+        # Find triggers with edge detection
+        triggers = []
+
+        for i in range(1, len(df)):
+            ts_sec = df.iloc[i]['timestamp']  # timestamp in seconds
+
+            # Skip if outside requested range (compare in seconds)
+            if kline_min_ts_sec and ts_sec < kline_min_ts_sec:
+                continue
+            if kline_max_ts_sec and ts_sec > kline_max_ts_sec:
+                continue
+
+            curr_hist = df.iloc[i]['histogram']
+            prev_hist = df.iloc[i-1]['histogram']
+            curr_macd = df.iloc[i]['macd']
+            prev_macd = df.iloc[i-1]['macd']
+
+            triggered_event = None
+
+            for event_type in event_types:
+                if event_type == "golden_cross" or event_type == "histogram_positive":
+                    if prev_hist <= 0 and curr_hist > 0:
+                        triggered_event = event_type
+                        break
+                elif event_type == "death_cross" or event_type == "histogram_negative":
+                    if prev_hist >= 0 and curr_hist < 0:
+                        triggered_event = event_type
+                        break
+                elif event_type == "macd_above_zero":
+                    if prev_macd <= 0 and curr_macd > 0:
+                        triggered_event = event_type
+                        break
+                elif event_type == "macd_below_zero":
+                    if prev_macd >= 0 and curr_macd < 0:
+                        triggered_event = event_type
+                        break
+
+            if triggered_event:
+                triggers.append({
+                    "timestamp": ts_sec * 1000,  # Convert back to milliseconds for frontend
+                    "triggered_event": triggered_event,
+                    "event_types": event_types,
+                    "values": {
+                        "macd": float(df.iloc[i]['macd']),
+                        "signal": float(df.iloc[i]['signal']),
+                        "histogram": float(curr_hist),
+                        "prev_histogram": float(prev_hist),
+                    },
+                    "cross_strength": abs(curr_hist - prev_hist),
+                })
+
+        logger.warning(f"[Backtest] MACD found {len(triggers)} triggers for {symbol}/{time_window}")
         return triggers
 
     # Legacy method - kept for backward compatibility but no longer used
@@ -1190,6 +1317,9 @@ class SignalBacktestService:
             condition = sig_def["trigger_condition"]
             metric = condition.get("metric")
             if metric:
+                # Skip MACD - it uses K-line data, handled separately
+                if metric == "macd":
+                    continue
                 # taker_volume uses taker_ratio data internally
                 if metric == "taker_volume":
                     mapped_metric = "taker_ratio"
@@ -1210,6 +1340,22 @@ class SignalBacktestService:
         for data in metrics_data.values():
             if data:
                 all_timestamps.update(r[0] for r in data)
+
+        # For MACD-only pools, get check points from MACD triggers
+        has_only_macd = all(
+            sig_def["trigger_condition"].get("metric") == "macd"
+            for sig_def in signal_defs.values()
+        )
+        if has_only_macd:
+            # For MACD-only pool, use MACD trigger timestamps as check points
+            for signal_id, sig_def in signal_defs.items():
+                condition = sig_def["trigger_condition"]
+                macd_triggers = self._find_macd_triggers_in_range(
+                    db, sig_def, symbol, condition.get("time_window", "15m"),
+                    kline_min_ts, kline_max_ts, exchange
+                )
+                for t in macd_triggers:
+                    all_timestamps.add(t["timestamp"])
 
         if kline_min_ts:
             all_timestamps = {ts for ts in all_timestamps if ts >= kline_min_ts}
@@ -1303,6 +1449,28 @@ class SignalBacktestService:
                         "volume_threshold": volume_threshold,
                     } if condition_met else None
                     signal_conditions[signal_id][check_time] = (condition_met, value_info)
+            elif metric == "macd":
+                # MACD event-based signal - use dedicated backtest method
+                macd_triggers = self._find_macd_triggers_in_range(
+                    db, sig_def, symbol, condition.get("time_window", "15m"),
+                    kline_min_ts, kline_max_ts, exchange
+                )
+                # Convert MACD triggers to signal_conditions format
+                macd_trigger_times = {t["timestamp"]: t for t in macd_triggers}
+                for check_time in check_points:
+                    if check_time in macd_trigger_times:
+                        t = macd_trigger_times[check_time]
+                        signal_conditions[signal_id][check_time] = (True, {
+                            "signal_id": signal_id,
+                            "signal_name": sig_def["signal_name"],
+                            "metric": "macd",
+                            "triggered_event": t.get("triggered_event"),
+                            "event_types": t.get("event_types"),
+                            "values": t.get("values"),
+                            "cross_strength": t.get("cross_strength"),
+                        })
+                    else:
+                        signal_conditions[signal_id][check_time] = (False, None)
             else:
                 operator = condition.get("operator")
                 threshold = condition.get("threshold")
@@ -1354,6 +1522,17 @@ class SignalBacktestService:
 
             # Skip this check point if any signal returned None
             if has_none:
+                continue
+
+            # For MACD-only pools, skip pending edge mechanism
+            # MACD is event-based: each trigger is an independent edge event
+            if has_only_macd:
+                if all_met:
+                    triggers.append({
+                        "timestamp": check_time,
+                        "triggered_signals": signal_values,
+                        "trigger_type": "all",
+                    })
                 continue
 
             # Update pending edges: when signal transitions from not-met to met

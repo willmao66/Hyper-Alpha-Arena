@@ -371,6 +371,10 @@ class SignalDetectionService:
         if metric == "taker_volume":
             return self._check_taker_condition(signal_id, signal_def, symbol, condition, time_window, exchange)
 
+        # Handle MACD event-based signal
+        if metric == "macd":
+            return self._check_macd_condition(signal_id, signal_def, symbol, condition, time_window, exchange)
+
         # Standard single-value signal
         operator = condition.get("operator")
         threshold = condition.get("threshold")
@@ -654,6 +658,107 @@ class SignalDetectionService:
 
         return result
 
+    def _check_macd_condition(
+        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str,
+        exchange: str = "hyperliquid"
+    ) -> Optional[dict]:
+        """
+        Check MACD event-based condition (without edge detection).
+        Supports multiple event types: golden_cross, death_cross, histogram_positive,
+        histogram_negative, macd_above_zero, macd_below_zero.
+        """
+        from database.connection import SessionLocal
+        from services.technical_indicators import get_macd_for_signal
+        from datetime import datetime
+
+        event_types = condition.get("event_types", [])
+        if not event_types:
+            return None
+
+        period = time_window if isinstance(time_window, str) else self._time_window_to_period(time_window)
+        current_time_ms = int(datetime.utcnow().timestamp() * 1000)
+
+        db = SessionLocal()
+        try:
+            macd_data = get_macd_for_signal(db, symbol, period, current_time_ms, exchange)
+        finally:
+            db.close()
+
+        if not macd_data:
+            return None
+
+        curr = macd_data['current']
+        prev = macd_data['previous']
+
+        # Check each event type
+        triggered_event = None
+        condition_met = False
+
+        for event_type in event_types:
+            if event_type == "golden_cross":
+                # Golden cross: histogram crosses from negative to positive
+                if prev['histogram'] <= 0 and curr['histogram'] > 0:
+                    triggered_event = "golden_cross"
+                    condition_met = True
+                    break
+            elif event_type == "death_cross":
+                # Death cross: histogram crosses from positive to negative
+                if prev['histogram'] >= 0 and curr['histogram'] < 0:
+                    triggered_event = "death_cross"
+                    condition_met = True
+                    break
+            elif event_type == "histogram_positive":
+                # Histogram turns positive (same as golden cross)
+                if prev['histogram'] <= 0 and curr['histogram'] > 0:
+                    triggered_event = "histogram_positive"
+                    condition_met = True
+                    break
+            elif event_type == "histogram_negative":
+                # Histogram turns negative (same as death cross)
+                if prev['histogram'] >= 0 and curr['histogram'] < 0:
+                    triggered_event = "histogram_negative"
+                    condition_met = True
+                    break
+            elif event_type == "macd_above_zero":
+                # MACD line crosses above zero
+                if prev['macd'] <= 0 and curr['macd'] > 0:
+                    triggered_event = "macd_above_zero"
+                    condition_met = True
+                    break
+            elif event_type == "macd_below_zero":
+                # MACD line crosses below zero
+                if prev['macd'] >= 0 and curr['macd'] < 0:
+                    triggered_event = "macd_below_zero"
+                    condition_met = True
+                    break
+
+        # DEBUG LOG
+        print(f"[MACDCheck] signal={signal_id} symbol={symbol} exchange={exchange} period={period} "
+              f"events={event_types} curr_hist={curr['histogram']:.6f} prev_hist={prev['histogram']:.6f} "
+              f"triggered={triggered_event} met={condition_met}", flush=True)
+
+        return {
+            "signal_id": signal_id,
+            "signal_name": signal_def.get("signal_name"),
+            "description": signal_def.get("description"),
+            "metric": "macd",
+            "event_types": event_types,
+            "triggered_event": triggered_event,
+            "condition_met": condition_met,
+            "time_window": time_window,
+            "exchange": exchange,
+            "values": {
+                "macd": curr['macd'],
+                "signal": curr['signal'],
+                "histogram": curr['histogram'],
+                "prev_macd": prev['macd'],
+                "prev_signal": prev['signal'],
+                "prev_histogram": prev['histogram'],
+            },
+            "cross_strength": macd_data['cross_strength'],
+            "latest_kline_ts": macd_data['latest_kline_ts'],
+        }
+
     def _log_pool_trigger(self, trigger_result: dict) -> int | None:
         """Log pool trigger to database and return the trigger_log_id."""
         try:
@@ -668,7 +773,7 @@ class SignalDetectionService:
             db = SessionLocal()
             try:
                 def _format_signal_for_log(s: dict) -> dict:
-                    """Format signal data for logging, handling both standard and taker_volume signals."""
+                    """Format signal data for logging, handling standard, taker_volume, and macd signals."""
                     base = {
                         "signal_id": s["signal_id"],
                         "signal_name": s["signal_name"],
@@ -681,6 +786,12 @@ class SignalDetectionService:
                         base["direction"] = s.get("actual_direction")
                         base["volume"] = s.get("total")
                         base["volume_threshold"] = s.get("volume_threshold")
+                    elif s["metric"] == "macd":
+                        # MACD event-based signal
+                        base["event_types"] = s.get("event_types")
+                        base["triggered_event"] = s.get("triggered_event")
+                        base["values"] = s.get("values")
+                        base["cross_strength"] = s.get("cross_strength")
                     else:
                         base["current_value"] = s.get("current_value")
                         base["threshold"] = s.get("threshold")

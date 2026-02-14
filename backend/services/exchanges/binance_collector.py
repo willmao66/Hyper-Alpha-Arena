@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 # Default collection intervals (seconds)
 KLINE_INTERVAL_SECONDS = 60  # 1 minute
 OI_INTERVAL_SECONDS = 60  # 1 minute (using real-time API for finer granularity)
+
+# K-line periods to collect (matching Hyperliquid for consistency)
+KLINE_PERIODS = ['1m', '3m', '5m', '15m', '30m', '1h']
 FUNDING_INTERVAL_SECONDS = 60  # 1 minute (using premiumIndex for real-time rate)
 SENTIMENT_INTERVAL_SECONDS = 300  # 5 minutes
 ORDERBOOK_INTERVAL_SECONDS = 15  # 15 seconds
@@ -180,22 +183,19 @@ class BinanceCollector:
         logger.info("Initial data collection completed")
 
     def _collect_klines(self):
-        """Collect K-line data for all symbols (includes taker volumes as backup)"""
+        """Collect K-line data for all symbols and periods"""
         db = SessionLocal()
         try:
             persistence = ExchangeDataPersistence(db)
             for symbol in self.symbols:
-                try:
-                    klines = self.adapter.fetch_klines(symbol, "1m", limit=5)
-                    if klines:
-                        result = persistence.save_klines(klines)
-                        # NOTE: Removed save_taker_volumes_from_klines() call
-                        # WebSocket collector provides 15s granularity taker data
-                        # REST K-line taker data (1m) was overwriting WebSocket data
-                        # causing backtest vs actual trigger mismatch
-                        logger.debug(f"Klines {symbol}: {result}")
-                except Exception as e:
-                    logger.error(f"Failed to collect klines for {symbol}: {e}")
+                for period in KLINE_PERIODS:
+                    try:
+                        klines = self.adapter.fetch_klines(symbol, period, limit=5)
+                        if klines:
+                            result = persistence.save_klines(klines)
+                            logger.debug(f"Klines {symbol}/{period}: {result}")
+                    except Exception as e:
+                        logger.error(f"Failed to collect klines for {symbol}/{period}: {e}")
         finally:
             db.close()
 

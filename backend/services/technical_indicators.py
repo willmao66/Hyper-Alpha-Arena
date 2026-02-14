@@ -316,3 +316,126 @@ def calculate_indicator(
     except Exception as e:
         logger.error(f"Error in calculate_indicator({symbol}, {indicator}, {period}): {e}")
         return None
+
+
+def get_macd_for_signal(
+    db,
+    symbol: str,
+    period: str,
+    current_time_ms: int,
+    exchange: str = "hyperliquid"
+) -> Optional[Dict[str, Any]]:
+    """
+    Get MACD values for signal detection.
+    Returns current and previous K-line's MACD values for cross detection.
+
+    Args:
+        db: Database session
+        symbol: Trading symbol (e.g., 'BTC')
+        period: K-line period (e.g., '1h', '4h')
+        current_time_ms: Current timestamp in milliseconds
+        exchange: Exchange name ('hyperliquid' or 'binance')
+
+    Returns:
+        Dict with current and previous MACD values, or None if calculation fails
+    """
+    from database.models import CryptoKline
+    from sqlalchemy import desc
+
+    try:
+        # Need at least 35 candles for MACD (26 slow + 9 signal)
+        count = 50
+
+        # Fetch K-line data from database
+        rows = (
+            db.query(CryptoKline)
+            .filter(
+                CryptoKline.symbol == symbol,
+                CryptoKline.period == period,
+                CryptoKline.exchange == exchange
+            )
+            .order_by(desc(CryptoKline.timestamp))
+            .limit(count)
+            .all()
+        )
+
+        if not rows or len(rows) < 35:
+            logger.warning(f"Insufficient kline data for MACD: {symbol} {period} {exchange}, got {len(rows) if rows else 0}")
+            return None
+
+        # Convert to DataFrame (reverse to chronological order)
+        kline_data = [
+            {
+                'timestamp': int(row.timestamp),
+                'open': float(row.open_price) if row.open_price else 0.0,
+                'high': float(row.high_price) if row.high_price else 0.0,
+                'low': float(row.low_price) if row.low_price else 0.0,
+                'close': float(row.close_price) if row.close_price else 0.0,
+                'volume': float(row.volume) if row.volume else 0.0,
+            }
+            for row in reversed(rows)
+        ]
+
+        df = pd.DataFrame(kline_data)
+        df['close'] = pd.to_numeric(df['close'], errors='coerce')
+
+        # Check data freshness - reject if latest K-line is too old
+        # For real-time signal detection, data should be within 2x the period interval
+        latest_kline_ts = kline_data[-1]['timestamp']
+        current_time_sec = current_time_ms // 1000
+
+        # Calculate max allowed age based on period
+        period_seconds = {
+            '1m': 60, '3m': 180, '5m': 300, '15m': 900,
+            '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400
+        }
+        max_age_sec = period_seconds.get(period, 3600) * 2  # Allow 2x period as buffer
+
+        if current_time_sec - latest_kline_ts > max_age_sec:
+            logger.warning(
+                f"[MACD] Stale K-line data for {symbol}/{period}/{exchange}: "
+                f"latest={latest_kline_ts}, current={current_time_sec}, age={current_time_sec - latest_kline_ts}s, max={max_age_sec}s"
+            )
+            return None
+
+        # Calculate MACD
+        macd_data = ta.macd(df['close'])
+        if macd_data is None or macd_data.empty:
+            return None
+
+        macd_values = macd_data['MACD_12_26_9'].fillna(0).tolist()
+        signal_values = macd_data['MACDs_12_26_9'].fillna(0).tolist()
+        histogram_values = macd_data['MACDh_12_26_9'].fillna(0).tolist()
+
+        if len(macd_values) < 2:
+            return None
+
+        # Get current and previous values
+        curr_macd = macd_values[-1]
+        curr_signal = signal_values[-1]
+        curr_histogram = histogram_values[-1]
+        prev_macd = macd_values[-2]
+        prev_signal = signal_values[-2]
+        prev_histogram = histogram_values[-2]
+
+        # Get the timestamp of the latest K-line for cache validation
+        latest_kline_ts = kline_data[-1]['timestamp']
+
+        return {
+            'current': {
+                'macd': curr_macd,
+                'signal': curr_signal,
+                'histogram': curr_histogram,
+            },
+            'previous': {
+                'macd': prev_macd,
+                'signal': prev_signal,
+                'histogram': prev_histogram,
+            },
+            'latest_kline_ts': latest_kline_ts,
+            'cross_strength': abs(curr_histogram - prev_histogram),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in get_macd_for_signal({symbol}, {period}, {exchange}): {e}")
+        return None

@@ -285,6 +285,7 @@ const METRICS = [
   { value: 'order_imbalance', label: 'Order Imbalance', desc: 'Order book imbalance (-1 to 1). Positive=buy pressure' },
   { value: 'oi', label: 'OI (Absolute)', desc: 'Absolute Open Interest value in USD' },
   { value: 'taker_volume', label: 'Taker Volume', desc: 'Composite signal: direction + ratio + volume threshold', isComposite: true },
+  { value: 'macd', label: 'MACD', desc: 'MACD technical indicator events: golden cross, death cross, etc.', isEvent: true },
   { value: 'price_change', label: 'Price Change', desc: 'Price change % over time window. Formula: (current-prev)/prev*100. Positive=up, Negative=down' },
   { value: 'volatility', label: 'Volatility', desc: 'Price volatility % over time window. Formula: (high-low)/low*100. Always positive, detects swings' },
 ]
@@ -294,6 +295,16 @@ const TAKER_DIRECTIONS = [
   { value: 'any', label: 'Any Direction', desc: 'Trigger on either buy or sell dominance' },
   { value: 'buy', label: 'Buy Dominant', desc: 'Only trigger when buyers dominate' },
   { value: 'sell', label: 'Sell Dominant', desc: 'Only trigger when sellers dominate' },
+]
+
+// MACD event types
+const MACD_EVENT_TYPES = [
+  { value: 'golden_cross', label: 'Golden Cross', desc: 'MACD crosses above Signal line (bullish)' },
+  { value: 'death_cross', label: 'Death Cross', desc: 'MACD crosses below Signal line (bearish)' },
+  { value: 'histogram_positive', label: 'Histogram Positive', desc: 'Histogram turns positive (same as golden cross)' },
+  { value: 'histogram_negative', label: 'Histogram Negative', desc: 'Histogram turns negative (same as death cross)' },
+  { value: 'macd_above_zero', label: 'MACD Above Zero', desc: 'MACD line crosses above zero (bullish confirmation)' },
+  { value: 'macd_below_zero', label: 'MACD Below Zero', desc: 'MACD line crosses below zero (bearish confirmation)' },
 ]
 
 const OPERATORS = [
@@ -340,6 +351,8 @@ export default function SignalManager() {
     direction: 'any',
     ratio_threshold: 1.5,
     volume_threshold: 50000,
+    // MACD event fields
+    event_types: ['golden_cross', 'death_cross'] as string[],
   })
 
   // Pool dialog state
@@ -589,6 +602,8 @@ export default function SignalManager() {
         direction: (cond as any).direction || 'any',
         ratio_threshold: (cond as any).ratio_threshold ?? 1.5,
         volume_threshold: (cond as any).volume_threshold ?? 50000,
+        // MACD event fields
+        event_types: (cond as any).event_types || ['golden_cross', 'death_cross'],
       })
     } else {
       setEditingSignal(null)
@@ -604,6 +619,7 @@ export default function SignalManager() {
         direction: 'any',
         ratio_threshold: 1.5,
         volume_threshold: 50000,
+        event_types: ['golden_cross', 'death_cross'],
       })
     }
     setSignalDialogOpen(true)
@@ -621,6 +637,18 @@ export default function SignalManager() {
           direction: signalForm.direction,
           ratio_threshold: signalForm.ratio_threshold,
           volume_threshold: signalForm.volume_threshold,
+          time_window: signalForm.time_window,
+        }
+      } else if (signalForm.metric === 'macd') {
+        // MACD event-based signal
+        if (signalForm.event_types.length === 0) {
+          toast.error('Please select at least one MACD event type')
+          setSavingSignal(false)
+          return
+        }
+        trigger_condition = {
+          metric: signalForm.metric,
+          event_types: signalForm.event_types,
           time_window: signalForm.time_window,
         }
       } else {
@@ -681,8 +709,9 @@ export default function SignalManager() {
     try {
       // Step 1: Fetch K-lines from market API (ensures fresh data)
       // Use 500 klines to match the K-line page and provide more historical context
+      // Include MACD indicator for chart display
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${symbol}?market=${signalExchange}&period=${signalTimeWindow}&count=500`
+        `/api/market/kline-with-indicators/${symbol}?market=${signalExchange}&period=${signalTimeWindow}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -717,6 +746,7 @@ export default function SignalManager() {
         ...triggerData,
         klines: formattedKlines,
         kline_count: formattedKlines.length,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to load preview data')
@@ -740,9 +770,9 @@ export default function SignalManager() {
     setPreviewData(null)
 
     try {
-      // Step 1: Fetch K-lines
+      // Step 1: Fetch K-lines with MACD indicator
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${symbol}?market=${poolExchange}&period=${poolTimeWindow}&count=500`
+        `/api/market/kline-with-indicators/${symbol}?market=${poolExchange}&period=${poolTimeWindow}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -775,6 +805,7 @@ export default function SignalManager() {
         klines: formattedKlines,
         kline_count: formattedKlines.length,
         isPoolPreview: true,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to load pool preview data')
@@ -854,9 +885,9 @@ export default function SignalManager() {
     setPreviewData(null)
 
     try {
-      // Fetch K-lines
+      // Fetch K-lines with MACD indicator
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${symbol}?market=${tempExchange}&period=${tempTimeWindow}&count=500`
+        `/api/market/kline-with-indicators/${symbol}?market=${tempExchange}&period=${tempTimeWindow}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -896,6 +927,7 @@ export default function SignalManager() {
         ...triggerData,
         klines: formattedKlines,
         kline_count: formattedKlines.length,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to load preview data')
@@ -913,9 +945,9 @@ export default function SignalManager() {
     const previewExchange = previewPool?.exchange || previewSignal?.exchange || 'hyperliquid'
 
     try {
-      // Fetch K-lines with new timeframe
+      // Fetch K-lines with new timeframe and MACD indicator
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${previewSymbol}?market=${previewExchange}&period=${newTimeframe}&count=500`
+        `/api/market/kline-with-indicators/${previewSymbol}?market=${previewExchange}&period=${newTimeframe}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -976,6 +1008,7 @@ export default function SignalManager() {
         kline_count: formattedKlines.length,
         isPoolPreview: !!previewPool,
         chart_timeframe: newTimeframe,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to refresh preview')
@@ -1066,6 +1099,15 @@ export default function SignalManager() {
       const ratio = (cond as any).ratio_threshold || 1.5
       const vol = ((cond as any).volume_threshold || 0).toLocaleString()
       return `${metric} | ${dir.toUpperCase()} ≥${ratio} Vol≥$${vol} (${cond.time_window})`
+    }
+    // Handle MACD event-based signal
+    if (cond.metric === 'macd') {
+      const events = (cond as any).event_types || []
+      const eventLabels = events.map((e: string) => {
+        const found = MACD_EVENT_TYPES.find(m => m.value === e)
+        return found ? found.label : e
+      }).join(', ')
+      return `${metric} | ${eventLabels || 'No events'} (${cond.time_window})`
     }
     const op = OPERATORS.find(o => o.value === cond.operator)?.label || cond.operator
     return `${metric} ${op} ${cond.threshold} (${cond.time_window})`
@@ -1297,6 +1339,8 @@ export default function SignalManager() {
                                 <div key={i} className="ml-4 text-xs">
                                   {s.metric === 'taker_volume' ? (
                                     <>• {s.signal_name}: {s.direction?.toUpperCase()} | ratio={s.current_value?.toFixed(2)} (≥{s.threshold}) | vol=${((s.volume || 0) / 1e6).toFixed(2)}M (≥${((s.volume_threshold || 0) / 1e6).toFixed(2)}M)</>
+                                  ) : s.metric === 'macd' ? (
+                                    <>• {s.signal_name}: {s.triggered_event} | MACD={s.values?.macd?.toFixed(4)} | Hist={s.values?.histogram?.toFixed(4)}</>
                                   ) : (
                                     <>• {s.signal_name}: {s.metric} = {s.current_value?.toFixed(4)} (threshold: {s.threshold})</>
                                   )}
@@ -1491,6 +1535,39 @@ export default function SignalManager() {
                   </div>
                 </div>
               </div>
+            ) : signalForm.metric === 'macd' ? (
+              /* MACD event-based signal UI */
+              <div className="space-y-4 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
+                <div className="text-xs font-medium text-purple-400">{t('signals.dialog.macdConfig', 'MACD Event Configuration')}</div>
+                <div>
+                  <Label>{t('signals.dialog.eventTypes', 'Event Types (select one or more)')}</Label>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {MACD_EVENT_TYPES.map(evt => (
+                      <label key={evt.value} className="flex items-center gap-2 p-2 rounded border cursor-pointer hover:bg-accent">
+                        <input
+                          type="checkbox"
+                          checked={signalForm.event_types.includes(evt.value)}
+                          onChange={e => {
+                            if (e.target.checked) {
+                              setSignalForm(prev => ({ ...prev, event_types: [...prev.event_types, evt.value] }))
+                            } else {
+                              setSignalForm(prev => ({ ...prev, event_types: prev.event_types.filter(v => v !== evt.value) }))
+                            }
+                          }}
+                          className="rounded"
+                        />
+                        <div>
+                          <div className="text-sm font-medium">{evt.label}</div>
+                          <div className="text-xs text-muted-foreground">{evt.desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {signalForm.event_types.length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">{t('signals.dialog.selectAtLeastOne', 'Please select at least one event type')}</p>
+                  )}
+                </div>
+              </div>
             ) : (
               /* Standard signal UI */
               <div className="grid grid-cols-2 gap-4">
@@ -1531,7 +1608,8 @@ export default function SignalManager() {
               </p>
             </div>
 
-            {/* Statistical Analysis Preview */}
+            {/* Statistical Analysis Preview - hide for event-based signals like MACD */}
+            {signalForm.metric !== 'macd' && (
             <div className="p-3 bg-muted/50 rounded-lg border">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm font-medium">{t('signals.dialog.statisticalAnalysis', 'Statistical Analysis')}</span>
@@ -1660,6 +1738,7 @@ export default function SignalManager() {
                 <p className="text-xs text-muted-foreground">{t('signals.dialog.unableToLoadAnalysis', 'Unable to load analysis')}</p>
               )}
             </div>
+            )}
 
             <div className="flex items-center gap-2">
               <Switch checked={signalForm.enabled} onCheckedChange={v => setSignalForm(prev => ({ ...prev, enabled: v }))} />
@@ -1893,6 +1972,7 @@ export default function SignalManager() {
                   klines={previewData.klines}
                   triggers={previewData.triggers || []}
                   timeWindow={chartTimeframe}
+                  macd={previewData.macd}
                 />
               </div>
 

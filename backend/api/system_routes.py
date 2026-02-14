@@ -70,44 +70,47 @@ def set_retention_days(db: Session, days: int, exchange: str = "hyperliquid") ->
 def get_storage_stats(exchange: str = "hyperliquid", db: Session = Depends(get_db)):
     """Get storage statistics for market flow data tables by exchange"""
     try:
-        # Query table sizes filtered by exchange
+        # Tables with exchange column
+        tables_with_exchange = [
+            'market_trades_aggregated',
+            'market_asset_metrics',
+            'market_orderbook_snapshots',
+            'crypto_klines'
+        ]
         if exchange == "binance":
-            # Binance also uses market_sentiment_metrics
-            size_query = text("""
-                SELECT
-                    relname as table_name,
-                    pg_total_relation_size(relid) as total_bytes
-                FROM pg_catalog.pg_statio_user_tables
-                WHERE relname IN (
-                    'market_trades_aggregated',
-                    'market_asset_metrics',
-                    'market_orderbook_snapshots',
-                    'market_sentiment_metrics',
-                    'crypto_klines'
-                )
-            """)
-        else:
-            size_query = text("""
-                SELECT
-                    relname as table_name,
-                    pg_total_relation_size(relid) as total_bytes
-                FROM pg_catalog.pg_statio_user_tables
-                WHERE relname IN (
-                    'market_trades_aggregated',
-                    'market_asset_metrics',
-                    'market_orderbook_snapshots'
-                )
-            """)
-        result = db.execute(size_query)
-        rows = result.fetchall()
+            tables_with_exchange.append('market_sentiment_metrics')
 
         tables = {}
         total_bytes = 0
-        for row in rows:
-            table_name = row[0]
-            size_bytes = row[1] or 0
-            tables[table_name] = round(size_bytes / (1024 * 1024), 1)
-            total_bytes += size_bytes
+
+        for table_name in tables_with_exchange:
+            try:
+                # Get total table size (including indexes)
+                size_query = text("""
+                    SELECT pg_total_relation_size(relid) as total_bytes
+                    FROM pg_catalog.pg_statio_user_tables
+                    WHERE relname = :table_name
+                """)
+                table_size = db.execute(size_query, {"table_name": table_name}).scalar() or 0
+
+                # Get row ratio for this exchange
+                ratio_query = text(f"""
+                    SELECT
+                        COALESCE(
+                            (SELECT COUNT(*)::float FROM {table_name} WHERE exchange = :exchange) /
+                            NULLIF((SELECT COUNT(*)::float FROM {table_name}), 0),
+                            0
+                        )
+                """)
+                ratio = db.execute(ratio_query, {"exchange": exchange}).scalar() or 0
+
+                # Calculate this exchange's share of the table
+                exchange_bytes = int(table_size * ratio)
+                tables[table_name] = round(exchange_bytes / (1024 * 1024), 1)
+                total_bytes += exchange_bytes
+            except Exception as e:
+                logger.warning(f"Failed to get stats for {table_name}: {e}")
+                tables[table_name] = 0
 
         total_mb = round(total_bytes / (1024 * 1024), 1)
         retention_days = get_retention_days(db, exchange)
