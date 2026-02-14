@@ -2,9 +2,9 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
-> **Dual-engine AI trading platform with market flow signal monitoring**. Monitors institutional order flow, OI changes, and funding rate extremes—triggers automated trading when market structure shifts. Two trading modes: AI Trader for strategies needing market understanding (news, sentiment), or Program Trader for fixed-rule strategies (technical indicators). AI-assisted configuration throughout—no coding required to start.
+> **Multi-exchange AI trading platform with market flow signal monitoring**. Supports **Hyperliquid** and **Binance Futures**. Monitors institutional order flow, OI changes, and funding rate extremes—triggers automated trading when market structure shifts. Two trading modes: AI Trader for strategies needing market understanding (news, sentiment), or Program Trader for fixed-rule strategies (technical indicators). AI-assisted configuration throughout—no coding required to start.
 >
-> **Essential tool for Hyperliquid traders**. One-click Docker deployment, active Telegram community, frequent updates. Supports testnet paper trading & mainnet real trading. **English & 中文 supported.**
+> **Essential tool for crypto perpetual traders**. One-click Docker deployment, active Telegram community, frequent updates. Supports Hyperliquid testnet paper trading & mainnet real trading, plus Binance Futures. **English & 中文 supported.**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub stars](https://img.shields.io/github/stars/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/stargazers)
@@ -26,11 +26,13 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 | **Non-technical traders** | Built-in AI assistants help you create trading signals and strategy prompts through natural conversation—no coding required |
 | **Quantitative researchers** | Test LLM-driven strategies with real market data on testnet before deploying real capital |
 | **Hyperliquid users** | Native integration with both testnet (free paper trading) and mainnet (1-50x leverage perpetuals) |
+| **Binance users** | Connect via API key to trade USDT-M futures with full feature support |
 | **AI enthusiasts** | Experiment with different LLMs (GPT, Claude, Deepseek) competing in real trading scenarios |
 
-**Trading Modes:**
-- **Hyperliquid Testnet (Paper Trading)**: Risk-free testing with real market mechanics, free test funds, and actual order book - a superior paper trading experience
-- **Hyperliquid Mainnet**: Live trading on decentralized perpetual exchange with 1-50x leverage support (real capital at risk)
+**Supported Exchanges:**
+- **Hyperliquid Testnet**: Risk-free paper trading with real market mechanics, free test funds, no KYC required
+- **Hyperliquid Mainnet**: Decentralized perpetual exchange, 1-50x leverage, wallet-based authentication
+- **Binance Futures**: World's largest crypto derivatives exchange, USDT-M perpetuals, API key authentication
 
 ## Features
 
@@ -49,7 +51,7 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 
 **Multi-Account Real-Time Comparison** - Don't know which strategy works better? Real-time asset curve comparison across multiple AI traders, with trade markers displayed on individual curves.
 
-**Deep Hyperliquid Integration** - Seamless testnet/mainnet switching, native 1-50x leverage support, built-in margin monitoring and liquidation price warnings.
+**Multi-Exchange Support** - Trade on Hyperliquid (decentralized, wallet-based) or Binance Futures (centralized, API key). Seamless testnet/mainnet switching for Hyperliquid, native 1-50x leverage support, built-in margin monitoring and liquidation price warnings.
 
 **Multi-Model LLM Support** - Compatible with OpenAI API models (GPT-5, Claude, Deepseek, etc.). Multi-wallet architecture with independent testnet/mainnet configurations.
 
@@ -127,6 +129,7 @@ docker compose up -d --build # (or docker-compose up -d --build)
 
 For detailed setup instructions including:
 - Hyperliquid wallet configuration (Testnet & Mainnet)
+- Binance API key setup for Futures trading
 - AI Trader creation and LLM API setup
 - Trading environment and leverage settings
 - Signal-triggered trading configuration
@@ -186,7 +189,11 @@ Please star and fork this repository to stay updated with development progress.
 ### Hyperliquid
 - Official Docs: https://hyperliquid.gitbook.io/
 - Python SDK: https://github.com/hyperliquid-dex/hyperliquid-python-sdk
-- Testnet: https://api.hyperliquid-testnet.xyz
+- Testnet: https://app.hyperliquid-testnet.xyz
+
+### Binance Futures
+- API Documentation: https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
+- Testnet: https://testnet.binancefuture.com
 
 ### Original Project
 - Open Alpha Arena: https://github.com/etrobot/open-alpha-arena

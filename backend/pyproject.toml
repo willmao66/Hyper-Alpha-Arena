@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hyper-alpha-arena-backend"
-version = "0.5.0"
+version = "0.8.0"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",

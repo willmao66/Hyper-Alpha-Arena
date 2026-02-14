@@ -2,9 +2,9 @@
 
 [English](./README.md) | **简体中文**
 
-> **双引擎 AI 交易平台，内置市场资金流信号监控**。精准监控大资金订单流、持仓量变化、资金费率异常，市场结构变化时自动触发交易。两种交易模式：AI Trader 适合需要理解市场的策略（舆情、综合判断），Program Trader 适合固定规则策略（技术指标触发）。AI 全程辅助配置，零基础也能上手。
+> **多交易所 AI 交易平台，内置市场资金流信号监控**。同时支持 **Hyperliquid** 和 **币安合约**。精准监控大资金订单流、持仓量变化、资金费率异常，市场结构变化时自动触发交易。两种交易模式：AI Trader 适合需要理解市场的策略（舆情、综合判断），Program Trader 适合固定规则策略（技术指标触发）。AI 全程辅助配置，零基础也能上手。
 >
-> **Hyperliquid 交易者的首选工具**。Docker 一键部署开箱即用，活跃的 Telegram 技术社区，持续快速迭代更新。支持测试网模拟交易和主网实盘交易。
+> **合约交易者的效率神器**。Docker 一键部署开箱即用，活跃的 Telegram 技术社区，持续快速迭代更新。Hyperliquid 支持测试网模拟和主网实盘，币安合约直接 API 对接。
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub stars](https://img.shields.io/github/stars/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/stargazers)
@@ -26,11 +26,13 @@ Hyper Alpha Arena 是一个 AI 交易平台——让 GPT、Claude、Deepseek 这
 | **普通交易者** | 不会写代码也能用，AI 助手陪你聊天就能配好策略 |
 | **量化玩家** | 先在测试网跑通策略，再上真金白银 |
 | **Hyperliquid 用户** | 测试网免费练手，主网 1-50 倍杠杆实盘 |
+| **币安用户** | API Key 一键绑定，U本位合约全功能支持 |
 | **AI 发烧友** | 让 GPT、Claude、Deepseek 同台 PK，看谁更能赚 |
 
-**两种模式：**
-- **测试网（模拟盘）**：零风险练手，真实行情、真实订单簿、免费测试金
-- **主网（实盘）**：真金白银，1-50 倍杠杆，盈亏自负
+**支持的交易所：**
+- **Hyperliquid 测试网**：零风险练手，真实行情真实订单簿，免费测试金，无需 KYC
+- **Hyperliquid 主网**：去中心化永续合约，1-50 倍杠杆，钱包签名交易
+- **币安合约**：全球最大加密衍生品交易所，U本位永续合约，API Key 认证
 
 ## 核心功能
 
@@ -49,7 +51,7 @@ Hyper Alpha Arena 是一个 AI 交易平台——让 GPT、Claude、Deepseek 这
 
 **多账户实时对比** - 不知道哪个策略更有效？多个 AI Trader 资产曲线实时对比，交易标记显示在各自曲线上，一目了然。
 
-**Hyperliquid 深度集成** - Testnet 免费纸盘 + Mainnet 实盘无缝切换，1-50x 杠杆原生支持，保证金监控和清算价预警内置。
+**多交易所支持** - Hyperliquid（去中心化、钱包签名）和币安合约（中心化、API Key）任你选。Hyperliquid 测试网/主网无缝切换，1-50x 杠杆原生支持，保证金监控和清算价预警内置。
 
 **多模型 LLM 支持** - 兼容 OpenAI API 格式模型（GPT-5、Claude、Deepseek 等）。多钱包架构，测试网/主网独立配置。
 
@@ -127,6 +129,7 @@ docker compose up -d --build # 或 docker-compose up -d --build
 
 详细配置指南请参考官方文档，包括：
 - Hyperliquid 钱包配置（测试网 & 主网）
+- 币安 API Key 设置
 - AI Trader 创建与 LLM API 设置
 - 交易环境与杠杆设置
 - 信号触发交易配置
@@ -184,7 +187,11 @@ docker-compose up -d --build
 ### Hyperliquid
 - 官方文档：https://hyperliquid.gitbook.io/
 - Python SDK：https://github.com/hyperliquid-dex/hyperliquid-python-sdk
-- 测试网：https://api.hyperliquid-testnet.xyz
+- 测试网：https://app.hyperliquid-testnet.xyz
+
+### 币安合约
+- API 文档：https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
+- 测试网：https://testnet.binancefuture.com
 
 ### 原始项目
 - Open Alpha Arena：https://github.com/etrobot/open-alpha-arena
