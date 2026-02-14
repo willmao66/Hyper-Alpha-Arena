@@ -565,6 +565,11 @@ export default function SignalManager() {
     // Clear previous analysis immediately to avoid data mismatch during loading
     setMetricAnalysis(null)
     const loadAnalysis = async () => {
+      // Skip analysis for event-based metrics (no threshold suggestions needed)
+      if (signalForm.metric === 'macd' || signalForm.metric === 'taker_volume') {
+        setAnalysisLoading(false)
+        return
+      }
       setAnalysisLoading(true)
       try {
         const data = await fetchMetricAnalysis(analysisSymbol, signalForm.metric, signalForm.time_window, signalForm.exchange)
