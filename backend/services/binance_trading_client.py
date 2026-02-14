@@ -1356,7 +1356,9 @@ class BinanceTradingClient:
                 - raw_response: Original API response
         """
         try:
-            result = self._request("GET", "/fapi/v1/apiReferral/ifNewUser", {}, signed=True)
+            # brokerId is required for this endpoint
+            params = {"brokerId": self.broker_id} if self.broker_id else {}
+            result = self._request("GET", "/fapi/v1/apiReferral/ifNewUser", params, signed=True)
 
             rebate_working = result.get("rebateWorking", False)
             is_new_user = result.get("ifNewUser", False)
