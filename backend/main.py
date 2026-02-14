@@ -506,6 +506,7 @@ from api.trader_data_routes import router as trader_data_router
 from api.prompt_backtest_routes import router as prompt_backtest_router
 from api.system_routes import router as system_router
 from api.binance_routes import router as binance_router
+from api.ai_stream_routes import router as ai_stream_router
 from routes.program_routes import router as program_router
 # Removed: AI account routes merged into account_routes (unified AI trader accounts)
 
@@ -533,6 +534,7 @@ app.include_router(prompt_backtest_router)
 app.include_router(program_router)
 app.include_router(system_router)
 app.include_router(binance_router)
+app.include_router(ai_stream_router)
 # app.include_router(ai_account_router, prefix="/api")  # Removed - merged into account_router
 
 # Strategy route aliases for frontend compatibility

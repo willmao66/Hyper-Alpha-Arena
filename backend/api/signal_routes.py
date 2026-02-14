@@ -639,6 +639,7 @@ class AiSignalChatRequest(BaseModel):
     account_id: int = Field(..., alias="accountId")
     user_message: str = Field(..., alias="userMessage")
     conversation_id: Optional[int] = Field(None, alias="conversationId")
+    use_background_task: bool = Field(False, alias="useBackgroundTask")
 
     class Config:
         populate_by_name = True
@@ -735,9 +736,13 @@ async def ai_signal_chat_stream(
     db: Session = Depends(get_db)
 ):
     """
-    Send a message to AI signal generation assistant with SSE streaming.
+    Send a message to AI signal generation assistant.
 
-    Returns a Server-Sent Events stream with the following event types:
+    Supports two modes:
+    - SSE streaming (default): Returns Server-Sent Events directly
+    - Background task (useBackgroundTask=true): Returns task_id for polling
+
+    Event types (SSE mode):
     - status: Progress status message
     - tool_call: Tool being called with arguments
     - tool_result: Result from tool execution
@@ -747,10 +752,49 @@ async def ai_signal_chat_stream(
     - done: Completion with final result
     - error: Error occurred
     """
+    from services.ai_stream_service import get_buffer_manager, generate_task_id, run_ai_task_in_background
+    from database.connection import SessionLocal
+
     user = db.query(User).filter(User.username == "default").first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Background task mode
+    if request.use_background_task:
+        task_id = generate_task_id("signal")
+        manager = get_buffer_manager()
+
+        # Check for existing running task
+        if request.conversation_id:
+            existing = manager.get_pending_task_for_conversation(request.conversation_id)
+            if existing:
+                return {"task_id": existing.task_id, "status": "already_running"}
+
+        manager.create_task(task_id, conversation_id=request.conversation_id)
+
+        # Capture request data
+        account_id = request.account_id
+        user_message = request.user_message
+        conversation_id = request.conversation_id
+        user_id = user.id
+
+        def generator_func():
+            bg_db = SessionLocal()
+            try:
+                yield from generate_signal_with_ai_stream(
+                    db=bg_db,
+                    account_id=account_id,
+                    user_message=user_message,
+                    conversation_id=conversation_id,
+                    user_id=user_id
+                )
+            finally:
+                bg_db.close()
+
+        run_ai_task_in_background(task_id, generator_func)
+        return {"task_id": task_id, "status": "started"}
+
+    # SSE streaming mode (default)
     def event_generator():
         for event in generate_signal_with_ai_stream(
             db=db,

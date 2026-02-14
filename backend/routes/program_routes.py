@@ -700,6 +700,7 @@ class AiProgramChatRequest(BaseModel):
     account_id: int
     conversation_id: Optional[int] = None
     program_id: Optional[int] = None
+    use_background_task: bool = False
 
 
 class ConversationResponse(BaseModel):
@@ -734,14 +735,48 @@ async def ai_program_chat(
 ):
     """
     AI-assisted program coding with SSE streaming.
-    Returns Server-Sent Events for real-time updates.
+    Supports both SSE mode (default) and background task mode.
     """
     from fastapi.responses import StreamingResponse
     from services.ai_program_service import generate_program_with_ai_stream
+    from services.ai_stream_service import (
+        get_buffer_manager, run_ai_task_in_background, generate_task_id
+    )
+    from database.connection import SessionLocal
 
     user = db.query(User).first()
     user_id = user.id if user else 1
 
+    # Background task mode: return task_id immediately
+    if request.use_background_task:
+        task_id = generate_task_id("program")
+        manager = get_buffer_manager()
+        manager.create_task(task_id, conversation_id=request.conversation_id)
+
+        # Capture request params for background thread
+        account_id = request.account_id
+        user_message = request.message
+        conversation_id = request.conversation_id
+        program_id = request.program_id
+
+        def generator_func():
+            bg_db = SessionLocal()
+            try:
+                yield from generate_program_with_ai_stream(
+                    db=bg_db,
+                    account_id=account_id,
+                    user_message=user_message,
+                    conversation_id=conversation_id,
+                    program_id=program_id,
+                    user_id=user_id
+                )
+            finally:
+                bg_db.close()
+
+        run_ai_task_in_background(task_id, generator_func)
+        return {"task_id": task_id, "status": "started"}
+
+    # SSE mode (default): stream directly
     def event_generator():
         yield from generate_program_with_ai_stream(
             db=db,

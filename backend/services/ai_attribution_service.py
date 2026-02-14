@@ -735,7 +735,7 @@ def generate_attribution_analysis_stream(
 
         # Collect reasoning and analysis log for storage
         all_reasoning_parts = []
-        all_analysis_log = []
+        tool_calls_log = []
 
         for round_num in range(max_rounds):
             is_last = (round_num == max_rounds - 1)
@@ -799,12 +799,12 @@ def generate_attribution_analysis_stream(
                     yield f"event: tool_result\ndata: {json.dumps({'name': func_name, 'result': json.loads(result)})}\n\n"
 
                     # Collect tool call and result for storage
-                    all_analysis_log.append({
+                    tool_calls_log.append({
                         "type": "tool_call",
                         "name": func_name,
                         "arguments": func_args
                     })
-                    all_analysis_log.append({
+                    tool_calls_log.append({
                         "type": "tool_result",
                         "name": func_name,
                         "result": json.loads(result)
@@ -826,9 +826,9 @@ def generate_attribution_analysis_stream(
         # Extract diagnosis results
         diagnosis_results = extract_diagnosis_results(assistant_content)
 
-        # Save assistant message with reasoning and analysis log
+        # Save assistant message with reasoning and tool calls log
         reasoning_snapshot = "\n\n---\n\n".join(all_reasoning_parts) if all_reasoning_parts else None
-        analysis_log_json = json.dumps(all_analysis_log) if all_analysis_log else None
+        tool_calls_log_json = json.dumps(tool_calls_log) if tool_calls_log else None
 
         assistant_msg = AiAttributionMessage(
             conversation_id=conversation.id,
@@ -836,7 +836,8 @@ def generate_attribution_analysis_stream(
             content=assistant_content,
             diagnosis_result=json.dumps(diagnosis_results) if diagnosis_results else None,
             reasoning_snapshot=reasoning_snapshot,
-            analysis_log=analysis_log_json
+            tool_calls_log=tool_calls_log_json,
+            is_complete=True
         )
         db.add(assistant_msg)
         db.commit()
@@ -892,14 +893,16 @@ def get_attribution_messages(db: Session, conversation_id: int, user_id: int = 1
                 msg_dict["diagnosis_results"] = json.loads(m.diagnosis_result)
             except:
                 pass
-        # Include reasoning and analysis log for history display
+        # Include reasoning and tool calls log for history display
         if m.reasoning_snapshot:
             msg_dict["reasoning_snapshot"] = m.reasoning_snapshot
-        if m.analysis_log:
+        if m.tool_calls_log:
             try:
-                msg_dict["analysis_log"] = json.loads(m.analysis_log)
+                msg_dict["tool_calls_log"] = json.loads(m.tool_calls_log)
             except:
                 pass
+        if hasattr(m, 'is_complete'):
+            msg_dict["is_complete"] = m.is_complete if m.is_complete is not None else True
         result.append(msg_dict)
 
     return result

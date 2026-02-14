@@ -783,6 +783,11 @@ class AiSignalMessage(Base):
     # For assistant messages: extracted signal configs from ```signal-config``` code blocks
     signal_configs = Column(Text, nullable=True)  # JSON array of signal configurations
 
+    # Reasoning and tool call logs (aligned with other AI assistants)
+    reasoning_snapshot = Column(Text, nullable=True)  # AI reasoning process (thinking)
+    tool_calls_log = Column(Text, nullable=True)  # JSON: tool calls and results
+    is_complete = Column(Boolean, nullable=True, default=True)  # False if interrupted
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
     # Relationships
@@ -823,9 +828,10 @@ class AiAttributionMessage(Base):
     # For assistant messages: extracted diagnosis results from AI analysis
     diagnosis_result = Column(Text, nullable=True)  # JSON: diagnosis cards and prompt suggestions
 
-    # Reasoning and analysis process storage (like AIDecisionLog.reasoning_snapshot)
+    # Reasoning and tool call logs (aligned with other AI assistants)
     reasoning_snapshot = Column(Text, nullable=True)  # AI reasoning process
-    analysis_log = Column(Text, nullable=True)  # JSON: tool calls and results log
+    tool_calls_log = Column(Text, nullable=True)  # JSON: tool calls and results log
+    is_complete = Column(Boolean, nullable=True, default=True)  # False if interrupted
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 

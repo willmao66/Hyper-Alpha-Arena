@@ -606,6 +606,7 @@ class AiChatRequest(BaseModel):
     user_message: str = Field(..., alias="userMessage")
     conversation_id: Optional[int] = Field(None, alias="conversationId")
     prompt_id: Optional[int] = Field(None, alias="promptId")
+    use_background_task: bool = Field(False, alias="useBackgroundTask")
 
     class Config:
         populate_by_name = True
@@ -673,11 +674,17 @@ def ai_chat_stream(
     db: Session = Depends(get_db)
 ):
     """
-    Send a message to AI prompt generation assistant with SSE streaming.
+    Send a message to AI prompt generation assistant.
 
-    Returns Server-Sent Events with tool calling progress and final response.
+    Supports two modes:
+    - SSE streaming (default): Returns Server-Sent Events directly
+    - Background task (useBackgroundTask=true): Returns task_id for polling
+
     Premium feature - requires active subscription.
     """
+    from services.ai_stream_service import get_buffer_manager, generate_task_id, run_ai_task_in_background
+    from database.connection import SessionLocal
+
     # Get user (default user for now)
     user = db.query(User).filter(User.username == "default").first()
     if not user:
@@ -691,7 +698,47 @@ def ai_chat_stream(
     if account.account_type != "AI":
         raise HTTPException(status_code=400, detail="Selected account is not an AI Trader")
 
-    # Return SSE stream
+    # Background task mode
+    if request.use_background_task:
+        task_id = generate_task_id("prompt")
+        manager = get_buffer_manager()
+
+        # Check for existing running task on this conversation
+        if request.conversation_id:
+            existing = manager.get_pending_task_for_conversation(request.conversation_id)
+            if existing:
+                return {"task_id": existing.task_id, "status": "already_running"}
+
+        # Create task
+        manager.create_task(task_id, conversation_id=request.conversation_id)
+
+        # Capture request data for background thread
+        account_id = account.id
+        user_message = request.user_message
+        conversation_id = request.conversation_id
+        user_id = user.id
+        prompt_id = request.prompt_id
+
+        def generator_func():
+            # Create new db session for background thread
+            bg_db = SessionLocal()
+            try:
+                bg_account = bg_db.query(Account).filter(Account.id == account_id).first()
+                yield from generate_prompt_with_ai_stream(
+                    db=bg_db,
+                    account=bg_account,
+                    user_message=user_message,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    prompt_id=prompt_id
+                )
+            finally:
+                bg_db.close()
+
+        run_ai_task_in_background(task_id, generator_func)
+        return {"task_id": task_id, "status": "started"}
+
+    # SSE streaming mode (default, backward compatible)
     return StreamingResponse(
         generate_prompt_with_ai_stream(
             db=db,

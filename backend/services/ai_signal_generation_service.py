@@ -1278,14 +1278,14 @@ def _sse_event(event_type: str, data: Any) -> str:
     return f"event: {event_type}\ndata: {json_data}\n\n"
 
 
-def _format_analysis_log(analysis_log: List[Dict]) -> str:
-    """Format analysis log as Markdown for storage and display."""
-    if not analysis_log:
+def _format_tool_calls_log(tool_calls_log: List[Dict]) -> str:
+    """Format tool calls log as Markdown for storage and display."""
+    if not tool_calls_log:
         return ""
 
     lines = ["<details>", "<summary>Analysis Process</summary>", ""]
 
-    for entry in analysis_log:
+    for entry in tool_calls_log:
         if entry["type"] == "reasoning":
             # Truncate long reasoning content
             content = entry["content"]
@@ -1405,8 +1405,9 @@ def generate_signal_with_ai_stream(
         max_tool_rounds = 30
         tool_round = 0
         assistant_content = None
-        # Accumulate analysis process for white-box display
-        analysis_log = []
+        # Accumulate tool calls and reasoning for storage (aligned with other AI assistants)
+        tool_calls_log = []
+        reasoning_snapshot_parts = []
 
         while tool_round < max_tool_rounds:
             tool_round += 1
@@ -1470,8 +1471,9 @@ def generate_signal_with_ai_stream(
             # Send reasoning content if present
             if reasoning_content:
                 yield _sse_event("reasoning", {"content": reasoning_content})
-                # Log reasoning for white-box display
-                analysis_log.append({
+                # Collect reasoning for storage
+                reasoning_snapshot_parts.append(reasoning_content)
+                tool_calls_log.append({
                     "type": "reasoning",
                     "round": tool_round,
                     "content": reasoning_content
@@ -1512,8 +1514,8 @@ def generate_signal_with_ai_stream(
                         "result": tool_result_parsed
                     })
 
-                    # Log tool call for white-box display
-                    analysis_log.append({
+                    # Log tool call for storage
+                    tool_calls_log.append({
                         "type": "tool_call",
                         "round": tool_round,
                         "name": func_name,
@@ -1528,7 +1530,7 @@ def generate_signal_with_ai_stream(
                     })
             else:
                 # No tool calls - final response
-                # Don't add reasoning here - analysis_log already has it via <details> format
+                # Don't add reasoning here - tool_calls_log already has it via <details> format
                 assistant_content = _extract_text_from_message(content) if content else ""
                 break
 
@@ -1547,16 +1549,20 @@ def generate_signal_with_ai_stream(
         for config in signal_configs:
             yield _sse_event("signal_config", {"config": config})
 
-        # Format analysis log as Markdown for storage
-        analysis_markdown = _format_analysis_log(analysis_log)
+        # Format tool calls log as Markdown for storage
+        analysis_markdown = _format_tool_calls_log(tool_calls_log)
         full_content_for_storage = analysis_markdown + assistant_content if analysis_markdown else assistant_content
+        reasoning_snapshot = "\n\n---\n\n".join(reasoning_snapshot_parts) if reasoning_snapshot_parts else None
 
-        # Save assistant message with analysis process
+        # Save assistant message with tool calls log and reasoning
         assistant_msg = AiSignalMessage(
             conversation_id=conversation.id,
             role="assistant",
             content=full_content_for_storage,
-            signal_configs=json.dumps(signal_configs) if signal_configs else None
+            signal_configs=json.dumps(signal_configs) if signal_configs else None,
+            reasoning_snapshot=reasoning_snapshot,
+            tool_calls_log=json.dumps(tool_calls_log) if tool_calls_log else None,
+            is_complete=True
         )
         db.add(assistant_msg)
         db.commit()

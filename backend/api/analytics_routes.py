@@ -656,6 +656,7 @@ class AiAttributionChatRequest(PydanticBaseModel):
     accountId: int
     userMessage: str
     conversationId: Optional[int] = None
+    useBackgroundTask: bool = False
 
 
 @router.post("/ai-attribution/chat-stream")
@@ -663,7 +664,50 @@ async def ai_attribution_chat_stream(
     request: AiAttributionChatRequest,
     db: Session = Depends(get_db)
 ):
-    """SSE streaming endpoint for AI attribution analysis chat."""
+    """
+    SSE streaming endpoint for AI attribution analysis chat.
+
+    Supports two modes:
+    - SSE streaming (default): Returns Server-Sent Events directly
+    - Background task (useBackgroundTask=true): Returns task_id for polling
+    """
+    from services.ai_stream_service import get_buffer_manager, generate_task_id, run_ai_task_in_background
+    from database.connection import SessionLocal
+
+    # Background task mode
+    if request.useBackgroundTask:
+        task_id = generate_task_id("attribution")
+        manager = get_buffer_manager()
+
+        # Check for existing running task
+        if request.conversationId:
+            existing = manager.get_pending_task_for_conversation(request.conversationId)
+            if existing:
+                return {"task_id": existing.task_id, "status": "already_running"}
+
+        manager.create_task(task_id, conversation_id=request.conversationId)
+
+        # Capture request data
+        account_id = request.accountId
+        user_message = request.userMessage
+        conversation_id = request.conversationId
+
+        def generator_func():
+            bg_db = SessionLocal()
+            try:
+                yield from generate_attribution_analysis_stream(
+                    db=bg_db,
+                    account_id=account_id,
+                    user_message=user_message,
+                    conversation_id=conversation_id
+                )
+            finally:
+                bg_db.close()
+
+        run_ai_task_in_background(task_id, generator_func)
+        return {"task_id": task_id, "status": "started"}
+
+    # SSE streaming mode (default)
     return StreamingResponse(
         generate_attribution_analysis_stream(
             db=db,

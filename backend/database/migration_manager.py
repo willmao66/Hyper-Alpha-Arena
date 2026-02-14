@@ -62,6 +62,7 @@ MIGRATIONS = [
     "add_exchange_to_decision_logs.py",
     "add_rebate_working_to_binance_wallets.py",
     "add_prompt_id_to_ai_prompt_conversations.py",
+    "unify_ai_message_fields.py",
 ]
 
 
