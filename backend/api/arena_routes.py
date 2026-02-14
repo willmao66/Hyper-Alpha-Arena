@@ -24,6 +24,7 @@ from database.models import (
     AccountStrategyConfig,
     PromptTemplate,
     TradingProgram,
+    BinanceWallet,
 )
 from database.snapshot_models import HyperliquidTrade
 from services.asset_calculator import calc_positions_value
@@ -201,6 +202,7 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
                 "account_name": account.name,
                 "model": account.model,
                 "environment": environment,
+                "exchange": "hyperliquid",
                 "wallet_address": wallet_address,
                 "total_unrealized_pnl": total_unrealized,
                 "available_cash": available_balance,
@@ -240,6 +242,157 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
         "generated_at": datetime.utcnow().isoformat(),
         "trading_mode": environment,
         "accounts": snapshots,
+    }
+
+
+def _get_binance_positions(db: Session, account_id: Optional[int], environment: str) -> list:
+    """
+    Get real-time positions from Binance Futures API.
+
+    Returns:
+        List of account snapshot dicts (same format as Hyperliquid snapshots)
+    """
+    from database.models import BinanceWallet
+    from services.binance_trading_client import BinanceTradingClient
+
+    accounts_query = db.query(Account).filter(
+        Account.account_type == "AI",
+        Account.is_active == "true",
+        Account.show_on_dashboard == True
+    )
+    if account_id:
+        accounts_query = accounts_query.filter(Account.id == account_id)
+
+    accounts = accounts_query.all()
+    snapshots = []
+
+    for account in accounts:
+        wallet = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == account.id,
+            BinanceWallet.environment == environment,
+            BinanceWallet.is_active == "true"
+        ).first()
+
+        if not wallet:
+            continue
+
+        try:
+            api_key = decrypt_private_key(wallet.api_key_encrypted)
+            secret_key = decrypt_private_key(wallet.secret_key_encrypted)
+            client = BinanceTradingClient(
+                api_key=api_key,
+                secret_key=secret_key,
+                environment=environment
+            )
+
+            balance = client.get_balance()
+            positions_data = client.get_positions()
+            rate_limit = client.get_rate_limit()
+
+            snapshots.append(
+                _build_binance_snapshot(
+                    account, environment, balance,
+                    positions_data, rate_limit
+                )
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to get Binance positions for account {account.id}: {e}",
+                exc_info=True
+            )
+            snapshots.append(_build_binance_fallback(account, environment))
+
+    return snapshots
+
+
+def _build_binance_snapshot(
+    account, environment, balance, positions_data, rate_limit
+) -> dict:
+    """Build a Binance account snapshot dict."""
+    position_items = []
+    total_unrealized = 0.0
+
+    for p in positions_data:
+        unrealized_pnl = p.get("unrealized_pnl", 0)
+        total_unrealized += unrealized_pnl
+        szi = float(p.get("szi", 0) or 0)
+        entry_px = float(p.get("entry_px", 0) or 0)
+        position_value = float(p.get("position_value", 0) or 0)
+        notional = abs(szi) * entry_px
+        current_price = position_value / abs(szi) if szi != 0 else entry_px
+
+        position_items.append({
+            "id": 0,
+            "symbol": p.get("coin", ""),
+            "name": p.get("coin", ""),
+            "market": "BINANCE_PERP",
+            "side": "LONG" if szi > 0 else "SHORT",
+            "quantity": abs(szi),
+            "avg_cost": entry_px,
+            "current_price": current_price,
+            "notional": notional,
+            "current_value": position_value,
+            "unrealized_pnl": float(unrealized_pnl),
+            "leverage": p.get("leverage"),
+            "margin_used": float(p.get("margin_used", 0) or 0),
+            "return_on_equity": 0.0,
+            "percentage": 0.0,
+            "margin_mode": p.get("leverage_type", "cross"),
+            "liquidation_px": float(p.get("liquidation_px", 0) or 0),
+            "max_leverage": None,
+            "leverage_type": p.get("leverage_type"),
+        })
+
+    total_equity = balance.get("total_equity", 0)
+    available_balance = balance.get("available_balance", 0)
+    used_margin = balance.get("used_margin", 0)
+    initial_capital = float(account.initial_capital or 0)
+    total_return = None
+    if initial_capital > 0:
+        total_return = (total_equity - initial_capital) / initial_capital
+    margin_pct = (used_margin / total_equity * 100) if total_equity > 0 else 0
+
+    return {
+        "account_id": account.id,
+        "account_name": account.name,
+        "model": account.model,
+        "environment": environment,
+        "exchange": "binance",
+        "wallet_address": None,
+        "total_unrealized_pnl": total_unrealized,
+        "available_cash": available_balance,
+        "used_margin": used_margin,
+        "positions_value": used_margin,
+        "positions": position_items,
+        "total_assets": total_equity,
+        "margin_usage_percent": round(margin_pct, 1),
+        "margin_mode": "cross",
+        "initial_capital": initial_capital,
+        "total_return": total_return,
+        "rate_limit": rate_limit,
+    }
+
+
+def _build_binance_fallback(account, environment) -> dict:
+    """Build a fallback snapshot when Binance API call fails."""
+    return {
+        "account_id": account.id,
+        "account_name": account.name,
+        "model": account.model,
+        "environment": environment,
+        "exchange": "binance",
+        "wallet_address": None,
+        "total_unrealized_pnl": 0.0,
+        "available_cash": 0.0,
+        "used_margin": 0.0,
+        "positions_value": 0.0,
+        "positions": [],
+        "total_assets": float(account.initial_capital or 0),
+        "margin_usage_percent": 0.0,
+        "margin_mode": "cross",
+        "initial_capital": float(account.initial_capital or 0),
+        "total_return": 0.0,
+        "rate_limit": None,
     }
 
 
@@ -395,6 +548,7 @@ def get_completed_trades(
     trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
     wallet_address: Optional[str] = Query(None),
     symbol: Optional[str] = Query(None),
+    exchange: Optional[str] = Query(None, regex="^(hyperliquid|binance)$"),
     db: Session = Depends(get_db),
 ):
     """Return recent trades across all AI accounts, filtered by trading mode."""
@@ -533,6 +687,39 @@ def get_completed_trades(
             pools = db.query(SignalPool).filter(SignalPool.id.in_(program_log_signal_pool_ids)).all()
             signal_pool_map = {p.id: p.pool_name for p in pools}
 
+        # For Binance: build mapping from triggered order ID to main order ID
+        # Binance TP/SL orders have two IDs:
+        # 1. Algo Order ID (stored in sl_order_id/tp_order_id) - e.g., 1000000012523017
+        # 2. Triggered Order ID (in HyperliquidTrade) - e.g., 12165552060
+        # We need to map triggered order IDs to main order IDs for proper nesting
+        binance_triggered_sl_to_main = {}  # triggered_order_id -> main_order_id
+        binance_triggered_tp_to_main = {}  # triggered_order_id -> main_order_id
+
+        # Get Binance wallets to fetch order info
+        bn_wallets = db.query(BinanceWallet).filter(BinanceWallet.is_active == "true").all()
+        if bn_wallets:
+            from services.binance_trading_client import BinanceTradingClient
+            from utils.encryption import decrypt_private_key
+
+            for wallet in bn_wallets:
+                try:
+                    api_key = decrypt_private_key(wallet.api_key_encrypted)
+                    secret_key = decrypt_private_key(wallet.secret_key_encrypted)
+                    client = BinanceTradingClient(api_key, secret_key, wallet.environment)
+                    fills = client.get_user_fills(limit=500)
+
+                    for fill in fills:
+                        main_order_id = fill.get("main_order_id")
+                        if main_order_id:
+                            triggered_oid = fill.get("oid")
+                            order_type = fill.get("order_type")
+                            if order_type == "sl":
+                                binance_triggered_sl_to_main[triggered_oid] = main_order_id
+                            elif order_type == "tp":
+                                binance_triggered_tp_to_main[triggered_oid] = main_order_id
+                except Exception as e:
+                    logger.warning(f"Failed to get Binance fills for TP/SL mapping: {e}")
+
         # First pass: build trade objects and separate main orders from sl/tp orders
         main_trades: Dict[str, dict] = {}  # order_id -> trade dict
         sl_trades: Dict[str, dict] = {}    # order_id -> trade dict (to be nested)
@@ -570,6 +757,8 @@ def get_completed_trades(
                 "commission": commission,
                 "trade_time": trade.trade_time.isoformat() if trade.trade_time else None,
                 "wallet_address": trade.wallet_address,
+                # Exchange will be set based on decision source, default to hyperliquid
+                "exchange": "hyperliquid",
             }
 
             accounts_meta[account.id] = {
@@ -587,6 +776,8 @@ def get_completed_trades(
                 trade_dict["signal_trigger_id"] = decision.signal_trigger_id
                 trade_dict["prompt_template_id"] = decision.prompt_template_id
                 trade_dict["decision_source_type"] = source_type
+                # Get exchange from decision (NULL treated as "hyperliquid")
+                trade_dict["exchange"] = decision.exchange or "hyperliquid"
                 # Get name from correct table based on source type
                 if source_type == "program":
                     trade_dict["prompt_template_name"] = program_map.get(decision.prompt_template_id)
@@ -611,6 +802,8 @@ def get_completed_trades(
                 trade_dict["decision_source_type"] = "program"
                 trade_dict["prompt_template_name"] = program_map.get(pl.program_id) or pl.program_name
                 trade_dict["signal_pool_name"] = signal_pool_map.get(pl.signal_pool_id)
+                # Get exchange from program log (NULL treated as "hyperliquid")
+                trade_dict["exchange"] = pl.exchange or "hyperliquid"
                 trade_dict["related_orders"] = []
                 main_trades[order_id_str] = trade_dict
             elif order_id_str and order_id_str in program_sl_to_main:
@@ -619,6 +812,15 @@ def get_completed_trades(
                 sl_trades[order_id_str] = trade_dict
             elif order_id_str and order_id_str in program_tp_to_main:
                 # This is a take-profit order from Program Trader
+                trade_dict["order_type"] = "tp"
+                tp_trades[order_id_str] = trade_dict
+            # Check Binance triggered TP/SL orders (triggered order ID != algo order ID)
+            elif order_id_str and order_id_str in binance_triggered_sl_to_main:
+                # This is a Binance triggered stop-loss order
+                trade_dict["order_type"] = "sl"
+                sl_trades[order_id_str] = trade_dict
+            elif order_id_str and order_id_str in binance_triggered_tp_to_main:
+                # This is a Binance triggered take-profit order
                 trade_dict["order_type"] = "tp"
                 tp_trades[order_id_str] = trade_dict
             else:
@@ -631,9 +833,13 @@ def get_completed_trades(
                 other_trades.append(trade_dict)
 
         # Second pass: nest SL/TP trades under their main orders
-        # Check both AIDecisionLog and ProgramExecutionLog mappings
+        # Check AIDecisionLog, ProgramExecutionLog, and Binance triggered order mappings
         for sl_order_id, sl_trade in sl_trades.items():
-            main_order_id = sl_to_main.get(sl_order_id) or program_sl_to_main.get(sl_order_id)
+            main_order_id = (
+                sl_to_main.get(sl_order_id) or
+                program_sl_to_main.get(sl_order_id) or
+                binance_triggered_sl_to_main.get(sl_order_id)
+            )
             if main_order_id and main_order_id in main_trades:
                 main_trades[main_order_id]["related_orders"].append({
                     "type": "sl",
@@ -645,7 +851,11 @@ def get_completed_trades(
                 })
 
         for tp_order_id, tp_trade in tp_trades.items():
-            main_order_id = tp_to_main.get(tp_order_id) or program_tp_to_main.get(tp_order_id)
+            main_order_id = (
+                tp_to_main.get(tp_order_id) or
+                program_tp_to_main.get(tp_order_id) or
+                binance_triggered_tp_to_main.get(tp_order_id)
+            )
             if main_order_id and main_order_id in main_trades:
                 main_trades[main_order_id]["related_orders"].append({
                     "type": "tp",
@@ -659,6 +869,14 @@ def get_completed_trades(
         # Combine main trades and other trades, sort by trade_time desc
         all_trades = list(main_trades.values()) + other_trades
         all_trades.sort(key=lambda t: t.get("trade_time") or "", reverse=True)
+
+        # Filter by exchange if specified
+        if exchange:
+            if exchange == "hyperliquid":
+                # Include trades with exchange=hyperliquid or NULL (legacy data)
+                all_trades = [t for t in all_trades if t.get("exchange") in ("hyperliquid", None)]
+            else:
+                all_trades = [t for t in all_trades if t.get("exchange") == exchange]
 
         return {
             "generated_at": datetime.utcnow().isoformat(),
@@ -748,6 +966,7 @@ def get_model_chat(
     include_snapshots: bool = Query(False, description="Include prompt/reasoning/decision snapshots (heavy data)"),
     symbol: Optional[str] = Query(None),
     ids: Optional[str] = Query(None, description="Comma-separated list of decision IDs to fetch"),
+    exchange: Optional[str] = Query(None, regex="^(hyperliquid|binance)$"),
     db: Session = Depends(get_db),
 ):
     """Return recent AI decision logs as chat-style summaries, filtered by trading mode."""
@@ -793,6 +1012,16 @@ def get_model_chat(
                 AIDecisionLog.hyperliquid_environment == trading_mode,
                 AIDecisionLog.hyperliquid_environment.isnot(None)
             )
+
+    # Filter by exchange
+    if exchange:
+        if exchange == "hyperliquid":
+            # Include hyperliquid or NULL (legacy data)
+            query = query.filter(
+                (AIDecisionLog.exchange == "hyperliquid") | (AIDecisionLog.exchange == None)
+            )
+        else:
+            query = query.filter(AIDecisionLog.exchange == exchange)
 
     decision_rows = query.limit(limit).all()
 
@@ -870,6 +1099,8 @@ def get_model_chat(
             "prompt_template_name": prompt_template_map.get(log.prompt_template_id) if log.prompt_template_id else None,
             "realized_pnl": float(log.realized_pnl) if log.realized_pnl else None,
             "has_snapshot": bool(log.prompt_snapshot),
+            # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+            "exchange": log.exchange or "hyperliquid",
         }
 
         # Only include heavy snapshot fields when explicitly requested
@@ -916,9 +1147,13 @@ def get_positions_snapshot(
 ):
     """Return consolidated positions and cash for active AI accounts, filtered by trading mode."""
 
-    # For Hyperliquid modes (testnet/mainnet), fetch real-time data from Hyperliquid API
+    # For Hyperliquid modes (testnet/mainnet), fetch real-time data from exchanges
     if trading_mode and trading_mode in ["testnet", "mainnet"]:
-        return _get_hyperliquid_positions(db, account_id, trading_mode)
+        result = _get_hyperliquid_positions(db, account_id, trading_mode)
+        # Also include Binance accounts
+        binance_accounts = _get_binance_positions(db, account_id, trading_mode)
+        result["accounts"] = result.get("accounts", []) + binance_accounts
+        return result
 
     # For paper mode (or no mode specified), query local database
     accounts_query = db.query(Account).filter(
@@ -1152,66 +1387,89 @@ def check_pnl_sync_status(
 @router.post("/update-pnl")
 def update_pnl_data(db: Session = Depends(get_db)):
     """
-    Update realized PnL and fee data for all trades by fetching from Hyperliquid API.
+    Update realized PnL and fee data for all trades by fetching from exchange APIs.
 
     This endpoint:
-    1. Fetches user_fills from all configured wallets (testnet + mainnet)
+    1. Fetches user_fills from all configured wallets (Hyperliquid + Binance, testnet + mainnet)
     2. Updates HyperliquidTrade.fee with actual fee data
-    3. Updates AIDecisionLog.realized_pnl for closed positions
+    3. Creates missing HyperliquidTrade records for resting orders that later filled
+    4. Updates AIDecisionLog.realized_pnl for closed positions
 
     Returns summary of updated records.
     """
-    from database.models import HyperliquidWallet, AccountPromptBinding
+    from database.models import HyperliquidWallet, BinanceWallet, AccountPromptBinding
     from services.hyperliquid_environment import get_hyperliquid_client
     from decimal import Decimal
     from collections import defaultdict
 
     result = {
         "success": True,
-        "environments": {},
+        "hyperliquid": {},
+        "binance": {},
         "errors": [],
     }
 
     snapshot_db = SnapshotSessionLocal()
 
     try:
-        # Get all configured wallets
-        wallets = db.query(HyperliquidWallet).all()
-        if not wallets:
-            return {
-                "success": False,
-                "message": "No Hyperliquid wallets configured",
-                "environments": {},
-                "errors": [],
-            }
+        # ========== Process Hyperliquid wallets ==========
+        hl_wallets = db.query(HyperliquidWallet).all()
+        if hl_wallets:
+            hl_wallet_configs = {}
+            for w in hl_wallets:
+                key = (w.account_id, w.environment)
+                if key not in hl_wallet_configs:
+                    hl_wallet_configs[key] = w
 
-        # Group wallets by (account_id, environment) to avoid duplicates
-        wallet_configs = {}
-        for w in wallets:
-            key = (w.account_id, w.environment)
-            if key not in wallet_configs:
-                wallet_configs[key] = w
+            all_hl_fills_by_env = defaultdict(list)
+            for (account_id, environment), wallet in hl_wallet_configs.items():
+                try:
+                    client = get_hyperliquid_client(db, account_id, override_environment=environment)
+                    fills = client._get_user_fills(db)
+                    all_hl_fills_by_env[environment].extend(fills)
+                    logger.info(f"[Hyperliquid] Fetched {len(fills)} fills for account {account_id} on {environment}")
+                except Exception as e:
+                    error_msg = f"[Hyperliquid] Failed to fetch fills for account {account_id} on {environment}: {str(e)}"
+                    logger.warning(error_msg)
+                    result["errors"].append(error_msg)
 
-        # Process each wallet
-        all_fills_by_env = defaultdict(list)
+            for environment, fills in all_hl_fills_by_env.items():
+                env_result = _process_fills_for_environment(
+                    db, snapshot_db, environment, fills, hl_wallet_configs, exchange="hyperliquid"
+                )
+                result["hyperliquid"][environment] = env_result
 
-        for (account_id, environment), wallet in wallet_configs.items():
-            try:
-                client = get_hyperliquid_client(db, account_id, override_environment=environment)
-                fills = client._get_user_fills(db)
-                all_fills_by_env[environment].extend(fills)
-                logger.info(f"Fetched {len(fills)} fills for account {account_id} on {environment}")
-            except Exception as e:
-                error_msg = f"Failed to fetch fills for account {account_id} on {environment}: {str(e)}"
-                logger.warning(error_msg)
-                result["errors"].append(error_msg)
+        # ========== Process Binance wallets ==========
+        bn_wallets = db.query(BinanceWallet).filter(BinanceWallet.is_active == "true").all()
+        if bn_wallets:
+            from services.binance_trading_client import BinanceTradingClient
+            from utils.encryption import decrypt_private_key
 
-        # Process fills for each environment
-        for environment, fills in all_fills_by_env.items():
-            env_result = _process_fills_for_environment(
-                db, snapshot_db, environment, fills, wallet_configs
-            )
-            result["environments"][environment] = env_result
+            bn_wallet_configs = {}
+            for w in bn_wallets:
+                key = (w.account_id, w.environment)
+                if key not in bn_wallet_configs:
+                    bn_wallet_configs[key] = w
+
+            all_bn_fills_by_env = defaultdict(list)
+            for (account_id, environment), wallet in bn_wallet_configs.items():
+                try:
+                    api_key = decrypt_private_key(wallet.api_key_encrypted)
+                    secret_key = decrypt_private_key(wallet.secret_key_encrypted)
+                    client = BinanceTradingClient(api_key, secret_key, environment)
+                    fills = client.get_user_fills()
+                    all_bn_fills_by_env[environment].extend(fills)
+                    logger.info(f"[Binance] Fetched {len(fills)} fills for account {account_id} on {environment}")
+                except Exception as e:
+                    error_msg = f"[Binance] Failed to fetch fills for account {account_id} on {environment}: {str(e)}"
+                    logger.warning(error_msg)
+                    result["errors"].append(error_msg)
+
+            for environment, fills in all_bn_fills_by_env.items():
+                env_result = _process_fills_for_environment(
+                    db, snapshot_db, environment, fills, bn_wallet_configs, exchange="binance"
+                )
+                result["binance"][environment] = env_result
 
         # Commit all changes
         snapshot_db.commit()
@@ -1235,6 +1493,7 @@ def _process_fills_for_environment(
     environment: str,
     fills: List[dict],
     wallet_configs: dict,
+    exchange: str = "hyperliquid",
 ) -> dict:
     """
     Process fills for a specific environment and update database records.
@@ -1242,7 +1501,10 @@ def _process_fills_for_environment(
     This function:
     1. Updates existing HyperliquidTrade records with fee data
     2. Creates missing HyperliquidTrade records for resting orders that later filled
-    3. Updates AIDecisionLog.realized_pnl for closed positions
+    3. Updates AIDecisionLog/ProgramExecutionLog.realized_pnl for closed positions
+
+    Args:
+        exchange: "hyperliquid" or "binance" - determines which wallet to use for API calls
 
     Returns summary of updates.
     """
@@ -1270,6 +1532,10 @@ def _process_fills_for_environment(
         "fills": [],
     })
 
+    # For Binance: build mapping from main_order_id to TP/SL order_ids
+    # This allows us to match TP/SL fills to the decision that created them
+    binance_tpsl_to_main = {}  # TP/SL order_id -> main_order_id
+
     for fill in fills:
         oid = str(fill.get("oid", ""))
         if not oid:
@@ -1281,6 +1547,10 @@ def _process_fills_for_environment(
         order_aggregates[oid]["total_fee"] += fee
         order_aggregates[oid]["total_pnl"] += closed_pnl
         order_aggregates[oid]["fills"].append(fill)
+
+        # For Binance TP/SL orders, record the mapping to main order
+        if exchange == "binance" and fill.get("main_order_id"):
+            binance_tpsl_to_main[oid] = fill.get("main_order_id")
 
     result["unique_orders"] = len(order_aggregates)
 
@@ -1302,10 +1572,14 @@ def _process_fills_for_environment(
 
     # Collect existing trade order_ids for deduplication
     existing_trade_order_ids = {str(t.order_id) for t in trades if t.order_id}
+    # For Binance: also build order_id -> trade mapping for updates
+    existing_trades_by_order_id = {str(t.order_id): t for t in trades if t.order_id}
 
-    # Helper function to get order trigger time from Hyperliquid API
+    # Helper function to get order trigger time from Hyperliquid API (only for Hyperliquid)
     def get_order_trigger_time(account_id: int, order_id: str) -> Optional[datetime]:
         """Get actual trigger time for TP/SL order from Hyperliquid API."""
+        if exchange != "hyperliquid":
+            return None  # Binance doesn't have this API
         key = (account_id, environment)
         if key not in wallet_configs:
             return None
@@ -1331,6 +1605,15 @@ def _process_fills_for_environment(
             if oid:
                 order_to_decision[str(oid)] = decision
 
+    # For Binance: also map triggered order IDs to their decisions
+    # Binance TP/SL triggered orders have different IDs than the algo order IDs stored in decision
+    if exchange == "binance":
+        for triggered_oid, main_oid in binance_tpsl_to_main.items():
+            # Find the decision that has this main_order_id
+            decision = order_to_decision.get(main_oid)
+            if decision and triggered_oid not in order_to_decision:
+                order_to_decision[triggered_oid] = decision
+
     # Also build order_id -> program_log mapping for Program Trader orders
     from database.models import ProgramExecutionLog
     program_logs = db.query(ProgramExecutionLog).filter(
@@ -1344,11 +1627,23 @@ def _process_fills_for_environment(
             if oid:
                 order_to_program_log[str(oid)] = pl
 
+    # For Binance: also map triggered order IDs to their program logs
+    if exchange == "binance":
+        for triggered_oid, main_oid in binance_tpsl_to_main.items():
+            pl = order_to_program_log.get(main_oid)
+            if pl and triggered_oid not in order_to_program_log:
+                order_to_program_log[triggered_oid] = pl
+
     # Create missing HyperliquidTrade records for resting orders that later filled
+    # For Binance: also update existing records with official fill data
     # Check both AIDecisionLog and ProgramExecutionLog
     for oid, agg in order_aggregates.items():
-        if oid in existing_trade_order_ids:
-            continue  # Already exists
+        existing_trade = existing_trades_by_order_id.get(oid) if exchange == "binance" else None
+
+        # For Hyperliquid: skip if already exists
+        # For Binance: allow update of existing records
+        if oid in existing_trade_order_ids and exchange != "binance":
+            continue  # Already exists (Hyperliquid only)
 
         # Try to find source: AIDecisionLog or ProgramExecutionLog
         decision = order_to_decision.get(oid)
@@ -1379,8 +1674,17 @@ def _process_fills_for_environment(
             continue
 
         avg_price = total_value / total_qty
-        fill_side = fills_list[0].get("side", "B")
-        side = "buy" if fill_side == "B" else "sell"
+
+        # Determine side from decision/program_log operation, NOT from exchange fill side
+        # Exchange returns B/S (buy/sell), but we want to preserve the original operation (buy/sell/close)
+        if decision:
+            side = decision.operation.lower() if decision.operation else "sell"
+        elif program_log:
+            side = program_log.decision_action.lower() if program_log.decision_action else "sell"
+        else:
+            # Fallback to exchange side (should not reach here due to earlier check)
+            fill_side = fills_list[0].get("side", "B")
+            side = "buy" if fill_side == "B" else "sell"
 
         # Parse trade time
         trade_time = None
@@ -1403,6 +1707,19 @@ def _process_fills_for_environment(
             wallet_address = program_log.wallet_address
             symbol = program_log.decision_symbol or fills_list[0].get("coin", "")
             source_info = f"program_log {program_log.id}"
+
+        # For Binance: update existing record with official fill data
+        if existing_trade and exchange == "binance":
+            existing_trade.quantity = total_qty
+            existing_trade.price = avg_price
+            existing_trade.trade_value = total_value
+            existing_trade.fee = agg["total_fee"]
+            existing_trade.order_status = "filled"
+            if trade_time:
+                existing_trade.trade_time = trade_time
+            result["trades_updated"] += 1
+            logger.info(f"Updated HyperliquidTrade for Binance order {oid} with official fill data")
+            continue
 
         # Create new HyperliquidTrade record
         new_trade = HyperliquidTrade(
@@ -1444,6 +1761,18 @@ def _process_fills_for_environment(
                     agg = order_aggregates[order_id_str]
                     total_pnl += agg["total_pnl"]
                     matched_order_ids.add(order_id_str)
+
+        # For Binance: also check TP/SL orders that triggered and created new order IDs
+        # The triggered order's clientOrderId contains the main order ID (e.g., "SL_12345")
+        if exchange == "binance" and decision.hyperliquid_order_id:
+            main_oid = str(decision.hyperliquid_order_id)
+            for tpsl_oid, linked_main_oid in binance_tpsl_to_main.items():
+                if linked_main_oid == main_oid and tpsl_oid not in matched_order_ids:
+                    if tpsl_oid in order_aggregates:
+                        agg = order_aggregates[tpsl_oid]
+                        total_pnl += agg["total_pnl"]
+                        matched_order_ids.add(tpsl_oid)
+                        logger.info(f"[Binance] Matched TP/SL order {tpsl_oid} to main order {main_oid}, pnl={agg['total_pnl']}, total_pnl={total_pnl}")
 
         # If matched any order, mark as synced (even if PnL is 0 for opening trades)
         if matched_order_ids:
@@ -1515,6 +1844,17 @@ def _process_fills_for_environment(
                     agg = order_aggregates[order_id_str]
                     total_pnl += agg["total_pnl"]
                     matched_order_ids.add(order_id_str)
+
+        # For Binance: also check TP/SL orders that triggered and created new order IDs
+        if exchange == "binance" and program_log.hyperliquid_order_id:
+            main_oid = str(program_log.hyperliquid_order_id)
+            for tpsl_oid, linked_main_oid in binance_tpsl_to_main.items():
+                if linked_main_oid == main_oid and tpsl_oid not in matched_order_ids:
+                    if tpsl_oid in order_aggregates:
+                        agg = order_aggregates[tpsl_oid]
+                        total_pnl += agg["total_pnl"]
+                        matched_order_ids.add(tpsl_oid)
+                        logger.info(f"[Binance] Matched TP/SL order {tpsl_oid} to program main order {main_oid}")
 
         if matched_order_ids:
             program_log.realized_pnl = total_pnl

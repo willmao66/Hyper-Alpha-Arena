@@ -37,6 +37,8 @@ services:
       # Hyperliquid Builder Fee Configuration
       HYPERLIQUID_BUILDER_ADDRESS: "0x012E82f81e506b8f0EF69FF719a6AC65822b5924"
       HYPERLIQUID_BUILDER_FEE: "30"
+      # Binance Broker Configuration
+      BINANCE_BROKER_ID: "tbyPbcd9"
       # Explicitly disable all proxy settings in container
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
@@ -51,6 +53,8 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      # Inherit host timezone for consistent time handling
+      - /etc/localtime:/etc/localtime:ro
       # ========== Selective Backend Mounts for Hot Reload ==========
       # Mount individual directories and files to enable hot reload while preserving
       # the built frontend static files in the container image.

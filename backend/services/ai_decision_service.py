@@ -564,6 +564,7 @@ def _build_prompt_context(
     environment: str = "mainnet",
     template_text: Optional[str] = None,
     trigger_context: Optional[Dict[str, Any]] = None,
+    exchange: str = "hyperliquid",
 ) -> Dict[str, Any]:
     """
     Build complete prompt context for AI decision-making.
@@ -590,6 +591,7 @@ def _build_prompt_context(
         environment: Trading environment (mainnet/testnet)
         template_text: Prompt template text for parsing K-line variables
         trigger_context: Context about what triggered this decision (signal or scheduled)
+        exchange: Exchange to use for market data ("hyperliquid" or "binance")
 
     Returns:
         Complete context dictionary ready for template.format_map()
@@ -822,46 +824,67 @@ def _build_prompt_context(
     # Build recent closed trades summary to help AI understand trading patterns
     # and avoid flip-flop behavior (rapid position reversals)
     recent_trades_summary = "No recent trade history available"
-    if hyperliquid_state and environment in ("testnet", "mainnet"):
+
+    # Support both Hyperliquid and Binance exchanges
+    if (hyperliquid_state or exchange == "binance") and environment in ("testnet", "mainnet"):
         try:
-            # Get trading client to fetch recent closed trades (use cached client for performance)
-            from services.hyperliquid_trading_client import get_cached_trading_client
             from database.connection import SessionLocal
 
-            # Get account's Hyperliquid wallet configuration
             with SessionLocal() as db_session:
-                from database.models import HyperliquidWallet
-                wallet = db_session.query(HyperliquidWallet).filter(
-                    HyperliquidWallet.account_id == account.id,
-                    HyperliquidWallet.environment == environment,
-                    HyperliquidWallet.is_active == "true"
-                ).first()
+                recent_trades = []
+                open_orders = []
 
-                if wallet:
-                    # Decrypt private key
+                if exchange == "binance":
+                    # Get Binance trading client
+                    from services.binance_trading_client import BinanceTradingClient
+                    from database.models import BinanceWallet
                     from utils.encryption import decrypt_private_key
-                    try:
+
+                    binance_wallet = db_session.query(BinanceWallet).filter(
+                        BinanceWallet.account_id == account.id,
+                        BinanceWallet.environment == environment,
+                        BinanceWallet.is_active == "true"
+                    ).first()
+
+                    if binance_wallet and binance_wallet.api_key_encrypted:
+                        api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+                        secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+                        client = BinanceTradingClient(
+                            api_key=api_key,
+                            secret_key=secret_key,
+                            environment=binance_wallet.environment or "testnet"
+                        )
+                        recent_trades = client.get_recent_closed_trades(db_session, limit=5)
+                        open_orders = client.get_open_orders_formatted(db_session)
+                    else:
+                        recent_trades_summary = "Binance wallet not configured"
+                else:
+                    # Get Hyperliquid trading client
+                    from services.hyperliquid_trading_client import get_cached_trading_client
+                    from database.models import HyperliquidWallet
+
+                    wallet = db_session.query(HyperliquidWallet).filter(
+                        HyperliquidWallet.account_id == account.id,
+                        HyperliquidWallet.environment == environment,
+                        HyperliquidWallet.is_active == "true"
+                    ).first()
+
+                    if wallet:
+                        from utils.encryption import decrypt_private_key
                         private_key = decrypt_private_key(wallet.private_key_encrypted)
-                    except Exception as decrypt_error:
-                        logger.error(f"Failed to decrypt private key: {decrypt_error}")
-                        recent_trades_summary = "Error: Failed to decrypt wallet private key"
-                        raise
+                        client = get_cached_trading_client(
+                            account_id=account.id,
+                            private_key=private_key,
+                            environment=environment,
+                            wallet_address=wallet.wallet_address
+                        )
+                        recent_trades = client.get_recent_closed_trades(db_session, limit=5)
+                        open_orders = client.get_open_orders(db_session)
+                    else:
+                        recent_trades_summary = "Wallet not configured for this environment"
 
-                    # Initialize trading client (cached for ~8s cold start savings)
-                    client = get_cached_trading_client(
-                        account_id=account.id,
-                        private_key=private_key,
-                        environment=environment,
-                        wallet_address=wallet.wallet_address
-                    )
-
-                    # Get recent closed trades (last 5)
-                    recent_trades = client.get_recent_closed_trades(db_session, limit=5)
-
-                    # Get open orders
-                    open_orders = client.get_open_orders(db_session)
-
-                    # Build recent trades section
+                # Build recent trades section (common format for both exchanges)
+                if recent_trades or open_orders:
                     trades_section = ""
                     if recent_trades:
                         trade_lines = ["Recent closed trades (last 5 positions):"]
@@ -884,7 +907,6 @@ def _build_prompt_context(
                     # Build open orders section
                     orders_section = ""
                     if open_orders:
-                        # Limit to 10 most recent orders to avoid prompt bloat
                         display_orders = open_orders[:10]
                         order_lines = [f"\nOpen orders ({len(open_orders)} pending):"]
                         for order in display_orders:
@@ -899,9 +921,7 @@ def _build_prompt_context(
                             trigger_condition = order.get('trigger_condition')
                             order_time = order.get('order_time', 'N/A')
 
-                            # Build trigger info
                             trigger_info = f"Trigger: {trigger_condition}" if trigger_condition else "Trigger: None"
-
                             order_lines.append(
                                 f"- {symbol} {direction}: {order_type} Order #{order_id} @ ${price:,.2f} | "
                                 f"Size: {size:.5f} | Value: ${order_value:,.2f} | Reduce Only: {reduce_only} | "
@@ -911,10 +931,8 @@ def _build_prompt_context(
                     else:
                         orders_section = "\nOpen orders: No open orders"
 
-                    # Combine both sections (Open Orders first, then Recent Trades)
                     recent_trades_summary = orders_section + "\n\n" + trades_section
-                else:
-                    recent_trades_summary = "Wallet not configured for this environment"
+
         except Exception as e:
             logger.warning(f"Failed to get recent trades summary: {e}", exc_info=True)
             recent_trades_summary = f"Error fetching trade history: {str(e)[:100]}"
@@ -936,7 +954,7 @@ def _build_prompt_context(
             if variable_groups:
                 with SessionLocal() as db:
                     kline_context = _build_klines_and_indicators_context(
-                        variable_groups, db, environment
+                        variable_groups, db, environment, exchange
                     )
                 logger.debug(f"Built K-line context with {len(kline_context)} variables")
         except Exception as e:
@@ -1068,7 +1086,7 @@ Regime Types:
             for tf in supported_timeframes:
                 tf_regime_lines = []
                 for symbol in ordered_symbols:
-                    regime_result = get_market_regime(db, symbol, tf, use_realtime=True)
+                    regime_result = get_market_regime(db, symbol, tf, use_realtime=True, exchange=exchange)
                     regime_text = format_regime_text(symbol, tf, regime_result)
                     market_regime_context[f"{symbol}_market_regime_{tf}"] = regime_text
                     tf_regime_lines.append(f"- {regime_text}")
@@ -1365,6 +1383,7 @@ def call_ai_for_decision(
     hyperliquid_state: Optional[Dict[str, Any]] = None,
     symbol_metadata: Optional[Dict[str, Any]] = None,
     trigger_context: Optional[Dict[str, Any]] = None,
+    exchange: str = "hyperliquid",
 ) -> Optional[List[Dict[str, Any]]]:
     """Call AI model API to get trading decision
 
@@ -1379,6 +1398,7 @@ def call_ai_for_decision(
         hyperliquid_state: Optional Hyperliquid account state for real trading
         symbol_metadata: Optional mapping of symbol -> display name overrides
         trigger_context: Optional context about what triggered this decision (signal or scheduled)
+        exchange: Exchange to use for market data ("hyperliquid" or "binance")
     """
     # Check if this is a default API key
     if _is_default_api_key(account.api_key):
@@ -1440,6 +1460,7 @@ def call_ai_for_decision(
             environment=global_environment,
             template_text=template.template_text,
             trigger_context=trigger_context,
+            exchange=exchange,
         )
         context["sampling_data"] = sampling_data
     else:
@@ -1471,6 +1492,7 @@ def call_ai_for_decision(
             environment=global_environment,
             template_text=template.template_text,
             trigger_context=trigger_context,
+            exchange=exchange,
         )
 
     # Market Regime variables are now generated inside _build_prompt_context
@@ -1980,6 +2002,8 @@ def save_ai_decision(
     hyperliquid_order_id: Optional[str] = None,
     tp_order_id: Optional[str] = None,
     sl_order_id: Optional[str] = None,
+    # Exchange identifier for attribution analysis
+    exchange: Optional[str] = None,
 ) -> None:
     """Save AI decision to the decision log"""
     try:
@@ -2054,6 +2078,8 @@ def save_ai_decision(
             hyperliquid_order_id=hyperliquid_order_id,
             tp_order_id=tp_order_id,
             sl_order_id=sl_order_id,
+            # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+            exchange=exchange,
         )
 
         db.add(decision_log)
@@ -2663,7 +2689,8 @@ def _format_price_value(value: float, reference_price: float = None, with_sign: 
 def _build_klines_and_indicators_context(
     variable_groups: Dict[str, Dict[str, Any]],
     db: Session,
-    environment: str = "mainnet"
+    environment: str = "mainnet",
+    exchange: str = "hyperliquid"
 ) -> Dict[str, str]:
     """
     Build K-line and indicator context for prompt filling.
@@ -2675,6 +2702,7 @@ def _build_klines_and_indicators_context(
         variable_groups: Parsed variable groups from _parse_kline_indicator_variables
         db: Database session
         environment: Trading environment (mainnet/testnet)
+        exchange: Exchange to use for market data ("hyperliquid" or "binance")
 
     Returns:
         Dict mapping variable names to formatted strings
@@ -2687,7 +2715,7 @@ def _build_klines_and_indicators_context(
     # If only one group, process directly without threading overhead
     if len(variable_groups) <= 1:
         for (symbol, period), requirements in variable_groups.items():
-            result = _process_single_symbol_period(symbol, period, requirements, environment)
+            result = _process_single_symbol_period(symbol, period, requirements, environment, exchange)
             context.update(result)
         logger.info(f"Built context with {len(context)} variables for environment: {environment}")
         return context
@@ -2705,7 +2733,7 @@ def _build_klines_and_indicators_context(
         for (symbol, period), requirements in variable_groups.items():
             future = executor.submit(
                 _process_single_symbol_period,
-                symbol, period, requirements, environment
+                symbol, period, requirements, environment, exchange
             )
             future_to_key[future] = (symbol, period)
 
@@ -2728,7 +2756,8 @@ def _process_single_symbol_period(
     symbol: str,
     period: Optional[str],
     requirements: Dict[str, Any],
-    environment: str
+    environment: str,
+    exchange: str = "hyperliquid"
 ) -> Dict[str, str]:
     """
     Process a single (symbol, period) combination and return context variables.
@@ -2741,6 +2770,7 @@ def _process_single_symbol_period(
         period: Time period (e.g., "5m", "1h") or None for market data
         requirements: Dict with 'klines', 'indicators', 'flow_indicators', 'market_data' keys
         environment: Trading environment (mainnet/testnet)
+        exchange: Exchange to use for market data ("hyperliquid" or "binance")
 
     Returns:
         Dict mapping variable names to formatted strings
@@ -2750,13 +2780,15 @@ def _process_single_symbol_period(
     from services.kline_ai_analysis_service import _format_klines_summary
 
     context = {}
+    # Determine market parameter based on exchange
+    market_param = "binance" if exchange == "binance" else "CRYPTO"
 
     try:
         # Handle market data (no period)
         if period is None and requirements.get('market_data'):
-            logger.info(f"Processing market data for {symbol} in {environment}")
+            logger.info(f"Processing market data for {symbol} in {environment} (exchange: {exchange})")
             try:
-                ticker = get_ticker_data(symbol, "CRYPTO", environment)
+                ticker = get_ticker_data(symbol, market_param, environment)
                 if ticker:
                     market_data_lines = [
                         f"Symbol: {symbol}",
@@ -2767,7 +2799,7 @@ def _process_single_symbol_period(
                     if 'open_interest' in ticker:
                         market_data_lines.append(f"Open Interest: ${ticker['open_interest']:,.0f}")
                     if 'funding_rate' in ticker:
-                        market_data_lines.append(f"Funding Rate: {ticker['funding_rate']:.6f}%")
+                        market_data_lines.append(f"Funding Rate: {ticker['funding_rate'] * 100:.4f}%")
 
                     var_name = f"{symbol}_market_data"
                     context[var_name] = "\n".join(market_data_lines)
@@ -2777,13 +2809,13 @@ def _process_single_symbol_period(
             return context
 
         # Process K-lines and indicators (has period)
-        logger.info(f"Processing {symbol} {period} for environment: {environment}")
+        logger.info(f"Processing {symbol} {period} for environment: {environment} (exchange: {exchange})")
 
         # Always fetch 500 candles for accurate indicator calculation
         # Skip persistence for prompt generation (real-time data only, no DB write overhead)
         kline_data = get_kline_data(
             symbol=symbol,
-            market="CRYPTO",
+            market=market_param,
             period=period,
             count=500,
             environment=environment,
@@ -2864,7 +2896,8 @@ def _process_single_symbol_period(
                     db=thread_db,
                     symbol=symbol,
                     period=period,
-                    indicators=flow_indicators_to_calc
+                    indicators=flow_indicators_to_calc,
+                    exchange=exchange
                 )
 
             for flow_name in flow_indicators_to_calc:

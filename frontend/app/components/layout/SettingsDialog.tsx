@@ -24,7 +24,7 @@ import {
   type UnauthorizedAccount,
   type TraderExportData
 } from '@/lib/api'
-import WalletConfigPanel from '@/components/trader/WalletConfigPanel'
+import ExchangeWalletsPanel from '@/components/trader/ExchangeWalletsPanel'
 import { AuthorizationModal } from '@/components/hyperliquid'
 import TraderDataImportDialog from '@/components/trader/TraderDataImportDialog'
 import { useTranslation } from 'react-i18next'
@@ -566,8 +566,8 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                           </div>
                         </div>
 
-                        {/* Wallet Configuration Panel */}
-                        <WalletConfigPanel
+                        {/* Exchange Wallets Panel */}
+                        <ExchangeWalletsPanel
                           accountId={account.id}
                           accountName={account.name}
                           onWalletConfigured={loadAccounts}

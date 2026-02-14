@@ -74,6 +74,7 @@ class BindingCreate(BaseModel):
     scheduled_trigger_enabled: bool = False
     is_active: bool = True
     params_override: Optional[Dict[str, Any]] = None
+    exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
 
 
 class BindingUpdate(BaseModel):
@@ -82,6 +83,7 @@ class BindingUpdate(BaseModel):
     scheduled_trigger_enabled: Optional[bool] = None
     is_active: Optional[bool] = None
     params_override: Optional[Dict[str, Any]] = None
+    exchange: Optional[str] = None  # "hyperliquid" or "binance"
 
 
 class BindingResponse(BaseModel):
@@ -97,6 +99,7 @@ class BindingResponse(BaseModel):
     is_active: bool
     last_trigger_at: Optional[str]
     params_override: Optional[Dict[str, Any]]
+    exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
     wallets: List[WalletInfo] = []  # AI Trader's wallets
     created_at: str
     updated_at: str
@@ -263,16 +266,43 @@ def _binding_to_response(binding: AccountProgramBinding, db: Session) -> Binding
         except:
             pass
 
-    # Query wallets for this AI Trader
-    from database.models import HyperliquidWallet
+    # Query wallets for this AI Trader based on exchange type
+    from database.models import HyperliquidWallet, BinanceWallet
+    from utils.encryption import decrypt_private_key
+    from services.hyperliquid_environment import get_global_trading_mode
+
     wallets = []
-    wallet_rows = db.query(HyperliquidWallet).filter(
-        HyperliquidWallet.account_id == binding.account_id,
-        HyperliquidWallet.is_active == "true"
-    ).all()
-    for w in wallet_rows:
-        if w.wallet_address:
-            wallets.append(WalletInfo(environment=w.environment, address=w.wallet_address))
+    exchange = binding.exchange or "hyperliquid"
+    environment = get_global_trading_mode(db)
+
+    if exchange == "binance":
+        # For Binance, show masked API Key (first 4 and last 4 chars)
+        binance_wallets = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == binding.account_id,
+            BinanceWallet.environment == environment,
+            BinanceWallet.is_active == "true"
+        ).all()
+        for w in binance_wallets:
+            if w.api_key_encrypted:
+                try:
+                    api_key = decrypt_private_key(w.api_key_encrypted)
+                    if len(api_key) >= 8:
+                        masked_key = f"{api_key[:4]}...{api_key[-4:]}"
+                    else:
+                        masked_key = "****"
+                except:
+                    masked_key = "****"
+                wallets.append(WalletInfo(environment=w.environment, address=masked_key))
+    else:
+        # For Hyperliquid, show wallet address
+        wallet_rows = db.query(HyperliquidWallet).filter(
+            HyperliquidWallet.account_id == binding.account_id,
+            HyperliquidWallet.environment == environment,
+            HyperliquidWallet.is_active == "true"
+        ).all()
+        for w in wallet_rows:
+            if w.wallet_address:
+                wallets.append(WalletInfo(environment=w.environment, address=w.wallet_address))
 
     return BindingResponse(
         id=binding.id,
@@ -287,6 +317,7 @@ def _binding_to_response(binding: AccountProgramBinding, db: Session) -> Binding
         is_active=binding.is_active,
         last_trigger_at=binding.last_trigger_at.isoformat() if binding.last_trigger_at else None,
         params_override=params_override,
+        exchange=binding.exchange or "hyperliquid",
         wallets=wallets,
         created_at=binding.created_at.isoformat() if binding.created_at else "",
         updated_at=binding.updated_at.isoformat() if binding.updated_at else "",
@@ -669,6 +700,7 @@ class AiProgramChatRequest(BaseModel):
     account_id: int
     conversation_id: Optional[int] = None
     program_id: Optional[int] = None
+    use_background_task: bool = False
 
 
 class ConversationResponse(BaseModel):
@@ -703,14 +735,48 @@ async def ai_program_chat(
 ):
     """
     AI-assisted program coding with SSE streaming.
-    Returns Server-Sent Events for real-time updates.
+    Supports both SSE mode (default) and background task mode.
     """
     from fastapi.responses import StreamingResponse
     from services.ai_program_service import generate_program_with_ai_stream
+    from services.ai_stream_service import (
+        get_buffer_manager, run_ai_task_in_background, generate_task_id
+    )
+    from database.connection import SessionLocal
 
     user = db.query(User).first()
     user_id = user.id if user else 1
 
+    # Background task mode: return task_id immediately
+    if request.use_background_task:
+        task_id = generate_task_id("program")
+        manager = get_buffer_manager()
+        manager.create_task(task_id, conversation_id=request.conversation_id)
+
+        # Capture request params for background thread
+        account_id = request.account_id
+        user_message = request.message
+        conversation_id = request.conversation_id
+        program_id = request.program_id
+
+        def generator_func():
+            bg_db = SessionLocal()
+            try:
+                yield from generate_program_with_ai_stream(
+                    db=bg_db,
+                    account_id=account_id,
+                    user_message=user_message,
+                    conversation_id=conversation_id,
+                    program_id=program_id,
+                    user_id=user_id
+                )
+            finally:
+                bg_db.close()
+
+        run_ai_task_in_background(task_id, generator_func)
+        return {"task_id": task_id, "status": "started"}
+
+    # SSE mode (default): stream directly
     def event_generator():
         yield from generate_program_with_ai_stream(
             db=db,
@@ -975,6 +1041,7 @@ def create_binding(data: BindingCreate, account_id: int = Query(...), db: Sessio
         scheduled_trigger_enabled=data.scheduled_trigger_enabled,
         is_active=data.is_active,
         params_override=json.dumps(data.params_override) if data.params_override else None,
+        exchange=data.exchange,
     )
     db.add(binding)
     db.commit()
@@ -1003,6 +1070,8 @@ def update_binding(binding_id: int, data: BindingUpdate, db: Session = Depends(g
         binding.is_active = data.is_active
     if data.params_override is not None:
         binding.params_override = json.dumps(data.params_override)
+    if data.exchange is not None:
+        binding.exchange = data.exchange
 
     db.commit()
     db.refresh(binding)
@@ -1085,6 +1154,9 @@ def preview_run_binding(binding_id: int, db: Session = Depends(get_db)):
     if not binding:
         raise HTTPException(status_code=404, detail="Binding not found")
 
+    # Get exchange from binding (default to hyperliquid for backward compatibility)
+    exchange = getattr(binding, 'exchange', None) or 'hyperliquid'
+
     # Get program
     program = db.query(TradingProgram).filter(
         TradingProgram.id == binding.program_id
@@ -1128,17 +1200,52 @@ def preview_run_binding(binding_id: int, db: Session = Depends(get_db)):
 
     # Create trading client and data provider with query recording
     try:
-        trading_client = get_hyperliquid_client(
-            db,
-            binding.account_id,
-            override_environment=wallet.environment
-        )
+        if exchange == "binance":
+            # Use Binance trading client
+            from services.binance_trading_client import BinanceTradingClient
+            from database.models import BinanceWallet as BinanceWalletModel
+
+            from utils.encryption import decrypt_private_key
+
+            binance_wallet = db.query(BinanceWalletModel).filter(
+                BinanceWalletModel.account_id == binding.account_id,
+                BinanceWalletModel.environment == global_environment,
+                BinanceWalletModel.is_active == "true"
+            ).first()
+
+            if not binance_wallet or not binance_wallet.api_key_encrypted:
+                return PreviewRunResponse(
+                    success=False,
+                    error=f"Binance {global_environment} wallet not configured for this AI Trader",
+                    execution_time_ms=(time.time() - start_time) * 1000
+                )
+
+            # Decrypt API keys
+            api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+            secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+
+            trading_client = BinanceTradingClient(
+                api_key=api_key,
+                secret_key=secret_key,
+                environment=binance_wallet.environment or "testnet"
+            )
+            environment = binance_wallet.environment or "testnet"
+        else:
+            # Default to Hyperliquid
+            trading_client = get_hyperliquid_client(
+                db,
+                binding.account_id,
+                override_environment=wallet.environment
+            )
+            environment = wallet.environment
+
         data_provider = DataProvider(
             db,
             account_id=binding.account_id,
-            environment=wallet.environment,
+            environment=environment,
             trading_client=trading_client,
-            record_queries=True  # Enable query logging
+            record_queries=True,  # Enable query logging
+            exchange=exchange  # Pass exchange to DataProvider
         )
     except Exception as e:
         return PreviewRunResponse(
@@ -1172,7 +1279,8 @@ def preview_run_binding(binding_id: int, db: Session = Depends(get_db)):
         input_data = {
             "trigger_symbol": trigger_symbol,
             "trigger_type": trigger_type,
-            "environment": wallet.environment,
+            "environment": environment,
+            "exchange": exchange,
             "signal_pool_name": "",  # Preview run doesn't have signal context
             "pool_logic": "OR",
             "triggered_signals": [],
@@ -1359,6 +1467,8 @@ class ExecutionLogResponse(BaseModel):
     params_snapshot: Optional[Dict[str, Any]] = None  # Params used for execution
     decision_json: Optional[Dict[str, Any]] = None  # Full decision object
     created_at: str
+    # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+    exchange: str = "hyperliquid"
 
     class Config:
         from_attributes = True
@@ -1371,6 +1481,7 @@ def list_executions(
     environment: Optional[str] = Query(None, regex="^(testnet|mainnet)$"),
     before: Optional[str] = Query(None, description="ISO timestamp for pagination, returns logs before this time"),
     limit: int = Query(50, le=200),
+    exchange: Optional[str] = Query(None, regex="^(hyperliquid|binance)$"),
     db: Session = Depends(get_db)
 ):
     """List program execution logs for Feed display."""
@@ -1386,6 +1497,14 @@ def list_executions(
         from datetime import datetime
         before_dt = datetime.fromisoformat(before.replace('Z', '+00:00'))
         query = query.filter(ProgramExecutionLog.created_at < before_dt)
+    if exchange:
+        if exchange == "hyperliquid":
+            # Include hyperliquid or NULL (legacy data)
+            query = query.filter(
+                (ProgramExecutionLog.exchange == "hyperliquid") | (ProgramExecutionLog.exchange == None)
+            )
+        else:
+            query = query.filter(ProgramExecutionLog.exchange == exchange)
 
     logs = query.order_by(ProgramExecutionLog.created_at.desc()).limit(limit).all()
 
@@ -1429,6 +1548,8 @@ def list_executions(
             params_snapshot=json.loads(log.params_snapshot) if log.params_snapshot else None,
             decision_json=json.loads(log.decision_json) if log.decision_json else None,
             created_at=log.created_at.isoformat() if log.created_at else "",
+            # Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+            exchange=log.exchange or "hyperliquid",
         ))
 
     return result

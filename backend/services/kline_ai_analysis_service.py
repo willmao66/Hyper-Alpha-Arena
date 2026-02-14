@@ -220,7 +220,8 @@ def _format_flow_indicators_summary(
     db: Session,
     symbol: str,
     period: str,
-    selected_flow_indicators: List[str]
+    selected_flow_indicators: List[str],
+    exchange: str = "hyperliquid"
 ) -> str:
     """Format market flow indicators into a readable summary for AI analysis.
 
@@ -245,7 +246,7 @@ def _format_flow_indicators_summary(
 
     # Fetch flow indicator data from database
     try:
-        flow_data = get_flow_indicators_for_prompt(db, symbol, period, backend_indicators)
+        flow_data = get_flow_indicators_for_prompt(db, symbol, period, backend_indicators, exchange=exchange)
     except Exception as e:
         logger.error(f"Failed to fetch flow indicators: {e}")
         return ""
@@ -372,6 +373,7 @@ def analyze_kline_chart(
     kline_limit: Optional[int] = None,
     user_id: int = 1,
     selected_flow_indicators: List[str] = None,
+    exchange: str = "hyperliquid",
 ) -> Optional[Dict[str, Any]]:
     """
     Perform AI analysis on K-line chart data
@@ -411,11 +413,12 @@ def analyze_kline_chart(
         indicators_summary = _format_indicators_summary(indicators)
         positions_summary = _format_positions_summary(positions or [])
         flow_indicators_summary = _format_flow_indicators_summary(
-            db, symbol, period, selected_flow_indicators or []
+            db, symbol, period, selected_flow_indicators or [], exchange=exchange
         )
 
         context = {
             "symbol": symbol,
+            "exchange": exchange,
             "period": period,
             "current_time_utc": now.isoformat() + "Z",
             "current_price": market_data.get("price", "N/A"),

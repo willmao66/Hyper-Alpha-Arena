@@ -85,6 +85,7 @@ def floor_timestamp(ts_ms: int, interval_ms: int) -> int:
 @router.get("/indicators", response_model=MarketFlowResponse)
 async def get_market_flow_indicators(
     symbol: str = Query(..., description="Trading symbol, e.g., BTC"),
+    exchange: str = Query("hyperliquid", description="Exchange: hyperliquid or binance"),
     timeframe: str = Query("1h", description="Aggregation timeframe"),
     start_time: Optional[int] = Query(None, description="Start timestamp in ms"),
     end_time: Optional[int] = Query(None, description="End timestamp in ms"),
@@ -134,7 +135,8 @@ async def get_market_flow_indicators(
     try:
         # Get earliest data timestamp
         earliest = db.query(func.min(MarketTradesAggregated.timestamp)).filter(
-            MarketTradesAggregated.symbol == symbol.upper()
+            MarketTradesAggregated.symbol == symbol.upper(),
+            MarketTradesAggregated.exchange == exchange.lower()
         ).scalar()
 
         if earliest:
@@ -143,7 +145,7 @@ async def get_market_flow_indicators(
         # Calculate indicators based on request
         if "cvd" in requested or "taker_volume" in requested:
             cvd_data, taker_data = _calculate_volume_indicators(
-                db, symbol.upper(), start_time, end_time, interval_ms
+                db, symbol.upper(), exchange.lower(), start_time, end_time, interval_ms
             )
             if "cvd" in requested:
                 result["indicators"]["cvd"] = cvd_data
@@ -152,7 +154,7 @@ async def get_market_flow_indicators(
 
         if "oi" in requested or "oi_delta" in requested:
             oi_data, oi_delta_data = _calculate_oi_indicators(
-                db, symbol.upper(), start_time, end_time, interval_ms
+                db, symbol.upper(), exchange.lower(), start_time, end_time, interval_ms
             )
             if "oi" in requested:
                 result["indicators"]["oi"] = oi_data
@@ -161,12 +163,12 @@ async def get_market_flow_indicators(
 
         if "funding" in requested:
             result["indicators"]["funding"] = _calculate_funding_indicator(
-                db, symbol.upper(), start_time, end_time, interval_ms
+                db, symbol.upper(), exchange.lower(), start_time, end_time, interval_ms
             )
 
         if "depth_ratio" in requested or "order_imbalance" in requested:
             depth_data, imbalance_data = _calculate_orderbook_indicators(
-                db, symbol.upper(), start_time, end_time, interval_ms
+                db, symbol.upper(), exchange.lower(), start_time, end_time, interval_ms
             )
             if "depth_ratio" in requested:
                 result["indicators"]["depth_ratio"] = depth_data
@@ -181,7 +183,7 @@ async def get_market_flow_indicators(
 
 
 def _calculate_volume_indicators(
-    db: Session, symbol: str, start_time: int, end_time: int, interval_ms: int
+    db: Session, symbol: str, exchange: str, start_time: int, end_time: int, interval_ms: int
 ) -> tuple:
     """
     Calculate CVD and Taker Volume indicators.
@@ -195,6 +197,7 @@ def _calculate_volume_indicators(
         MarketTradesAggregated.taker_sell_volume
     ).filter(
         MarketTradesAggregated.symbol == symbol,
+        MarketTradesAggregated.exchange == exchange,
         MarketTradesAggregated.timestamp >= start_time,
         MarketTradesAggregated.timestamp <= end_time
     ).order_by(MarketTradesAggregated.timestamp).all()
@@ -236,7 +239,7 @@ def _calculate_volume_indicators(
 
 
 def _calculate_oi_indicators(
-    db: Session, symbol: str, start_time: int, end_time: int, interval_ms: int
+    db: Session, symbol: str, exchange: str, start_time: int, end_time: int, interval_ms: int
 ) -> tuple:
     """
     Calculate OI (Open Interest) indicators.
@@ -250,6 +253,7 @@ def _calculate_oi_indicators(
         MarketAssetMetrics.open_interest
     ).filter(
         MarketAssetMetrics.symbol == symbol,
+        MarketAssetMetrics.exchange == exchange,
         MarketAssetMetrics.timestamp >= start_time,
         MarketAssetMetrics.timestamp <= end_time
     ).order_by(MarketAssetMetrics.timestamp).all()
@@ -290,7 +294,7 @@ def _calculate_oi_indicators(
 
 
 def _calculate_funding_indicator(
-    db: Session, symbol: str, start_time: int, end_time: int, interval_ms: int
+    db: Session, symbol: str, exchange: str, start_time: int, end_time: int, interval_ms: int
 ) -> list:
     """
     Calculate Funding Rate indicator.
@@ -302,8 +306,10 @@ def _calculate_funding_indicator(
         MarketAssetMetrics.funding_rate
     ).filter(
         MarketAssetMetrics.symbol == symbol,
+        MarketAssetMetrics.exchange == exchange,
         MarketAssetMetrics.timestamp >= start_time,
-        MarketAssetMetrics.timestamp <= end_time
+        MarketAssetMetrics.timestamp <= end_time,
+        MarketAssetMetrics.funding_rate.isnot(None)
     ).order_by(MarketAssetMetrics.timestamp).all()
 
     if not records:
@@ -330,7 +336,7 @@ def _calculate_funding_indicator(
 
 
 def _calculate_orderbook_indicators(
-    db: Session, symbol: str, start_time: int, end_time: int, interval_ms: int
+    db: Session, symbol: str, exchange: str, start_time: int, end_time: int, interval_ms: int
 ) -> tuple:
     """
     Calculate orderbook-based indicators.
@@ -344,6 +350,7 @@ def _calculate_orderbook_indicators(
         MarketOrderbookSnapshots.ask_depth_5
     ).filter(
         MarketOrderbookSnapshots.symbol == symbol,
+        MarketOrderbookSnapshots.exchange == exchange,
         MarketOrderbookSnapshots.timestamp >= start_time,
         MarketOrderbookSnapshots.timestamp <= end_time
     ).order_by(MarketOrderbookSnapshots.timestamp).all()

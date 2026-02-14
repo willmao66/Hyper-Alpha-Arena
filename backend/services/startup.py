@@ -52,8 +52,18 @@ def initialize_services():
         # Start market data stream
         # NOTE: Paper trading snapshot service disabled - using Hyperliquid snapshots only
         combined_symbols = build_market_stream_symbols()
-        print("Starting market data stream...")
-        start_market_stream(combined_symbols, interval_seconds=1.5)
+
+        # Use GlobalSamplingConfig.sampling_interval for market stream polling
+        # This reduces API calls significantly (from 1.5s to user-configured interval)
+        from database.connection import SessionLocal
+        from database.models import GlobalSamplingConfig
+        with SessionLocal() as db:
+            global_config = db.query(GlobalSamplingConfig).first()
+            # Default 18s, minimum 5s to prevent misconfiguration
+            stream_interval = max(5, global_config.sampling_interval if global_config else 18)
+
+        print(f"Starting market data stream (interval={stream_interval}s)...")
+        start_market_stream(combined_symbols, interval_seconds=stream_interval)
         print("Market data stream started")
         # subscribe_price_updates(handle_price_update)  # DISABLED: Paper trading snapshot
         # print("Asset snapshot handler subscribed")
@@ -103,6 +113,11 @@ def initialize_services():
         asyncio.create_task(hyperliquid_snapshot_service.start())
         logger.info("Hyperliquid snapshot service started (30-second interval)")
 
+        # Start Binance account snapshot service (every 5 minutes)
+        from services.binance_snapshot_service import binance_snapshot_service
+        asyncio.create_task(binance_snapshot_service.start())
+        logger.info("Binance snapshot service started (5-minute interval)")
+
         # Start K-line realtime collection service
         from services.kline_realtime_collector import realtime_collector
         asyncio.create_task(realtime_collector.start())
@@ -122,6 +137,21 @@ def initialize_services():
             task_id="market_flow_data_cleanup"
         )
         logger.info("Market flow data cleanup task started (6-hour interval, 30-day retention)")
+
+        # Start Binance data collector (REST API polling) - uses same Watchlist as Hyperliquid
+        from services.exchanges.binance_collector import binance_collector
+        from services.hyperliquid_symbol_service import get_selected_symbols
+        watchlist_symbols = get_selected_symbols()
+        print(f"Starting Binance data collector with watchlist symbols: {watchlist_symbols}")
+        binance_collector.start(symbols=watchlist_symbols if watchlist_symbols else ["BTC"])
+        print("Binance data collector started")
+        logger.info(f"Binance data collector started with symbols: {watchlist_symbols}")
+
+        # Start Binance WebSocket collector (15-second Taker Volume aggregation)
+        from services.exchanges.binance_ws_collector import binance_ws_collector
+        binance_ws_collector.start(symbols=watchlist_symbols if watchlist_symbols else ["BTC"])
+        print("Binance WebSocket collector started")
+        logger.info(f"Binance WebSocket collector started with symbols: {watchlist_symbols}")
 
         logger.info("All services initialized successfully")
 
@@ -149,6 +179,14 @@ def shutdown_services():
         # Stop market flow collector
         from services.market_flow_collector import market_flow_collector
         market_flow_collector.stop()
+
+        # Stop Binance data collector
+        from services.exchanges.binance_collector import binance_collector
+        binance_collector.stop()
+
+        # Stop Binance WebSocket collector
+        from services.exchanges.binance_ws_collector import binance_ws_collector
+        binance_ws_collector.stop()
 
         stop_scheduler()
         logger.info("All services have been shut down")

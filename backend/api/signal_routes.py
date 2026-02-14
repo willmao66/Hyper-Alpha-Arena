@@ -40,7 +40,7 @@ def list_signals(db: Session = Depends(get_db)) -> SignalListResponse:
     import json
 
     signals_result = db.execute(text("""
-        SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at
+        SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at, exchange
         FROM signal_definitions ORDER BY id
     """))
     signals = []
@@ -52,11 +52,11 @@ def list_signals(db: Session = Depends(get_db)) -> SignalListResponse:
         signals.append(SignalDefinitionResponse(
             id=row[0], signal_name=row[1], description=row[2],
             trigger_condition=trigger_condition, enabled=row[4],
-            created_at=row[5], updated_at=row[6]
+            created_at=row[5], updated_at=row[6], exchange=row[7] or "hyperliquid"
         ))
 
     pools_result = db.execute(text("""
-        SELECT id, pool_name, signal_ids, symbols, enabled, created_at, logic
+        SELECT id, pool_name, signal_ids, symbols, enabled, created_at, logic, exchange
         FROM signal_pools ORDER BY id
     """))
     pools = []
@@ -71,7 +71,7 @@ def list_signals(db: Session = Depends(get_db)) -> SignalListResponse:
         pools.append(SignalPoolResponse(
             id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
             symbols=symbols or [], enabled=row[4], created_at=row[5],
-            logic=row[6] or "OR"
+            logic=row[6] or "OR", exchange=row[7] or "hyperliquid"
         ))
 
     return SignalListResponse(signals=signals, pools=pools)
@@ -82,14 +82,15 @@ def create_signal(payload: SignalDefinitionCreate, db: Session = Depends(get_db)
     """Create a new signal definition"""
     import json
     result = db.execute(text("""
-        INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled)
-        VALUES (:name, :desc, :condition, :enabled)
-        RETURNING id, signal_name, description, trigger_condition, enabled, created_at, updated_at
+        INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled, exchange)
+        VALUES (:name, :desc, :condition, :enabled, :exchange)
+        RETURNING id, signal_name, description, trigger_condition, enabled, created_at, updated_at, exchange
     """), {
         "name": payload.signal_name,
         "desc": payload.description,
         "condition": json.dumps(payload.trigger_condition),
-        "enabled": payload.enabled
+        "enabled": payload.enabled,
+        "exchange": payload.exchange
     })
     db.commit()
     row = result.fetchone()
@@ -99,7 +100,7 @@ def create_signal(payload: SignalDefinitionCreate, db: Session = Depends(get_db)
     return SignalDefinitionResponse(
         id=row[0], signal_name=row[1], description=row[2],
         trigger_condition=trigger_condition, enabled=row[4],
-        created_at=row[5], updated_at=row[6]
+        created_at=row[5], updated_at=row[6], exchange=row[7] or "hyperliquid"
     )
 
 
@@ -108,7 +109,7 @@ def get_signal(signal_id: int, db: Session = Depends(get_db)):
     """Get a signal definition by ID"""
     import json
     result = db.execute(text("""
-        SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at
+        SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at, exchange
         FROM signal_definitions WHERE id = :id
     """), {"id": signal_id})
     row = result.fetchone()
@@ -120,7 +121,7 @@ def get_signal(signal_id: int, db: Session = Depends(get_db)):
     return SignalDefinitionResponse(
         id=row[0], signal_name=row[1], description=row[2],
         trigger_condition=trigger_condition, enabled=row[4],
-        created_at=row[5], updated_at=row[6]
+        created_at=row[5], updated_at=row[6], exchange=row[7] or "hyperliquid"
     )
 
 
@@ -143,12 +144,15 @@ def update_signal(signal_id: int, payload: SignalDefinitionUpdate, db: Session =
     if payload.enabled is not None:
         updates.append("enabled = :enabled")
         params["enabled"] = payload.enabled
+    if payload.exchange is not None:
+        updates.append("exchange = :exchange")
+        params["exchange"] = payload.exchange
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     updates.append("updated_at = CURRENT_TIMESTAMP")
-    query = f"UPDATE signal_definitions SET {', '.join(updates)} WHERE id = :id RETURNING *"
+    query = f"UPDATE signal_definitions SET {', '.join(updates)} WHERE id = :id RETURNING id, signal_name, description, trigger_condition, enabled, created_at, updated_at, exchange"
     result = db.execute(text(query), params)
     db.commit()
     row = result.fetchone()
@@ -160,7 +164,7 @@ def update_signal(signal_id: int, payload: SignalDefinitionUpdate, db: Session =
     return SignalDefinitionResponse(
         id=row[0], signal_name=row[1], description=row[2],
         trigger_condition=trigger_condition, enabled=row[4],
-        created_at=row[5], updated_at=row[6]
+        created_at=row[5], updated_at=row[6], exchange=row[7] or "hyperliquid"
     )
 
 
@@ -180,16 +184,31 @@ def delete_signal(signal_id: int, db: Session = Depends(get_db)):
 def create_pool(payload: SignalPoolCreate, db: Session = Depends(get_db)):
     """Create a new signal pool"""
     import json
+
+    # Validate that all signals belong to the same exchange as the pool
+    if payload.signal_ids:
+        result = db.execute(text("""
+            SELECT id, exchange FROM signal_definitions WHERE id = ANY(:ids)
+        """), {"ids": payload.signal_ids})
+        for row in result.fetchall():
+            signal_exchange = row[1] or "hyperliquid"
+            if signal_exchange != payload.exchange:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Signal {row[0]} belongs to {signal_exchange}, but pool is for {payload.exchange}"
+                )
+
     result = db.execute(text("""
-        INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic)
-        VALUES (:name, :signal_ids, :symbols, :enabled, :logic)
-        RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic
+        INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic, exchange)
+        VALUES (:name, :signal_ids, :symbols, :enabled, :logic, :exchange)
+        RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic, exchange
     """), {
         "name": payload.pool_name,
         "signal_ids": json.dumps(payload.signal_ids),
         "symbols": json.dumps(payload.symbols),
         "enabled": payload.enabled,
-        "logic": payload.logic
+        "logic": payload.logic,
+        "exchange": payload.exchange
     })
     db.commit()
     row = result.fetchone()
@@ -202,7 +221,7 @@ def create_pool(payload: SignalPoolCreate, db: Session = Depends(get_db)):
     return SignalPoolResponse(
         id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
         symbols=symbols or [], enabled=row[4], created_at=row[5],
-        logic=row[6] or "OR"
+        logic=row[6] or "OR", exchange=row[7] or "hyperliquid"
     )
 
 
@@ -211,7 +230,7 @@ def get_pool(pool_id: int, db: Session = Depends(get_db)):
     """Get a signal pool by ID"""
     import json
     result = db.execute(text("""
-        SELECT id, pool_name, signal_ids, symbols, enabled, created_at, logic
+        SELECT id, pool_name, signal_ids, symbols, enabled, created_at, logic, exchange
         FROM signal_pools WHERE id = :id
     """), {"id": pool_id})
     row = result.fetchone()
@@ -226,7 +245,7 @@ def get_pool(pool_id: int, db: Session = Depends(get_db)):
     return SignalPoolResponse(
         id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
         symbols=symbols or [], enabled=row[4], created_at=row[5],
-        logic=row[6] or "OR"
+        logic=row[6] or "OR", exchange=row[7] or "hyperliquid"
     )
 
 
@@ -234,6 +253,28 @@ def get_pool(pool_id: int, db: Session = Depends(get_db)):
 def update_pool(pool_id: int, payload: SignalPoolUpdate, db: Session = Depends(get_db)):
     """Update a signal pool"""
     import json
+
+    # Get current pool exchange if not being updated
+    target_exchange = payload.exchange
+    if target_exchange is None:
+        current = db.execute(text("SELECT exchange FROM signal_pools WHERE id = :id"), {"id": pool_id}).fetchone()
+        if current:
+            target_exchange = current[0] or "hyperliquid"
+
+    # Validate that all signals belong to the same exchange as the pool
+    signal_ids_to_check = payload.signal_ids
+    if signal_ids_to_check and target_exchange:
+        result = db.execute(text("""
+            SELECT id, exchange FROM signal_definitions WHERE id = ANY(:ids)
+        """), {"ids": signal_ids_to_check})
+        for row in result.fetchall():
+            signal_exchange = row[1] or "hyperliquid"
+            if signal_exchange != target_exchange:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Signal {row[0]} belongs to {signal_exchange}, but pool is for {target_exchange}"
+                )
+
     updates = []
     params = {"id": pool_id}
     if payload.pool_name is not None:
@@ -251,11 +292,14 @@ def update_pool(pool_id: int, payload: SignalPoolUpdate, db: Session = Depends(g
     if payload.logic is not None:
         updates.append("logic = :logic")
         params["logic"] = payload.logic
+    if payload.exchange is not None:
+        updates.append("exchange = :exchange")
+        params["exchange"] = payload.exchange
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    query = f"UPDATE signal_pools SET {', '.join(updates)} WHERE id = :id RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic"
+    query = f"UPDATE signal_pools SET {', '.join(updates)} WHERE id = :id RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic, exchange"
     result = db.execute(text(query), params)
     db.commit()
     row = result.fetchone()
@@ -270,7 +314,7 @@ def update_pool(pool_id: int, payload: SignalPoolUpdate, db: Session = Depends(g
     return SignalPoolResponse(
         id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
         symbols=symbols or [], enabled=row[4], created_at=row[5],
-        logic=row[6] or "OR"
+        logic=row[6] or "OR", exchange=row[7] or "hyperliquid"
     )
 
 
@@ -292,6 +336,7 @@ def analyze_metric(
     metric: str = Query(..., description="Metric type (e.g., oi_delta_percent)"),
     period: str = Query("5m", description="Time period (e.g., 5m, 15m)"),
     days: int = Query(7, le=30, description="Days of history to analyze"),
+    exchange: str = Query("hyperliquid", description="Exchange (hyperliquid or binance)"),
     db: Session = Depends(get_db)
 ):
     """
@@ -301,7 +346,7 @@ def analyze_metric(
     """
     from services.signal_analysis_service import signal_analysis_service
 
-    result = signal_analysis_service.analyze_metric(db, symbol, metric, period, days)
+    result = signal_analysis_service.analyze_metric(db, symbol, metric, period, days, exchange)
     return result
 
 
@@ -342,6 +387,7 @@ class TempBacktestRequest(BaseModel):
     trigger_condition: dict = Field(..., alias="triggerCondition", description="Signal trigger condition")
     kline_min_ts: Optional[int] = Field(None, alias="klineMinTs", description="Min K-line timestamp in ms")
     kline_max_ts: Optional[int] = Field(None, alias="klineMaxTs", description="Max K-line timestamp in ms")
+    exchange: str = Field("hyperliquid", description="Exchange (hyperliquid or binance)")
 
     class Config:
         populate_by_name = True
@@ -364,7 +410,8 @@ def backtest_preview(
             symbol=request.symbol,
             trigger_condition=request.trigger_condition,
             kline_min_ts=request.kline_min_ts,
-            kline_max_ts=request.kline_max_ts
+            kline_max_ts=request.kline_max_ts,
+            exchange=request.exchange
         )
         return result
     except Exception as e:
@@ -592,6 +639,7 @@ class AiSignalChatRequest(BaseModel):
     account_id: int = Field(..., alias="accountId")
     user_message: str = Field(..., alias="userMessage")
     conversation_id: Optional[int] = Field(None, alias="conversationId")
+    use_background_task: bool = Field(False, alias="useBackgroundTask")
 
     class Config:
         populate_by_name = True
@@ -688,9 +736,13 @@ async def ai_signal_chat_stream(
     db: Session = Depends(get_db)
 ):
     """
-    Send a message to AI signal generation assistant with SSE streaming.
+    Send a message to AI signal generation assistant.
 
-    Returns a Server-Sent Events stream with the following event types:
+    Supports two modes:
+    - SSE streaming (default): Returns Server-Sent Events directly
+    - Background task (useBackgroundTask=true): Returns task_id for polling
+
+    Event types (SSE mode):
     - status: Progress status message
     - tool_call: Tool being called with arguments
     - tool_result: Result from tool execution
@@ -700,10 +752,49 @@ async def ai_signal_chat_stream(
     - done: Completion with final result
     - error: Error occurred
     """
+    from services.ai_stream_service import get_buffer_manager, generate_task_id, run_ai_task_in_background
+    from database.connection import SessionLocal
+
     user = db.query(User).filter(User.username == "default").first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Background task mode
+    if request.use_background_task:
+        task_id = generate_task_id("signal")
+        manager = get_buffer_manager()
+
+        # Check for existing running task
+        if request.conversation_id:
+            existing = manager.get_pending_task_for_conversation(request.conversation_id)
+            if existing:
+                return {"task_id": existing.task_id, "status": "already_running"}
+
+        manager.create_task(task_id, conversation_id=request.conversation_id)
+
+        # Capture request data
+        account_id = request.account_id
+        user_message = request.user_message
+        conversation_id = request.conversation_id
+        user_id = user.id
+
+        def generator_func():
+            bg_db = SessionLocal()
+            try:
+                yield from generate_signal_with_ai_stream(
+                    db=bg_db,
+                    account_id=account_id,
+                    user_message=user_message,
+                    conversation_id=conversation_id,
+                    user_id=user_id
+                )
+            finally:
+                bg_db.close()
+
+        run_ai_task_in_background(task_id, generator_func)
+        return {"task_id": task_id, "status": "started"}
+
+    # SSE streaming mode (default)
     def event_generator():
         for event in generate_signal_with_ai_stream(
             db=db,
@@ -734,6 +825,7 @@ class SignalPoolConfigRequest(BaseModel):
     description: Optional[str] = Field(None, description="Pool description")
     logic: str = Field("AND", description="Combination logic: AND or OR")
     signals: List[dict] = Field(..., description="List of signal configurations")
+    exchange: str = Field("hyperliquid", description="Exchange: hyperliquid or binance")
 
     class Config:
         populate_by_name = True
@@ -802,36 +894,39 @@ def create_pool_from_config(
                         detail=f"Signal {i+1} missing required fields (metric, operator, threshold, time_window)"
                     )
 
-            # Create signal
+            # Create signal with exchange
             result = db.execute(text("""
-                INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled)
-                VALUES (:name, :desc, :condition, :enabled)
-                RETURNING id, signal_name, description, trigger_condition, enabled, created_at
+                INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled, exchange)
+                VALUES (:name, :desc, :condition, :enabled, :exchange)
+                RETURNING id, signal_name, description, trigger_condition, enabled, created_at, exchange
             """), {
                 "name": sig_name,
                 "desc": sig.get("description") or f"Part of {request.name}",
                 "condition": json.dumps(trigger_condition),
-                "enabled": True
+                "enabled": True,
+                "exchange": request.exchange
             })
             row = result.fetchone()
             created_signal_ids.append(row[0])
             created_signals.append({
                 "id": row[0],
                 "signal_name": row[1],
-                "trigger_condition": trigger_condition
+                "trigger_condition": trigger_condition,
+                "exchange": request.exchange
             })
 
-        # Create the pool
+        # Create the pool with exchange
         pool_result = db.execute(text("""
-            INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic)
-            VALUES (:name, :signal_ids, :symbols, :enabled, :logic)
-            RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic
+            INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic, exchange)
+            VALUES (:name, :signal_ids, :symbols, :enabled, :logic, :exchange)
+            RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic, exchange
         """), {
             "name": request.name,
             "signal_ids": json.dumps(created_signal_ids),
             "symbols": json.dumps([request.symbol]),
             "enabled": True,
-            "logic": request.logic
+            "logic": request.logic,
+            "exchange": request.exchange
         })
         pool_row = pool_result.fetchone()
 
@@ -844,7 +939,8 @@ def create_pool_from_config(
                 "pool_name": pool_row[1],
                 "signal_ids": created_signal_ids,
                 "symbols": [request.symbol],
-                "logic": request.logic
+                "logic": request.logic,
+                "exchange": request.exchange
             },
             "signals": created_signals
         }

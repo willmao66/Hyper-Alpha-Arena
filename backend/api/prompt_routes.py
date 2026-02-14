@@ -232,7 +232,8 @@ def preview_prompt(
         "templateText": "...",  # Optional: Use this template text directly (for preview before save)
         "promptTemplateKey": "pro",  # Optional: Fallback to database template if templateText not provided
         "accountIds": [1, 2],
-        "symbols": ["BTC", "ETH"]
+        "symbols": ["BTC", "ETH"],
+        "exchanges": ["hyperliquid", "binance"]  # Optional: Array of exchanges (default: ["hyperliquid"])
     }
 
     Returns:
@@ -241,7 +242,7 @@ def preview_prompt(
             {
                 "accountId": 1,
                 "accountName": "Trader-A",
-                "symbol": "BTC",
+                "exchange": "hyperliquid",
                 "filledPrompt": "..."
             },
             ...
@@ -270,6 +271,8 @@ def preview_prompt(
     template_text = payload.get("templateText")
     prompt_key = payload.get("promptTemplateKey", "default")
     account_ids = payload.get("accountIds", [])
+    # Support both old "exchange" (string) and new "exchanges" (array) format
+    exchanges = payload.get("exchanges") or [payload.get("exchange", "hyperliquid")]
 
     raw_symbols = [str(sym).upper() for sym in payload.get("symbols", []) if sym]
     requested_symbols: List[str] = []
@@ -316,159 +319,270 @@ def preview_prompt(
             logger.warning(f"Account {account_id} not found, skipping")
             continue
 
-        # Check if account uses Hyperliquid - ONLY use global environment
-        from services.hyperliquid_environment import get_global_trading_mode
-        hyperliquid_environment = get_global_trading_mode(db)
-
-        # NOTE: Account-level environment setting is deprecated
-        # All accounts MUST follow the global trading mode
-
-        hyperliquid_state = None
-
-        if hyperliquid_environment in ["testnet", "mainnet"]:
-            # Get Hyperliquid real-time data
+        # Generate preview for each selected exchange
+        for exchange in exchanges:
             try:
-                from services.hyperliquid_environment import get_hyperliquid_client
-
-                client = get_hyperliquid_client(db, account_id, override_environment=hyperliquid_environment)
-                account_state = client.get_account_state(db)
-                # include_timing=True for prompt preview to show position holding duration
-                positions = client.get_positions(db, include_timing=True)
-
-                # Build portfolio with Hyperliquid data
-                portfolio = {
-                    'cash': account_state['available_balance'],
-                    'frozen_cash': account_state.get('used_margin', 0),
-                    'positions': {},
-                    'total_assets': account_state['total_equity']
-                }
-
-                for pos in positions:
-                    symbol = pos['coin']
-                    portfolio['positions'][symbol] = {
-                        'quantity': pos['szi'],
-                        'avg_cost': pos['entry_px'],
-                        'current_value': pos['position_value'],
-                        'unrealized_pnl': pos['unrealized_pnl'],
-                        'leverage': pos['leverage']
-                    }
-
-                # Build Hyperliquid state for prompt context
-                hyperliquid_state = {
-                    'total_equity': account_state['total_equity'],
-                    'available_balance': account_state['available_balance'],
-                    'used_margin': account_state.get('used_margin', 0),
-                    'margin_usage_percent': account_state['margin_usage_percent'],
-                    'maintenance_margin': account_state.get('maintenance_margin', 0),
-                    'positions': positions
-                }
-
-                logger.info(
-                    f"Preview: Using Hyperliquid {hyperliquid_environment} data for {account.name}: "
-                    f"equity=${account_state['total_equity']:.2f}"
+                preview_result = _generate_single_preview(
+                    db=db,
+                    account=account,
+                    exchange=exchange,
+                    template_text=template_text,
+                    news_section=news_section,
+                    requested_symbols=requested_symbols,
+                    base_symbol_order=base_symbol_order,
+                    hyper_watchlist=hyper_watchlist,
+                    hyper_symbol_map=hyper_symbol_map,
+                    sampling_pool=sampling_pool,
+                    logger=logger,
+                    SUPPORTED_SYMBOLS=SUPPORTED_SYMBOLS,
+                    get_last_price=get_last_price,
+                    _get_portfolio_data=_get_portfolio_data,
+                    _build_prompt_context=_build_prompt_context,
+                    _build_multi_symbol_sampling_data=_build_multi_symbol_sampling_data,
+                    SafeDict=SafeDict,
                 )
-
-            except Exception as hl_err:
-                logger.error(f"Failed to get Hyperliquid data for {account.name}: {hl_err}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to fetch Hyperliquid {hyperliquid_environment} data: {hl_err}",
-                )
-        else:
-            # Paper trading mode
-            portfolio = _get_portfolio_data(db, account)
-
-        # Determine active symbols + metadata for this account
-        if hyperliquid_environment in ["testnet", "mainnet"]:
-            active_symbols = requested_symbols or hyper_watchlist or base_symbol_order
-            symbol_metadata_map = {}
-            for sym in active_symbols:
-                entry = dict(hyper_symbol_map.get(sym, {}))
-                entry.setdefault("name", sym)
-                symbol_metadata_map[sym] = entry
-        else:
-            active_symbols = requested_symbols or base_symbol_order
-            symbol_metadata_map = {sym: SUPPORTED_SYMBOLS.get(sym, sym) for sym in active_symbols}
-
-        if not active_symbols:
-            active_symbols = base_symbol_order
-
-        prices: Dict[str, float] = {}
-        for sym in active_symbols:
-            try:
-                prices[sym] = get_last_price(sym, "CRYPTO", environment=hyperliquid_environment or "mainnet")
-            except Exception as err:
-                logger.warning(f"Failed to get price for {sym}: {err}")
-                prices[sym] = 0.0
-
-        # Get actual sampling interval from config
-        sampling_interval = None
-        try:
-            from database.models import GlobalSamplingConfig
-            config = db.query(GlobalSamplingConfig).first()
-            if config:
-                sampling_interval = config.sampling_interval
-        except Exception as e:
-            logger.warning(f"Failed to get sampling interval: {e}")
-
-        sampling_data = _build_multi_symbol_sampling_data(active_symbols, sampling_pool, sampling_interval)
-        # IMPORTANT: _build_prompt_context is the ONLY function that builds prompt context.
-        # It now handles K-line and indicator variables internally when template_text is provided.
-        # DO NOT add separate K-line processing here - it will cause inconsistencies.
-
-        # Build a sample trigger_context for preview purposes
-        # This shows users what the variable will look like when triggered
-        sample_trigger_context = {
-            "trigger_type": "signal",
-            "signal_pool_id": 1,
-            "signal_pool_name": "OI Surge Monitor",
-            "pool_logic": "OR",
-            "triggered_signals": [
-                {
-                    "signal_name": "OI Delta Alert",
-                    "description": "Open Interest increased significantly, indicating new positions entering the market",
-                    "metric": "oi_delta",
-                    "operator": ">",
-                    "threshold": 2.0,
-                    "current_value": 2.5,
-                    "time_window": "15m",
-                }
-            ],
-            "trigger_symbol": "BTC",
-        }
-
-        context = _build_prompt_context(
-            account,
-            portfolio,
-            prices,
-            news_section,
-            None,
-            None,
-            hyperliquid_state,
-            db=db,
-            symbol_metadata=symbol_metadata_map,
-            symbol_order=active_symbols,
-            sampling_interval=sampling_interval,
-            environment=hyperliquid_environment or "mainnet",
-            template_text=template_text,
-            trigger_context=sample_trigger_context,
-        )
-        context["sampling_data"] = sampling_data
-
-        try:
-            filled_prompt = template_text.format_map(SafeDict(context))
-        except Exception as err:
-            logger.error(f"Failed to fill prompt for {account.name}: {err}")
-            filled_prompt = f"Error filling prompt: {err}"
-
-        previews.append({
-            "accountId": account.id,
-            "accountName": account.name,
-            "symbols": requested_symbols if requested_symbols else [],
-            "filledPrompt": filled_prompt,
-        })
+                previews.append(preview_result)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Failed to generate preview for {account.name} ({exchange}): {e}")
+                previews.append({
+                    "accountId": account.id,
+                    "accountName": account.name,
+                    "exchange": exchange,
+                    "symbols": requested_symbols if requested_symbols else [],
+                    "filledPrompt": f"Error generating preview: {str(e)[:200]}",
+                })
 
     return {"previews": previews}
+
+
+def _generate_single_preview(
+    db,
+    account,
+    exchange: str,
+    template_text: str,
+    news_section: str,
+    requested_symbols,
+    base_symbol_order,
+    hyper_watchlist,
+    hyper_symbol_map,
+    sampling_pool,
+    logger,
+    SUPPORTED_SYMBOLS,
+    get_last_price,
+    _get_portfolio_data,
+    _build_prompt_context,
+    _build_multi_symbol_sampling_data,
+    SafeDict,
+) -> dict:
+    """Generate a single preview for one account and one exchange."""
+    from typing import Dict
+
+    hyperliquid_state = None
+    binance_state = None
+    portfolio = None
+    environment = "mainnet"
+
+    if exchange == "binance":
+        from services.binance_trading_client import BinanceTradingClient
+        from database.models import BinanceWallet
+        from utils.encryption import decrypt_private_key
+        from services.hyperliquid_environment import get_global_trading_mode
+
+        # Get global trading environment (same as Hyperliquid)
+        binance_environment = get_global_trading_mode(db)
+
+        binance_wallet = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == account.id,
+            BinanceWallet.environment == binance_environment,
+            BinanceWallet.is_active == "true"
+        ).first()
+
+        if not binance_wallet or not binance_wallet.api_key_encrypted:
+            return {
+                "accountId": account.id,
+                "accountName": account.name,
+                "exchange": exchange,
+                "symbols": requested_symbols if requested_symbols else [],
+                "filledPrompt": f"Binance {binance_environment} wallet not configured for this account",
+            }
+
+        api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+        secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+
+        client = BinanceTradingClient(
+            api_key=api_key,
+            secret_key=secret_key,
+            environment=binance_environment
+        )
+        environment = binance_environment
+
+        account_state = client.get_account_state(db)
+        positions = client.get_positions()
+
+        portfolio = {
+            'cash': account_state['available_balance'],
+            'frozen_cash': account_state.get('used_margin', 0),
+            'positions': {},
+            'total_assets': account_state['total_equity']
+        }
+
+        for pos in positions:
+            symbol = pos.get('coin') or pos.get('symbol', '')
+            portfolio['positions'][symbol] = {
+                'quantity': pos.get('szi') or pos.get('size', 0),
+                'avg_cost': pos.get('entry_px') or pos.get('entry_price', 0),
+                'current_value': pos.get('position_value', 0),
+                'unrealized_pnl': pos.get('unrealized_pnl', 0),
+                'leverage': pos.get('leverage', 1)
+            }
+
+        binance_state = {
+            'total_equity': account_state['total_equity'],
+            'available_balance': account_state['available_balance'],
+            'used_margin': account_state.get('used_margin', 0),
+            'margin_usage_percent': account_state.get('margin_usage_percent', 0),
+            'maintenance_margin': account_state.get('maintenance_margin', 0),
+            'positions': positions
+        }
+
+        logger.info(f"Preview: Using Binance {environment} data for {account.name}")
+
+    else:
+        from services.hyperliquid_environment import get_global_trading_mode, get_hyperliquid_client
+
+        hyperliquid_environment = get_global_trading_mode(db)
+        environment = hyperliquid_environment
+
+        if hyperliquid_environment in ["testnet", "mainnet"]:
+            client = get_hyperliquid_client(db, account.id, override_environment=hyperliquid_environment)
+            account_state = client.get_account_state(db)
+            positions = client.get_positions(db, include_timing=True)
+
+            portfolio = {
+                'cash': account_state['available_balance'],
+                'frozen_cash': account_state.get('used_margin', 0),
+                'positions': {},
+                'total_assets': account_state['total_equity']
+            }
+
+            for pos in positions:
+                symbol = pos['coin']
+                portfolio['positions'][symbol] = {
+                    'quantity': pos['szi'],
+                    'avg_cost': pos['entry_px'],
+                    'current_value': pos['position_value'],
+                    'unrealized_pnl': pos['unrealized_pnl'],
+                    'leverage': pos['leverage']
+                }
+
+            hyperliquid_state = {
+                'total_equity': account_state['total_equity'],
+                'available_balance': account_state['available_balance'],
+                'used_margin': account_state.get('used_margin', 0),
+                'margin_usage_percent': account_state['margin_usage_percent'],
+                'maintenance_margin': account_state.get('maintenance_margin', 0),
+                'positions': positions
+            }
+
+            logger.info(f"Preview: Using Hyperliquid {hyperliquid_environment} data for {account.name}")
+        else:
+            portfolio = _get_portfolio_data(db, account)
+
+    # Determine active symbols + metadata
+    market_param = "binance" if exchange == "binance" else "CRYPTO"
+
+    if exchange == "binance":
+        active_symbols = requested_symbols or base_symbol_order
+        symbol_metadata_map = {sym: SUPPORTED_SYMBOLS.get(sym, sym) for sym in active_symbols}
+    elif environment in ["testnet", "mainnet"]:
+        active_symbols = requested_symbols or hyper_watchlist or base_symbol_order
+        symbol_metadata_map = {}
+        for sym in active_symbols:
+            entry = dict(hyper_symbol_map.get(sym, {}))
+            entry.setdefault("name", sym)
+            symbol_metadata_map[sym] = entry
+    else:
+        active_symbols = requested_symbols or base_symbol_order
+        symbol_metadata_map = {sym: SUPPORTED_SYMBOLS.get(sym, sym) for sym in active_symbols}
+
+    if not active_symbols:
+        active_symbols = base_symbol_order
+
+    prices: Dict[str, float] = {}
+    for sym in active_symbols:
+        try:
+            prices[sym] = get_last_price(sym, market_param, environment=environment or "mainnet")
+        except Exception as err:
+            logger.warning(f"Failed to get price for {sym}: {err}")
+            prices[sym] = 0.0
+
+    # Get sampling interval
+    sampling_interval = None
+    try:
+        from database.models import GlobalSamplingConfig
+        config = db.query(GlobalSamplingConfig).first()
+        if config:
+            sampling_interval = config.sampling_interval
+    except Exception:
+        pass
+
+    sampling_data = _build_multi_symbol_sampling_data(active_symbols, sampling_pool, sampling_interval)
+
+    sample_trigger_context = {
+        "trigger_type": "signal",
+        "signal_pool_id": 1,
+        "signal_pool_name": "OI Surge Monitor",
+        "pool_logic": "OR",
+        "triggered_signals": [
+            {
+                "signal_name": "OI Delta Alert",
+                "description": "Open Interest increased significantly",
+                "metric": "oi_delta",
+                "operator": ">",
+                "threshold": 2.0,
+                "current_value": 2.5,
+                "time_window": "15m",
+            }
+        ],
+        "trigger_symbol": "BTC",
+    }
+
+    exchange_state = binance_state if exchange == "binance" else hyperliquid_state
+
+    context = _build_prompt_context(
+        account,
+        portfolio,
+        prices,
+        news_section,
+        None,
+        None,
+        exchange_state,
+        db=db,
+        symbol_metadata=symbol_metadata_map,
+        symbol_order=active_symbols,
+        sampling_interval=sampling_interval,
+        environment=environment or "mainnet",
+        template_text=template_text,
+        trigger_context=sample_trigger_context,
+        exchange=exchange,
+    )
+    context["sampling_data"] = sampling_data
+
+    try:
+        filled_prompt = template_text.format_map(SafeDict(context))
+    except Exception as err:
+        logger.error(f"Failed to fill prompt for {account.name}: {err}")
+        filled_prompt = f"Error filling prompt: {err}"
+
+    return {
+        "accountId": account.id,
+        "accountName": account.name,
+        "exchange": exchange,
+        "symbols": requested_symbols if requested_symbols else [],
+        "filledPrompt": filled_prompt,
+    }
 
 
 # ============================================================================
@@ -491,6 +605,8 @@ class AiChatRequest(BaseModel):
     account_id: int = Field(..., alias="accountId")
     user_message: str = Field(..., alias="userMessage")
     conversation_id: Optional[int] = Field(None, alias="conversationId")
+    prompt_id: Optional[int] = Field(None, alias="promptId")
+    use_background_task: bool = Field(False, alias="useBackgroundTask")
 
     class Config:
         populate_by_name = True
@@ -538,7 +654,8 @@ def ai_chat(
         account=account,
         user_message=request.user_message,
         conversation_id=request.conversation_id,
-        user_id=user.id
+        user_id=user.id,
+        prompt_id=request.prompt_id
     )
 
     return AiChatResponse(
@@ -557,11 +674,17 @@ def ai_chat_stream(
     db: Session = Depends(get_db)
 ):
     """
-    Send a message to AI prompt generation assistant with SSE streaming.
+    Send a message to AI prompt generation assistant.
 
-    Returns Server-Sent Events with tool calling progress and final response.
+    Supports two modes:
+    - SSE streaming (default): Returns Server-Sent Events directly
+    - Background task (useBackgroundTask=true): Returns task_id for polling
+
     Premium feature - requires active subscription.
     """
+    from services.ai_stream_service import get_buffer_manager, generate_task_id, run_ai_task_in_background
+    from database.connection import SessionLocal
+
     # Get user (default user for now)
     user = db.query(User).filter(User.username == "default").first()
     if not user:
@@ -575,14 +698,55 @@ def ai_chat_stream(
     if account.account_type != "AI":
         raise HTTPException(status_code=400, detail="Selected account is not an AI Trader")
 
-    # Return SSE stream
+    # Background task mode
+    if request.use_background_task:
+        task_id = generate_task_id("prompt")
+        manager = get_buffer_manager()
+
+        # Check for existing running task on this conversation
+        if request.conversation_id:
+            existing = manager.get_pending_task_for_conversation(request.conversation_id)
+            if existing:
+                return {"task_id": existing.task_id, "status": "already_running"}
+
+        # Create task
+        manager.create_task(task_id, conversation_id=request.conversation_id)
+
+        # Capture request data for background thread
+        account_id = account.id
+        user_message = request.user_message
+        conversation_id = request.conversation_id
+        user_id = user.id
+        prompt_id = request.prompt_id
+
+        def generator_func():
+            # Create new db session for background thread
+            bg_db = SessionLocal()
+            try:
+                bg_account = bg_db.query(Account).filter(Account.id == account_id).first()
+                yield from generate_prompt_with_ai_stream(
+                    db=bg_db,
+                    account=bg_account,
+                    user_message=user_message,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    prompt_id=prompt_id
+                )
+            finally:
+                bg_db.close()
+
+        run_ai_task_in_background(task_id, generator_func)
+        return {"task_id": task_id, "status": "started"}
+
+    # SSE streaming mode (default, backward compatible)
     return StreamingResponse(
         generate_prompt_with_ai_stream(
             db=db,
             account=account,
             user_message=request.user_message,
             conversation_id=request.conversation_id,
-            user_id=user.id
+            user_id=user.id,
+            prompt_id=request.prompt_id
         ),
         media_type="text/event-stream",
         headers={

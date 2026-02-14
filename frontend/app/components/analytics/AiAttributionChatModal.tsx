@@ -51,7 +51,8 @@ interface Message {
   statusText?: string
   analysisLog?: AnalysisEntry[]
   reasoning_snapshot?: string  // Stored reasoning from history
-  analysis_log?: AnalysisEntry[]  // Stored analysis log from history
+  tool_calls_log?: AnalysisEntry[]  // Stored tool calls log from history (renamed from analysis_log)
+  is_complete?: boolean  // False if message was interrupted
 }
 
 interface Conversation {
@@ -130,10 +131,10 @@ export default function AiAttributionChatModal({
       const response = await fetch(`/api/analytics/ai-attribution/conversations/${conversationId}/messages`)
       if (response.ok) {
         const data = await response.json()
-        // Map analysis_log from API to analysisLog for display
+        // Map tool_calls_log from API to analysisLog for display
         const mappedMessages = (data.messages || []).map((m: Message) => ({
           ...m,
-          analysisLog: m.analysis_log || undefined  // Use stored analysis_log for history display
+          analysisLog: m.tool_calls_log || undefined  // Use stored tool_calls_log for history display
         }))
         setMessages(mappedMessages)
         // Assign roundIndex to each message's diagnosis results based on message order

@@ -54,6 +54,15 @@ MIGRATIONS = [
     "add_backtest_tables.py",
     "add_backtest_extended_fields.py",
     "add_regime_body_ratio_cvd_divisor.py",
+    "create_market_sentiment_metrics_table.py",
+    "create_hyperliquid_backfill_tasks.py",
+    "add_exchange_to_signals.py",
+    "add_binance_wallet_tables.py",
+    "add_exchange_to_trigger_configs.py",
+    "add_exchange_to_decision_logs.py",
+    "add_rebate_working_to_binance_wallets.py",
+    "add_prompt_id_to_ai_prompt_conversations.py",
+    "unify_ai_message_fields.py",
 ]
 
 

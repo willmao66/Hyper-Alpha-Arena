@@ -34,8 +34,10 @@
     "success": "成功",
     "failed": "失败",
     "collectionDaysHint": "Hyperliquid 资金流数据已累计采集 {{days}} 天",
+    "binanceCollectionDaysHint": "币安资金流数据已累计采集 {{days}} 天",
     "error": "错误",
-    "keyboardHintCtrlEnter": "按 Ctrl+Enter（Mac 上为 Cmd+Enter）发送"
+    "keyboardHintCtrlEnter": "按 Ctrl+Enter（Mac 上为 Cmd+Enter）发送",
+    "recommended": "推荐"
   },
   "regime": {
     "noConfig": "未找到配置",
@@ -58,8 +60,8 @@
     "noneMatched": "以上条件均未匹配"
   },
   "trade": {
-    "title": "Hyperliquid 交易",
-    "subtitle": "手动交易操作",
+    "title": "手动交易",
+    "subtitle": "手动交易主要用于熟悉交易规则以及手动平仓",
     "refreshingData": "正在刷新持仓和余额",
     "loadingWallet": "正在加载钱包数据...",
     "overview": "概览",
@@ -80,7 +82,12 @@
     "tip4": "交易前检查清算价格",
     "tip5": "平仓以释放保证金",
     "walletDisabled": "钱包已禁用",
-    "walletDisabledDesc": "请在AI交易员管理页面重新启用此钱包后再进行交易。"
+    "walletDisabledDesc": "请在AI交易员管理页面重新启用此钱包后再进行交易。",
+    "selectExchange": "交易所",
+    "selectWallet": "选择交易钱包",
+    "noWalletsAvailable": "暂无可用钱包",
+    "noWalletsHint": "请先为您的AI交易员配置钱包。",
+    "loadingWallets": "正在加载钱包..."
   },
   "aiPrompt": {
     "title": "AI策略提示词生成器",
@@ -150,6 +157,8 @@
   },
   "header": {
     "exchanges": "交易所",
+    "supported": "支持",
+    "supportedExchanges": "支持的交易所",
     "premiumDiscount": "订阅高级版，免服务费",
     "vipMember": "VIP会员",
     "yearlyPlan": "年度套餐",
@@ -186,11 +195,12 @@
   },
   "account": {
     "accountStatus": "账户状态",
-    "noAccountsConfigured": "未配置Hyperliquid账户",
+    "noAccountsConfigured": "未配置账户",
     "loadingData": "正在加载账户数据...",
     "equity": "权益",
     "margin": "保证金",
     "left": "剩余",
+    "apiWeight": "权重/分钟",
     "winRate": "胜率",
     "positions": "持仓",
     "noOpenPositions": "暂无持仓",
@@ -268,6 +278,8 @@
       "signalNamePlaceholder": "例如：OI激增信号",
       "descriptionLabel": "描述",
       "descriptionPlaceholder": "该信号检测什么市场条件？",
+      "exchangeLabel": "交易所",
+      "exchangeDesc": "选择该信号的数据源交易所",
       "metricLabel": "指标",
       "compositeConfig": "复合信号配置",
       "directionLabel": "方向",
@@ -275,6 +287,9 @@
       "ratioThresholdDesc": "倍数（如1.5表示多50%）。买卖对称。",
       "volumeThreshold": "成交量阈值",
       "volumeThresholdDesc": "最小成交量（USD）",
+      "macdConfig": "MACD 事件配置",
+      "eventTypes": "事件类型（可多选）",
+      "selectAtLeastOne": "请至少选择一个事件类型",
       "operatorLabel": "运算符",
       "thresholdLabel": "阈值",
       "thresholdDesc": "比较的目标值",
@@ -498,6 +513,7 @@
     "filter": "筛选",
     "allTraders": "全部交易员",
     "allSymbols": "全部交易对",
+    "allExchanges": "全部交易所",
     "completedTrades": "已完成交易",
     "modelChat": "AI决策",
     "program": "程序执行",
@@ -656,6 +672,8 @@
     "openInterest": "持仓量",
     "selectSymbol": "选择交易对",
     "mainnetWarning": "K线分析仅支持主网环境",
+    "binanceWarning": "K线分析仅支持币安合约正式环境",
+    "indicatorUnavailable": "{{exchange}} 在 {{period}} 周期不可用",
     "backfillInProgress": "正在回填数据...",
     "starting": "启动中...",
     "backfillHistorical": "回填历史数据",
@@ -745,6 +763,8 @@
   "exchange": {
     "chooseExchange": "选择交易所",
     "selectToStart": "选择一个交易所开始交易",
+    "supportedExchanges": "支持的交易所",
+    "compareDesc": "对比功能特性和数据采集方式",
     "active": "当前使用",
     "comingSoon": "即将上线",
     "selectionChanged": "交易所选择已更改",
@@ -752,7 +772,32 @@
     "saving": "保存中...",
     "saveChanges": "保存更改",
     "proTip": "小贴士",
-    "referralTip": "通过我们的推荐链接注册，享受手续费折扣并支持平台发展。"
+    "referralTip": "通过我们的推荐链接注册，享受手续费折扣并支持平台发展。",
+    "dataCollection": "数据采集",
+    "binanceNote": "一个身份 = 一个账户。通过推荐链接注册可享手续费折扣。",
+    "hyperliquid": {
+      "description": "最大的去中心化永续合约交易所",
+      "feature1": "无需 KYC",
+      "feature2": "链上结算",
+      "feature3": "支持测试网",
+      "button": "打开交易"
+    },
+    "binance": {
+      "description": "全球交易量最大的中心化交易所",
+      "feature1": "需要 KYC",
+      "feature2": "高流动性",
+      "feature3": "支持测试网",
+      "button": "先注册"
+    },
+    "data": {
+      "kline": "K线",
+      "oi": "持仓量",
+      "funding": "资金费率",
+      "trades": "成交",
+      "takerVolume": "主动成交量",
+      "orderbook": "订单簿",
+      "realtime": "实时"
+    }
   },
   "trading": {
     "mode": "交易模式",
@@ -827,7 +872,12 @@
     "saveGlobalSettings": "保存全局设置",
     "watchlistMoved": "监控列表管理已移至设置页面。",
     "currentWatchlist": "当前监控列表",
-    "goToSettings": "前往设置"
+    "goToSettings": "前往设置",
+    "exchange": "交易所",
+    "selectExchange": "选择交易所",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "币安",
+    "exchangeHint": "选择用于市场数据和交易执行的交易所"
   },
   "settings": {
     "language": "语言",
@@ -853,12 +903,22 @@
     "retentionHint": "超过此期限的数据将被自动删除（7-730 天）",
     "dataCoverage": "数据覆盖",
     "dataCoverageDesc": "已采集数据完整度的可视化概览",
+    "marketFlowCoverage": "资金流数据覆盖",
+    "klineCoverage": "K线数据覆盖",
+    "backfillHistory": "回填历史数据",
+    "backfillDesc": "K线 (1m/15m/1h), OI (30天), 资金费率 (365天), 多空比 (30天)",
+    "hyperliquidBackfillDesc": "K线: 1m (~3.5天), 15m (~52天), 1h (~208天)",
+    "startBackfill": "开始回填",
+    "restartBackfill": "重新开始",
+    "backfillRunning": "正在回填",
+    "backfillCompleted": "上次回填已完成",
+    "backfillFailed": "上次回填失败",
     "showLast": "显示最近",
     "noData": "无数据",
     "noDataCollected": "尚未采集数据"
   },
   "order": {
-    "title": "手动下单（Hyperliquid）",
+    "title": "手动下单",
     "description": "永续合约手动下单",
     "symbol": "交易对",
     "side": "方向",
@@ -907,6 +967,11 @@
     "usedMargin": "已用保证金",
     "wallet": "钱包",
     "apiUsage": "API使用情况",
+    "apiWeight": "API权重（每分钟）",
+    "weightUsed": "已用权重",
+    "weightCap": "权重上限",
+    "binanceWeightInfo": "币安API权重每分钟重置。不同API调用消耗不同权重。",
+    "comingSoon": "即将推出",
     "cumulativeVolume": "累计交易量",
     "requestsUsed": "已用请求数",
     "requestsCap": "请求上限",
@@ -946,6 +1011,7 @@
     "thisWeek": "本周",
     "thisMonth": "本月",
     "allTime": "全部",
+    "allExchanges": "全部交易所",
     "allAccounts": "全部账户",
     "grossPnl": "策略盈亏",
     "totalFees": "总手续费",
@@ -1176,6 +1242,10 @@
     "status": "状态",
     "active": "启用",
     "saveBinding": "保存绑定",
+    "exchange": "交易所",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "Binance",
+    "exchangeHint": "选择市场数据和交易执行的交易所",
     "testRun": "测试运行",
     "testing": "测试中...",
     "triggerSymbol": "触发币种",
@@ -1296,5 +1366,30 @@
       "connectionLost": "连接中断，正在重新加载已保存的进度...",
       "toolCallsDetail": "工具调用详情 ({{count}} 轮)"
     }
+  },
+  "binance": {
+    "rebateCheck": "账户验证",
+    "rebateIneligibleMessage": "该账户已绑定其他推荐关系，无法享受本平台的交易优惠。",
+    "rebateIneligibleOptions": "您可以选择以下方式之一继续：",
+    "subscribePremium": "订阅会员",
+    "subscribeDescription": "无限次自动交易，解锁全部功能",
+    "registerNew": "注册新账户",
+    "registerDescription": "币安新用户？通过推荐链接注册，无限次交易 + 5% 返佣。",
+    "continueLimited": "继续使用（有限制）",
+    "continueLimitedDescription": "当前账户每日限 40 次自动交易（含 AI Trader 和 Program）。如需更多，请订阅或注册返佣账户。",
+    "continueLimitedButton": "我知道了",
+    "supportTip": "订阅会员或通过推荐链接注册，可以更好地支持平台发展。团队发展不易，望请理解。",
+    "rebateNote": "仅未绑定推荐关系的账户可用于 AI 交易",
+    "positionModeHint": "需要单向持仓模式。请前往币安 App → 合约 → 设置 → 持仓模式 → 单向持仓"
+  },
+  "quota": {
+    "executionQuota": "执行配额",
+    "dailyQuota": "每日配额",
+    "upgradeUnlimited": "升级无限制",
+    "upgradeTitle": "升级无限制",
+    "currentUsage": "当前使用",
+    "perDay": "每天",
+    "upgradeOptions": "选择以下选项解锁无限次自动交易：",
+    "resetAt": "重置时间"
   }
 }

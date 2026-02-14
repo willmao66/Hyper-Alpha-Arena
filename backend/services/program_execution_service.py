@@ -11,17 +11,35 @@ Architecture:
 import json
 import logging
 import threading
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+import time
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional, List, Tuple
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Ensure datetime is timezone-aware UTC.
+
+    Database stores UTC time in 'timestamp without time zone' columns.
+    The naive datetime from DB is already UTC, just missing the timezone marker.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+from sqlalchemy import func
 
 from database.connection import SessionLocal
 from database.models import (
     TradingProgram, AccountProgramBinding, ProgramExecutionLog,
-    Account, HyperliquidWallet
+    Account, HyperliquidWallet, BinanceWallet, AIDecisionLog,
+    User, UserSubscription
 )
 from program_trader.executor import execute_strategy
 from program_trader.models import MarketData, ActionType
 from program_trader.data_provider import DataProvider
+from config.settings import BINANCE_DAILY_QUOTA_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +68,48 @@ class ProgramExecutionService:
         self._binding_states: Dict[int, dict] = {}  # binding_id -> state dict
         self._last_cache_refresh: Optional[datetime] = None
         self._cache_refresh_interval = 60  # Refresh cache every 60 seconds
+        self._daily_quota_limit = BINANCE_DAILY_QUOTA_LIMIT
         logger.info("[ProgramExecution] Service initialized")
+
+    def _is_premium_user(self, db) -> bool:
+        """Check if current logged-in user is a premium member"""
+        try:
+            subscription = db.query(UserSubscription).join(User).filter(
+                User.username != 'default',
+                UserSubscription.subscription_type == 'premium'
+            ).first()
+            return subscription is not None
+        except Exception as e:
+            logger.warning(f"Failed to check premium status: {e}")
+            return False
+
+    def _check_binance_daily_quota(self, db, account_id: int) -> Tuple[bool, Dict[str, int]]:
+        """Check if Binance mainnet daily quota is exceeded."""
+        if self._is_premium_user(db):
+            return False, {"used": 0, "limit": self._daily_quota_limit, "remaining": self._daily_quota_limit}
+
+        # Use UTC midnight for quota reset
+        today_start_utc = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        ai_count = db.query(func.count(AIDecisionLog.id)).filter(
+            AIDecisionLog.account_id == account_id,
+            AIDecisionLog.exchange == "binance",
+            AIDecisionLog.hyperliquid_environment == "mainnet",
+            AIDecisionLog.created_at >= today_start_utc
+        ).scalar() or 0
+
+        program_count = db.query(func.count(ProgramExecutionLog.id)).filter(
+            ProgramExecutionLog.account_id == account_id,
+            ProgramExecutionLog.exchange == "binance",
+            ProgramExecutionLog.environment == "mainnet",
+            ProgramExecutionLog.created_at >= today_start_utc
+        ).scalar() or 0
+
+        used = ai_count + program_count
+        remaining = max(0, self._daily_quota_limit - used)
+        exceeded = used >= self._daily_quota_limit
+
+        return exceeded, {"used": used, "limit": self._daily_quota_limit, "remaining": remaining}
 
     def on_signal_triggered(
         self,
@@ -135,7 +194,7 @@ class ProgramExecutionService:
                     "account_id": binding.account_id,
                     "program_id": binding.program_id,
                     "trigger_interval": binding.trigger_interval,
-                    "last_trigger_at": binding.last_trigger_at,
+                    "last_trigger_at": _as_utc(binding.last_trigger_at),
                     "signal_pool_ids": json.loads(binding.signal_pool_ids) if binding.signal_pool_ids else [],
                 }
 
@@ -254,28 +313,58 @@ class ProgramExecutionService:
 
             logger.info(f"[ProgramExecution] Executing: {program.name} via {account.name} (trigger: {trigger_type})")
 
-            # Get wallet address for this account
-            wallet_address = self._get_wallet_address(db, account)
+            # Get exchange from binding (default to hyperliquid for backward compatibility)
+            exchange = getattr(binding, 'exchange', None) or 'hyperliquid'
+
+            # Get wallet address for this account based on exchange
+            wallet_address = self._get_wallet_address(db, account, exchange)
 
             # Get trading environment and create trading client
             from services.hyperliquid_environment import get_global_trading_mode, get_hyperliquid_client, get_leverage_settings
 
             environment = get_global_trading_mode(db)
             trading_client = None
-            if environment and wallet_address:
-                try:
-                    trading_client = get_hyperliquid_client(db, account.id, override_environment=environment)
-                except Exception as e:
-                    logger.warning(f"[ProgramExecution] Failed to create trading client: {e}")
 
-            # Get leverage settings (same as AI Trader)
-            leverage_settings = get_leverage_settings(db, account.id, environment or "mainnet")
+            if exchange == "binance":
+                # Use Binance trading client
+                if wallet_address:  # wallet_address here is actually API key presence indicator
+                    try:
+                        from services.binance_trading_client import BinanceTradingClient
+                        from utils.encryption import decrypt_private_key
+
+                        binance_wallet = db.query(BinanceWallet).filter(
+                            BinanceWallet.account_id == account.id,
+                            BinanceWallet.environment == (environment or "mainnet"),
+                            BinanceWallet.is_active == "true"
+                        ).first()
+
+                        if binance_wallet:
+                            api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+                            secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+                            trading_client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")
+                        else:
+                            logger.warning(f"[ProgramExecution] No active Binance wallet found for account {account.id} on {environment}")
+                    except Exception as e:
+                        logger.warning(f"[ProgramExecution] Failed to create Binance trading client: {e}")
+                # Get leverage settings from BinanceWallet
+                leverage_settings = self._get_binance_leverage_settings(db, account.id, environment or "mainnet")
+            else:
+                # Use Hyperliquid trading client (default)
+                if environment and wallet_address:
+                    try:
+                        trading_client = get_hyperliquid_client(db, account.id, override_environment=environment)
+                    except Exception as e:
+                        logger.warning(f"[ProgramExecution] Failed to create Hyperliquid trading client: {e}")
+                # Get leverage settings (same as AI Trader)
+                leverage_settings = get_leverage_settings(db, account.id, environment or "mainnet")
+
             max_leverage = leverage_settings["max_leverage"]
             default_leverage = leverage_settings["default_leverage"]
 
             # Build MarketData with trading client (enable query recording for analysis)
             data_provider = DataProvider(
-                db, account.id, environment or "mainnet", trading_client, record_queries=True
+                db, account.id, environment or "mainnet", trading_client,
+                record_queries=True, exchange=exchange
             )
             market_data = self._build_market_data(
                 data_provider=data_provider,
@@ -306,22 +395,50 @@ class ProgramExecutionService:
             # Execute strategy
             result = execute_strategy(program.code, market_data, params)
 
+            # Check daily quota for Binance mainnet non-rebate accounts BEFORE logging
+            # This ensures quota exceeded decisions are logged with success=False
+            quota_exceeded = False
+            quota_info = {}
+            if exchange == "binance" and (environment or "mainnet") == "mainnet":
+                binance_wallet = db.query(BinanceWallet).filter(
+                    BinanceWallet.account_id == account.id,
+                    BinanceWallet.environment == (environment or "mainnet"),
+                    BinanceWallet.is_active == "true"
+                ).first()
+                if binance_wallet and binance_wallet.rebate_working is False:
+                    quota_exceeded, quota_info = self._check_binance_daily_quota(db, account.id)
+                    if quota_exceeded:
+                        logger.warning(
+                            f"[ProgramExecution] Binding {binding.id} ({program.name}) quota exceeded - "
+                            f"Decision recorded but NOT executed ({quota_info['used']}/{quota_info['limit']})"
+                        )
+                        # Modify result to indicate quota exceeded
+                        result.success = False
+                        result.error = f"Daily quota exceeded ({quota_info['used']}/{quota_info['limit']})"
+
             # Log execution with full context for analysis
             log_id = self._log_execution(
                 db, binding, symbol, pool, wallet_address, result, params,
-                data_provider, market_data, environment or "mainnet", trigger_type
+                data_provider, market_data, environment or "mainnet", trigger_type, exchange
             )
+
+            # If quota exceeded, don't proceed to handle decision (no trading)
+            if quota_exceeded:
+                return
 
             # Handle decision if successful
             if result.success and result.decision:
-                order_result = self._handle_decision(db, binding, result.decision, symbol, wallet_address)
+                order_result = self._handle_decision(
+                    db, binding, result.decision, symbol, wallet_address,
+                    exchange=exchange, trading_client=trading_client
+                )
                 # Update log with order result and create HyperliquidTrade if filled
                 # Skip for HOLD decisions - they don't execute orders
                 op = result.decision.operation.lower() if hasattr(result.decision, 'operation') else result.decision.action.value
                 if log_id and op != "hold":
                     self._update_log_with_order(
                         db, log_id, order_result, binding, result.decision,
-                        wallet_address, environment or "mainnet"
+                        wallet_address, environment or "mainnet", exchange=exchange
                     )
 
         except Exception as e:
@@ -330,21 +447,45 @@ class ProgramExecutionService:
             self._running_bindings[binding_id] = False
             lock.release()
 
-    def _get_wallet_address(self, db, account: Account) -> Optional[str]:
-        """Get the active wallet address for an account."""
+    def _get_wallet_address(self, db, account: Account, exchange: str = "hyperliquid") -> Optional[str]:
+        """Get the active wallet address for an account based on exchange."""
         from services.hyperliquid_environment import get_global_trading_mode
 
         environment = get_global_trading_mode(db)
         if not environment:
             return None
 
-        wallet = db.query(HyperliquidWallet).filter(
-            HyperliquidWallet.account_id == account.id,
-            HyperliquidWallet.environment == environment,
-            HyperliquidWallet.is_active == "true"
-        ).first()
+        if exchange == "binance":
+            # For Binance, check if API key exists (return a truthy value if configured)
+            wallet = db.query(BinanceWallet).filter(
+                BinanceWallet.account_id == account.id,
+                BinanceWallet.environment == environment,
+                BinanceWallet.is_active == "true"
+            ).first()
+            # Return a placeholder to indicate wallet is configured
+            return "binance_configured" if wallet and wallet.api_key_encrypted else None
+        else:
+            # Hyperliquid wallet
+            wallet = db.query(HyperliquidWallet).filter(
+                HyperliquidWallet.account_id == account.id,
+                HyperliquidWallet.environment == environment,
+                HyperliquidWallet.is_active == "true"
+            ).first()
+            return wallet.wallet_address if wallet else None
 
-        return wallet.wallet_address if wallet else None
+    def _get_binance_leverage_settings(self, db, account_id: int, environment: str) -> dict:
+        """Get leverage settings from BinanceWallet."""
+        wallet = db.query(BinanceWallet).filter(
+            BinanceWallet.account_id == account_id,
+            BinanceWallet.environment == environment,
+            BinanceWallet.is_active == "true"
+        ).first()
+        if wallet:
+            return {
+                "max_leverage": wallet.max_leverage or 10,
+                "default_leverage": wallet.default_leverage or 3
+            }
+        return {"max_leverage": 10, "default_leverage": 3}
 
     def _build_market_data(
         self,
@@ -421,7 +562,8 @@ class ProgramExecutionService:
         data_provider: Optional[DataProvider],
         market_data,
         environment: str,
-        trigger_type: str = "signal"
+        trigger_type: str = "signal",
+        exchange: str = "hyperliquid"
     ):
         """Log program execution to database with full context for analysis."""
         try:
@@ -502,6 +644,7 @@ class ProgramExecutionService:
                 signal_pool_id=pool.get("pool_id"),
                 wallet_address=wallet_address,
                 environment=environment,  # Track execution environment for attribution
+                exchange=exchange,  # Track exchange for attribution (NULL treated as "hyperliquid")
                 success=result.success,
                 error_message=result.error,
                 execution_time_ms=result.execution_time_ms,
@@ -530,7 +673,8 @@ class ProgramExecutionService:
         binding: AccountProgramBinding,
         decision,
         wallet_address: str,
-        environment: str
+        environment: str,
+        exchange: str = "hyperliquid"
     ):
         """Update execution log with order IDs and create HyperliquidTrade if filled."""
         try:
@@ -544,6 +688,15 @@ class ProgramExecutionService:
                 log.error_message = (log.error_message or "") + " [Order execution failed]"
                 db.commit()
                 logger.info(f"[ProgramExecution] Updated log {log_id} with order failure status")
+                return
+
+            # Handle quota exceeded - decision was recorded but not executed
+            if isinstance(order_result, dict) and order_result.get('quota_exceeded'):
+                quota_info = order_result.get('quota_info', {})
+                log.success = False  # Mark as not executed due to quota
+                log.error_message = f"Executed: NO - Daily quota exceeded ({quota_info.get('used', 0)}/{quota_info.get('limit', 20)})"
+                db.commit()
+                logger.info(f"[ProgramExecution] Updated log {log_id} with quota exceeded status")
                 return
 
             # Extract order IDs from result
@@ -565,7 +718,7 @@ class ProgramExecutionService:
             order_status = order_result.get('status')
             if order_status == 'filled':
                 self._create_hyperliquid_trade(
-                    binding, decision, order_result, wallet_address, environment
+                    binding, decision, order_result, wallet_address, environment, exchange
                 )
 
         except Exception as e:
@@ -577,9 +730,10 @@ class ProgramExecutionService:
         decision,
         order_result: dict,
         wallet_address: str,
-        environment: str
+        environment: str,
+        exchange: str = "hyperliquid"
     ):
-        """Create HyperliquidTrade record for filled orders (same as trading_commands.py)."""
+        """Create HyperliquidTrade record for filled orders."""
         try:
             from database.snapshot_connection import SnapshotSessionLocal
             from database.snapshot_models import HyperliquidTrade
@@ -590,6 +744,21 @@ class ProgramExecutionService:
             order_status = order_result.get('status')
             leverage = decision.leverage if hasattr(decision, 'leverage') else 1
 
+            # Use different field names based on exchange
+            if exchange == "binance":
+                # Binance uses filled_qty, avg_price
+                filled_qty = float(order_result.get('filled_qty', 0))
+                avg_price = float(order_result.get('avg_price', 0))
+                # Fallback to decision values if Binance returns 0
+                decision_qty = float(decision.quantity) if hasattr(decision, 'quantity') else 0
+                decision_price = float(decision.price) if hasattr(decision, 'price') else 0
+                trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal(str(decision_qty))
+                trade_price = Decimal(str(avg_price)) if avg_price > 0 else Decimal(str(decision_price))
+            else:
+                # Hyperliquid uses filled_amount, average_price
+                trade_qty = Decimal(str(order_result.get('filled_amount', 0)))
+                trade_price = Decimal(str(order_result.get('average_price', 0)))
+
             snapshot_db = SnapshotSessionLocal()
             try:
                 trade_record = HyperliquidTrade(
@@ -598,12 +767,12 @@ class ProgramExecutionService:
                     wallet_address=wallet_address,
                     symbol=decision.symbol,
                     side=op,
-                    quantity=Decimal(str(order_result.get('filled_amount', 0))),
-                    price=Decimal(str(order_result.get('average_price', 0))),
+                    quantity=trade_qty,
+                    price=trade_price,
                     leverage=leverage,
                     order_id=order_id,
                     order_status=order_status,
-                    trade_value=Decimal(str(order_result.get('filled_amount', 0))) * Decimal(str(order_result.get('average_price', 0))),
+                    trade_value=trade_qty * trade_price,
                     fee=Decimal(str(order_result.get('fee', 0)))
                 )
                 snapshot_db.add(trade_record)
@@ -620,7 +789,9 @@ class ProgramExecutionService:
         binding: AccountProgramBinding,
         decision,
         symbol: str,
-        wallet_address: Optional[str]
+        wallet_address: Optional[str],
+        exchange: str = "hyperliquid",
+        trading_client=None
     ):
         """Handle the decision from program execution - execute actual trade."""
         from program_trader.executor import validate_decision
@@ -635,12 +806,43 @@ class ProgramExecutionService:
         # Validate decision
         positions_dict = {}
         environment = get_global_trading_mode(db)
+
+        # Note: Quota check is now done in _execute_binding before logging,
+        # so we don't need to check again here.
+
+        # Use provided trading_client or create one based on exchange
+        client = trading_client
+        if not client:
+            if exchange == "binance":
+                try:
+                    from services.binance_trading_client import BinanceTradingClient
+                    from database.models import BinanceWallet
+                    from utils.encryption import decrypt_private_key
+
+                    binance_wallet = db.query(BinanceWallet).filter(
+                        BinanceWallet.account_id == binding.account_id,
+                        BinanceWallet.environment == (environment or "mainnet"),
+                        BinanceWallet.is_active == "true"
+                    ).first()
+
+                    if binance_wallet:
+                        api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+                        secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+                        client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")
+                    else:
+                        logger.error(f"[ProgramExecution] No active Binance wallet found for account {binding.account_id}")
+                        return False
+                except Exception as e:
+                    logger.error(f"[ProgramExecution] Failed to create Binance client: {e}")
+                    return False
+            else:
+                client = get_hyperliquid_client(db, binding.account_id, override_environment=environment)
+
         if hasattr(decision, 'operation'):
             # New Decision format - get positions for validation
-            if environment and wallet_address:
+            if environment and client:
                 try:
-                    client = get_hyperliquid_client(db, binding.account_id, override_environment=environment)
-                    data_provider = DataProvider(db, binding.account_id, environment, client)
+                    data_provider = DataProvider(db, binding.account_id, environment, client, exchange=exchange)
                     for sym, pos in data_provider.get_positions().items():
                         positions_dict[sym] = {"side": pos.side, "size": pos.size}
                 except Exception as e:
@@ -654,11 +856,11 @@ class ProgramExecutionService:
         logger.info(
             f"[ProgramExecution] Binding {binding.id} decision: {op} "
             f"{decision.symbol} portion={getattr(decision, 'target_portion_of_balance', 0)} "
-            f"leverage={decision.leverage}x - {decision.reason}"
+            f"leverage={decision.leverage}x exchange={exchange} - {decision.reason}"
         )
 
-        # Check wallet
-        if not wallet_address:
+        # Check wallet (for Binance, wallet_address may be API key indicator)
+        if not wallet_address and exchange != "binance":
             logger.error(f"[ProgramExecution] No wallet address for binding {binding.id}")
             return False
 
@@ -667,16 +869,17 @@ class ProgramExecutionService:
             return False
 
         try:
-            # Initialize trading client using correct factory function
-            client = get_hyperliquid_client(db, binding.account_id, override_environment=environment)
-
             # Get account info and current market price
             account_info = client.get_account_state(db)
             available_balance = account_info.get("available_balance", 0)
 
-            # Get real-time market price for price bounds enforcement
-            from services.hyperliquid_market_data import get_last_price_from_hyperliquid
-            market_price = get_last_price_from_hyperliquid(decision.symbol, environment)
+            # Get real-time market price based on exchange
+            if exchange == "binance":
+                market_price = client.get_mark_price(decision.symbol)
+            else:
+                from services.hyperliquid_market_data import get_last_price_from_hyperliquid
+                market_price = get_last_price_from_hyperliquid(decision.symbol, environment)
+
             if not market_price or market_price <= 0:
                 market_price = getattr(decision, 'max_price', None) or getattr(decision, 'min_price', None)
             if not market_price:
@@ -700,15 +903,15 @@ class ProgramExecutionService:
 
             # Log result
             if order_result and order_result.get("status") in ["filled", "resting"]:
-                logger.info(f"[ProgramExecution] Order succeeded: {order_result}")
-                return order_result  # Return full order_result for HyperliquidTrade creation
+                logger.info(f"[ProgramExecution] Order succeeded on {exchange}: {order_result}")
+                return order_result  # Return full order_result for trade record creation
             else:
                 error_msg = order_result.get('error', 'Unknown error') if order_result else 'No result'
-                logger.error(f"[ProgramExecution] Order failed: {error_msg}")
+                logger.error(f"[ProgramExecution] Order failed on {exchange}: {error_msg}")
                 return None
 
         except Exception as e:
-            logger.error(f"[ProgramExecution] Error executing trade: {e}")
+            logger.error(f"[ProgramExecution] Error executing trade on {exchange}: {e}")
             return None
 
     def _execute_buy(self, db, client, decision, available_balance, market_price, environment):

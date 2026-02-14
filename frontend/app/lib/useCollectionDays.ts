@@ -1,32 +1,33 @@
 import { useState, useEffect } from 'react'
 
-let cachedDays: number | null = null
-let fetchPromise: Promise<number> | null = null
+// Cache per exchange
+const cachedDays: Record<string, number> = {}
+const fetchPromises: Record<string, Promise<number>> = {}
 
-export function useCollectionDays() {
-  const [days, setDays] = useState<number | null>(cachedDays)
+export function useCollectionDays(exchange: string = 'hyperliquid') {
+  const [days, setDays] = useState<number | null>(cachedDays[exchange] ?? null)
 
   useEffect(() => {
-    if (cachedDays !== null) {
-      setDays(cachedDays)
+    if (cachedDays[exchange] !== undefined) {
+      setDays(cachedDays[exchange])
       return
     }
 
-    if (!fetchPromise) {
-      fetchPromise = fetch('/api/system/collection-days')
+    if (!fetchPromises[exchange]) {
+      fetchPromises[exchange] = fetch(`/api/system/collection-days?exchange=${exchange}`)
         .then(res => res.json())
         .then(data => {
-          cachedDays = data.days || 0
-          return cachedDays
+          cachedDays[exchange] = data.days || 0
+          return cachedDays[exchange]
         })
         .catch(() => {
-          cachedDays = 0
+          cachedDays[exchange] = 0
           return 0
         })
     }
 
-    fetchPromise.then(d => setDays(d))
-  }, [])
+    fetchPromises[exchange].then(d => setDays(d))
+  }, [exchange])
 
   return days
 }

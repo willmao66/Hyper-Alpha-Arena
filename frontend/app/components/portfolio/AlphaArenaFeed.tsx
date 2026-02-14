@@ -32,7 +32,7 @@ import { getModelLogo, getProgramIconColors } from './logoAssets'
 import FlipNumber from './FlipNumber'
 import HighlightWrapper from './HighlightWrapper'
 import { formatDateTime } from '@/lib/dateTime'
-import { Loader2, Settings, ChevronDown, ChevronRight } from 'lucide-react'
+import { Loader2, Settings, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import { copyToClipboard } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -47,6 +47,7 @@ interface AlphaArenaFeedProps {
   walletAddress?: string
   onPageChange?: (page: string) => void
   onSelectedSymbolChange?: (symbol: string | null) => void
+  onSelectedExchangeChange?: (exchange: 'all' | 'hyperliquid' | 'binance') => void
 }
 
 type FeedTab = 'trades' | 'model-chat' | 'positions' | 'program'
@@ -82,6 +83,7 @@ export default function AlphaArenaFeed({
   walletAddress,
   onPageChange,
   onSelectedSymbolChange,
+  onSelectedExchangeChange,
 }: AlphaArenaFeedProps) {
   const { t } = useTranslation()
   const { getData, updateData } = useArenaData()
@@ -96,6 +98,7 @@ export default function AlphaArenaFeed({
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [copiedSections, setCopiedSections] = useState<Record<string, boolean>>({})
   const [manualRefreshKey, setManualRefreshKey] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [loadingTrades, setLoadingTrades] = useState(false)
   const [loadingModelChat, setLoadingModelChat] = useState(false)
   const [loadingPositions, setLoadingPositions] = useState(false)
@@ -132,6 +135,9 @@ export default function AlphaArenaFeed({
   const [symbolOptions, setSymbolOptions] = useState<string[]>([])
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
 
+  // Exchange filter state
+  const [selectedExchange, setSelectedExchange] = useState<'all' | 'hyperliquid' | 'binance'>('all')
+
   // Dashboard visibility config dialog
   const [showVisibilityConfig, setShowVisibilityConfig] = useState(false)
   const [visibilityAccounts, setVisibilityAccounts] = useState<TradingAccount[]>([])
@@ -161,6 +167,22 @@ export default function AlphaArenaFeed({
     const walletKey = walletAddress ? walletAddress.toLowerCase() : 'nowallet'
     return `${accountKey}_${tradingMode}_${walletKey}`
   }, [activeAccount, tradingMode, walletAddress])
+
+  // Filter data by selected exchange (frontend filtering)
+  const filteredTrades = useMemo(() => {
+    if (selectedExchange === 'all') return trades
+    return trades.filter(t => (t.exchange || 'hyperliquid') === selectedExchange)
+  }, [trades, selectedExchange])
+
+  const filteredModelChat = useMemo(() => {
+    if (selectedExchange === 'all') return modelChat
+    return modelChat.filter(m => (m.exchange || 'hyperliquid') === selectedExchange)
+  }, [modelChat, selectedExchange])
+
+  const filteredProgramLogs = useMemo(() => {
+    if (selectedExchange === 'all') return programLogs
+    return programLogs.filter(p => (p.exchange || 'hyperliquid') === selectedExchange)
+  }, [programLogs, selectedExchange])
 
   // Initialize from global state on mount or account change
   useEffect(() => {
@@ -316,12 +338,14 @@ export default function AlphaArenaFeed({
       setLoadingTrades(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const symbol = selectedSymbol || undefined
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const tradeRes = await getArenaTrades({
         limit: DEFAULT_LIMIT,
         account_id: accountId,
         trading_mode: tradingMode,
         wallet_address: walletAddress,
         symbol: symbol,
+        exchange: exchange,
       })
       const newTrades = tradeRes.trades || []
       setTrades(newTrades)
@@ -345,7 +369,7 @@ export default function AlphaArenaFeed({
       setLoadingTrades(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, selectedSymbol])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, selectedSymbol, selectedExchange])
 
   // Helper function to merge and deduplicate model chat entries
   const mergeModelChatData = useCallback((existing: ArenaModelChatEntry[], newData: ArenaModelChatEntry[]) => {
@@ -372,12 +396,14 @@ export default function AlphaArenaFeed({
       setLoadingModelChat(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const symbol = selectedSymbol || undefined
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const chatRes = await getArenaModelChat({
         limit: MODEL_CHAT_LIMIT,
         account_id: accountId,
         trading_mode: tradingMode,
         wallet_address: walletAddress,
         symbol: symbol,
+        exchange: exchange,
       })
       const newModelChat = chatRes.entries || []
 
@@ -418,7 +444,7 @@ export default function AlphaArenaFeed({
       return null
     }
 
-  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, mergeModelChatData, selectedSymbol])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, mergeModelChatData, selectedSymbol, selectedExchange])
 
   // Load more model chat entries (lazy loading)
   const loadMoreModelChat = useCallback(async () => {
@@ -438,12 +464,14 @@ export default function AlphaArenaFeed({
       }
 
       const accountId = activeAccount === 'all' ? undefined : activeAccount
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const chatRes = await getArenaModelChat({
         limit: MODEL_CHAT_LIMIT,
         account_id: accountId,
         trading_mode: tradingMode,
         wallet_address: walletAddress,
         before_time: beforeTime,
+        exchange: exchange,
       })
 
       const newEntries = chatRes.entries || []
@@ -461,7 +489,7 @@ export default function AlphaArenaFeed({
       console.error('[AlphaArenaFeed] Failed to load more model chat:', err)
       setIsLoadingMoreModelChat(false)
     }
-  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, hasMoreModelChat, isLoadingMoreModelChat, mergeModelChatData, selectedSymbol])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, hasMoreModelChat, isLoadingMoreModelChat, mergeModelChatData, selectedSymbol, selectedExchange])
 
   const loadPositionsData = useCallback(async () => {
     try {
@@ -502,7 +530,8 @@ export default function AlphaArenaFeed({
       if (!backgroundRefresh) setLoadingProgram(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
-      const logs = await getProgramExecutions({ account_id: accountId, environment: env, limit: 50 })
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
+      const logs = await getProgramExecutions({ account_id: accountId, environment: env, limit: 50, exchange: exchange })
       setProgramLogs(logs)
       setHasMoreProgram(logs.length >= 50)
       if (!backgroundRefresh) setLoadingProgram(false)
@@ -512,7 +541,7 @@ export default function AlphaArenaFeed({
       if (!backgroundRefresh) setLoadingProgram(false)
       return null
     }
-  }, [activeAccount, tradingMode])
+  }, [activeAccount, tradingMode, selectedExchange])
 
   // Load more program logs (lazy loading)
   const loadMoreProgramData = useCallback(async () => {
@@ -523,11 +552,13 @@ export default function AlphaArenaFeed({
       const oldestLog = programLogs[programLogs.length - 1]
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
+      const exchange = selectedExchange === 'all' ? undefined : selectedExchange
       const moreLogs = await getProgramExecutions({
         account_id: accountId,
         environment: env,
         limit: 50,
-        before: oldestLog.created_at
+        before: oldestLog.created_at,
+        exchange: exchange,
       })
 
       if (moreLogs.length === 0) {
@@ -541,7 +572,7 @@ export default function AlphaArenaFeed({
     } finally {
       setIsLoadingMoreProgram(false)
     }
-  }, [activeAccount, tradingMode, programLogs, hasMoreProgram, isLoadingMoreProgram])
+  }, [activeAccount, tradingMode, programLogs, hasMoreProgram, isLoadingMoreProgram, selectedExchange])
 
   // Copy program log content (decision or error based on success status)
   const handleCopyProgramLog = async (log: ProgramExecutionLog) => {
@@ -686,13 +717,27 @@ export default function AlphaArenaFeed({
     return allTraderOptions.sort((a, b) => a.name.localeCompare(b.name))
   }, [allTraderOptions])
 
-  const handleRefreshClick = () => {
+  const handleRefreshClick = async () => {
+    setIsRefreshing(true)
     setManualRefreshKey((key) => key + 1)
+    // Keep spinning for at least 500ms for visual feedback
+    setTimeout(() => setIsRefreshing(false), 500)
   }
 
   const handleSymbolFilterChange = (symbol: string | null) => {
     setSelectedSymbol(symbol)
     onSelectedSymbolChange?.(symbol)
+  }
+
+  const handleExchangeFilterChange = (exchange: 'all' | 'hyperliquid' | 'binance') => {
+    setSelectedExchange(exchange)
+    onSelectedExchangeChange?.(exchange)
+    // Reload data with new exchange filter
+    Promise.allSettled([
+      loadTradesData(),
+      loadModelChatData(false),
+      loadProgramData()
+    ])
   }
 
   // Dashboard visibility config handlers
@@ -795,13 +840,23 @@ export default function AlphaArenaFeed({
     try {
       const result = await updateArenaPnl()
       if (result.success) {
-        // Calculate total updates across all environments
+        // Calculate total updates across all exchanges and environments
         let totalTrades = 0
         let totalDecisions = 0
-        Object.values(result.environments).forEach((env) => {
-          totalTrades += env.trades_updated
-          totalDecisions += env.decisions_updated
-        })
+        // Process Hyperliquid environments
+        if (result.hyperliquid) {
+          Object.values(result.hyperliquid).forEach((env) => {
+            totalTrades += env.trades_updated + env.trades_created
+            totalDecisions += env.decisions_updated + env.program_logs_updated
+          })
+        }
+        // Process Binance environments
+        if (result.binance) {
+          Object.values(result.binance).forEach((env) => {
+            totalTrades += env.trades_updated + env.trades_created
+            totalDecisions += env.decisions_updated + env.program_logs_updated
+          })
+        }
         setPnlUpdateResult(
           t('feed.pnlUpdateSuccess', 'Updated {{trades}} trades, {{decisions}} decisions', {
             trades: totalTrades,
@@ -873,7 +928,7 @@ export default function AlphaArenaFeed({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('feed.filter', 'Filter')}</span>
           <select
             value={activeAccount === 'all' ? '' : activeAccount}
@@ -881,12 +936,12 @@ export default function AlphaArenaFeed({
               const value = e.target.value
               handleAccountFilterChange(value ? Number(value) : 'all')
             }}
-            className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground"
+            className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground max-w-[120px]"
           >
             <option value="">{t('feed.allTraders', 'All Traders')}</option>
             {accountOptions.map((meta) => (
               <option key={meta.account_id} value={meta.account_id}>
-                {meta.name}{meta.model ? ` (${meta.model})` : ''}
+                {meta.name}
               </option>
             ))}
           </select>
@@ -903,10 +958,19 @@ export default function AlphaArenaFeed({
               </option>
             ))}
           </select>
+          <select
+            value={selectedExchange}
+            onChange={(e) => handleExchangeFilterChange(e.target.value as 'all' | 'hyperliquid' | 'binance')}
+            className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground"
+          >
+            <option value="all">{t('feed.allExchanges', 'All Exchanges')}</option>
+            <option value="hyperliquid">Hyperliquid</option>
+            <option value="binance">Binance</option>
+          </select>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleRefreshClick} disabled={loadingTrades || loadingModelChat || loadingPositions}>
-            {t('common.refresh', 'Refresh')}
+          <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={handleRefreshClick} disabled={isRefreshing || loadingTrades || loadingModelChat || loadingPositions} title={t('common.refresh', 'Refresh')}>
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           </Button>
           <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={handleOpenVisibilityConfig} title={t('feed.configureVisibility', 'Configure Dashboard Visibility')}>
             <Settings className="h-4 w-4" />
@@ -1049,12 +1113,12 @@ export default function AlphaArenaFeed({
                   </DialogContent>
                 </Dialog>
 
-                {loadingTrades && trades.length === 0 ? (
+                {loadingTrades && filteredTrades.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.loadingTrades', 'Loading trades...')}</div>
-                ) : trades.length === 0 ? (
+                ) : filteredTrades.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.noTrades', 'No recent trades found.')}</div>
                 ) : (
-                  trades.map((trade) => {
+                  filteredTrades.map((trade) => {
                     const modelLogo = getModelLogo(trade.account_name || trade.model)
                     const isNew = !seenTradeIds.current.has(trade.trade_id)
                     if (!seenTradeIds.current.has(trade.trade_id)) {
@@ -1134,21 +1198,33 @@ export default function AlphaArenaFeed({
                           </div>
                         </div>
                         {(trade.signal_trigger_id || trade.prompt_template_name) && (
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground pt-1 border-t border-border/50">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                              trade.signal_trigger_id
-                                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                            }`}>
-                              {trade.signal_trigger_id
-                                ? t('feed.signalPoolTrigger', 'Signal Pool')
-                                : t('feed.scheduledTrigger', 'Scheduled')}
-                            </span>
-                            {trade.prompt_template_name && trade.decision_source_type !== 'program' && (
-                              <span className="px-2 py-0.5 rounded font-medium bg-muted text-foreground">
-                                {trade.prompt_template_name}
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground pt-1 border-t border-border/50">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                                trade.signal_trigger_id
+                                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                              }`}>
+                                {trade.signal_trigger_id
+                                  ? t('feed.signalPoolTrigger', 'Signal Pool')
+                                  : t('feed.scheduledTrigger', 'Scheduled')}
                               </span>
-                            )}
+                              {trade.prompt_template_name && trade.decision_source_type !== 'program' && (
+                                <span className="px-2 py-0.5 rounded font-medium bg-muted text-foreground">
+                                  {trade.prompt_template_name}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                              <img
+                                src={trade.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                                alt={trade.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="text-[10px] font-medium text-slate-200">
+                                {trade.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              </span>
+                            </div>
                           </div>
                         )}
                         {trade.related_orders && trade.related_orders.length > 0 && (
@@ -1184,13 +1260,13 @@ export default function AlphaArenaFeed({
               </TabsContent>
 
               <TabsContent value="model-chat" className="flex-1 h-0 overflow-y-auto mt-0 p-4 space-y-3">
-                {loadingModelChat && modelChat.length === 0 ? (
+                {loadingModelChat && filteredModelChat.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.loadingModelChat', 'Loading model chat...')}</div>
-                ) : modelChat.length === 0 ? (
+                ) : filteredModelChat.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.noModelChat', 'No recent AI commentary.')}</div>
                 ) : (
                   <>
-                  {modelChat.map((entry) => {
+                  {filteredModelChat.map((entry) => {
                     const isExpanded = expandedChat === entry.id
                     const modelLogo = getModelLogo(entry.account_name || entry.model)
                     const isNew = !seenDecisionIds.current.has(entry.id)
@@ -1238,32 +1314,44 @@ export default function AlphaArenaFeed({
                           </div>
                           <span>{formatDate(entry.decision_time)}</span>
                         </div>
-                        <div className="text-sm font-medium text-foreground flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            entry.operation?.toUpperCase() === 'BUY'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : entry.operation?.toUpperCase() === 'SELL'
-                              ? 'bg-red-100 text-red-800'
-                              : entry.operation?.toUpperCase() === 'CLOSE'
-                              ? 'bg-blue-100 text-blue-800'
-                              : entry.operation?.toUpperCase() === 'HOLD'
-                              ? 'bg-gray-200 text-gray-800'
-                              : 'bg-orange-100 text-orange-800'
-                          }`}>
-                            {(entry.operation || 'UNKNOWN').toUpperCase()}
-                          </span>
-                          {entry.symbol && (
-                            <span className="font-semibold">{entry.symbol}</span>
-                          )}
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            entry.signal_trigger_id
-                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                          }`}>
-                            {entry.signal_trigger_id
-                              ? t('feed.signalPoolTrigger', 'Signal Pool')
-                              : t('feed.scheduledTrigger', 'Scheduled')}
-                          </span>
+                        <div className="text-sm font-medium text-foreground flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${
+                              entry.operation?.toUpperCase() === 'BUY'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : entry.operation?.toUpperCase() === 'SELL'
+                                ? 'bg-red-100 text-red-800'
+                                : entry.operation?.toUpperCase() === 'CLOSE'
+                                ? 'bg-blue-100 text-blue-800'
+                                : entry.operation?.toUpperCase() === 'HOLD'
+                                ? 'bg-gray-200 text-gray-800'
+                                : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {(entry.operation || 'UNKNOWN').toUpperCase()}
+                            </span>
+                            {entry.symbol && (
+                              <span className="font-semibold">{entry.symbol}</span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              entry.signal_trigger_id
+                                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                              {entry.signal_trigger_id
+                                ? t('feed.signalPoolTrigger', 'Signal Pool')
+                                : t('feed.scheduledTrigger', 'Scheduled')}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                            <img
+                              src={entry.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                              alt={entry.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              className="h-3.5 w-3.5"
+                            />
+                            <span className="text-[10px] font-medium text-slate-200">
+                              {entry.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                            </span>
+                          </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {isExpanded ? entry.reason : `${entry.reason.slice(0, 160)}${entry.reason.length > 160 ? '…' : ''}`}
@@ -1435,6 +1523,16 @@ export default function AlphaArenaFeed({
                                 {snapshot.environment}
                               </span>
                             )}
+                            <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                              <img
+                                src={snapshot.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                                alt={snapshot.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="text-[10px] font-medium text-slate-200">
+                                {snapshot.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-4 text-xs uppercase tracking-wide text-muted-foreground">
                             <div>
@@ -1566,12 +1664,12 @@ export default function AlphaArenaFeed({
               </TabsContent>
 
               <TabsContent value="program" className="flex-1 h-0 overflow-y-auto mt-0 p-4 space-y-3">
-                {loadingProgram && programLogs.length === 0 ? (
+                {loadingProgram && filteredProgramLogs.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.loadingProgram', 'Loading program executions...')}</div>
-                ) : programLogs.length === 0 ? (
+                ) : filteredProgramLogs.length === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('feed.noProgram', 'No program executions yet.')}</div>
                 ) : (
-                  programLogs.map((log) => {
+                  filteredProgramLogs.map((log) => {
                     const isExpanded = expandedProgramLog === log.id
                     const iconColors = getProgramIconColors(log.program_id)
                     return (
@@ -1593,37 +1691,49 @@ export default function AlphaArenaFeed({
                           </div>
                           <span>{formatDate(log.created_at)}</span>
                         </div>
-                        <div className="text-sm font-medium text-foreground flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            log.decision_action?.toUpperCase() === 'BUY'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : log.decision_action?.toUpperCase() === 'SELL'
-                              ? 'bg-red-100 text-red-800'
-                              : log.decision_action?.toUpperCase() === 'CLOSE'
-                              ? 'bg-blue-100 text-blue-800'
-                              : log.decision_action?.toUpperCase() === 'HOLD'
-                              ? 'bg-gray-200 text-gray-800'
-                              : 'bg-orange-100 text-orange-800'
-                          }`}>
-                            {(log.decision_action || 'UNKNOWN').toUpperCase()}
-                          </span>
-                          {log.decision_symbol && (
-                            <span className="font-semibold">{log.decision_symbol}</span>
-                          )}
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            log.trigger_type === 'signal'
-                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                          }`}>
-                            {log.trigger_type === 'signal' ? t('feed.signalPoolTrigger', 'Signal Pool') : t('feed.scheduledTrigger', 'Scheduled')}
-                          </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            log.success
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                              : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                          }`}>
-                            {log.success ? t('common.success', 'Success') : t('common.failed', 'Failed')}
-                          </span>
+                        <div className="text-sm font-medium text-foreground flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${
+                              log.decision_action?.toUpperCase() === 'BUY'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : log.decision_action?.toUpperCase() === 'SELL'
+                                ? 'bg-red-100 text-red-800'
+                                : log.decision_action?.toUpperCase() === 'CLOSE'
+                                ? 'bg-blue-100 text-blue-800'
+                                : log.decision_action?.toUpperCase() === 'HOLD'
+                                ? 'bg-gray-200 text-gray-800'
+                                : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {(log.decision_action || 'UNKNOWN').toUpperCase()}
+                            </span>
+                            {log.decision_symbol && (
+                              <span className="font-semibold">{log.decision_symbol}</span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              log.trigger_type === 'signal'
+                                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                              {log.trigger_type === 'signal' ? t('feed.signalPoolTrigger', 'Signal Pool') : t('feed.scheduledTrigger', 'Scheduled')}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              log.success
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                            }`}>
+                              {log.success ? t('common.success', 'Success') : t('common.failed', 'Failed')}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                            <img
+                              src={log.exchange === 'binance' ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'}
+                              alt={log.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                              className="h-3.5 w-3.5"
+                            />
+                            <span className="text-[10px] font-medium text-slate-200">
+                              {log.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                            </span>
+                          </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {isExpanded ? log.decision_reason : `${(log.decision_reason || '').slice(0, 160)}${(log.decision_reason || '').length > 160 ? '…' : ''}`}

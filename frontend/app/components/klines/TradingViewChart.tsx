@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, AreaSeries } from 'lightweight-charts'
 import PacmanLoader from '../ui/pacman-loader'
-import { formatChartTime } from '../../lib/dateTime'
+import { formatChartTime, localToUtcTimestamp } from '../../lib/dateTime'
 
 // Mobile detection helper
 const isMobileDevice = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -29,6 +29,7 @@ const formatMobilePrice = (price: number): string => {
 interface TradingViewChartProps {
   symbol: string
   period: string
+  exchange?: 'hyperliquid' | 'binance'
   chartType: 'candlestick' | 'line' | 'area'
   selectedIndicators: string[]
   selectedFlowIndicators?: string[]
@@ -44,6 +45,7 @@ type ChartType = 'candlestick' | 'line' | 'area'
 export default function TradingViewChart({
   symbol,
   period,
+  exchange = 'hyperliquid',
   chartType,
   selectedIndicators,
   selectedFlowIndicators = [],
@@ -1299,18 +1301,21 @@ export default function TradingViewChart({
       let endTime: number
 
       if (chartData.length > 0) {
-        // chartData.time is in seconds (TradingView format), convert to milliseconds
+        // chartData.time is in local timezone (adjusted by formatChartTime for display)
+        // Convert back to UTC for API request
         const firstTime = chartData[0].time
         const lastTime = chartData[chartData.length - 1].time
-        startTime = (typeof firstTime === 'number' ? firstTime : new Date(firstTime).getTime() / 1000) * 1000
-        endTime = (typeof lastTime === 'number' ? lastTime : new Date(lastTime).getTime() / 1000) * 1000
+        const utcFirstTime = typeof firstTime === 'number' ? localToUtcTimestamp(firstTime) : new Date(firstTime).getTime() / 1000
+        const utcLastTime = typeof lastTime === 'number' ? localToUtcTimestamp(lastTime) : new Date(lastTime).getTime() / 1000
+        startTime = utcFirstTime * 1000
+        endTime = utcLastTime * 1000
       } else {
         endTime = Date.now()
         startTime = endTime - 7 * 24 * 60 * 60 * 1000
       }
 
       const response = await fetch(
-        `/api/market-flow/indicators?symbol=${symbol}&timeframe=${period}&start_time=${startTime}&end_time=${endTime}&indicators=${indicator}`
+        `/api/market-flow/indicators?symbol=${symbol}&exchange=${exchange}&timeframe=${period}&start_time=${startTime}&end_time=${endTime}&indicators=${indicator}`
       )
       if (!response.ok) return
 
@@ -1447,7 +1452,7 @@ export default function TradingViewChart({
       // 始终请求当前选中的指标，避免缓存缺失
       const indicatorsToFetch = selectedIndicators
       const indicatorsParam = indicatorsToFetch.length > 0 ? `&indicators=${indicatorsToFetch.join(',')}` : ''
-      const response = await fetch(`/api/market/kline-with-indicators/${symbol}?market=hyperliquid&period=${period}&count=500${indicatorsParam}`)
+      const response = await fetch(`/api/market/kline-with-indicators/${symbol}?market=${exchange}&period=${period}&count=500${indicatorsParam}`)
       const result = await response.json()
 
       if (result.klines && result.klines.length > 0) {
@@ -1487,7 +1492,7 @@ export default function TradingViewChart({
     }
   }
 
-  // 当symbol或period变化时清空缓存并重新获取数据
+  // 当symbol、period或exchange变化时清空缓存并重新获取数据
   useEffect(() => {
     if (symbol && period) {
       // 立即清空图表数据和缓存
@@ -1521,7 +1526,7 @@ export default function TradingViewChart({
       // 强制请求所有选中指标
       fetchKlineData(true)
     }
-  }, [symbol, period])
+  }, [symbol, period, exchange])
 
   // 当指标选择变化时，检查并获取缺失的指标数据
   useEffect(() => {
@@ -1676,7 +1681,7 @@ export default function TradingViewChart({
     }
   }, [activeFlowIndicator])
 
-  // Re-fetch flow data when symbol, period, or chartData changes
+  // Re-fetch flow data when symbol, period, exchange, or chartData changes
   useEffect(() => {
     if (selectedFlowIndicators.length > 0 && flowPaneRef.current && chartData.length > 0) {
       // Clear all flow series data first (consistent with main chart behavior)
@@ -1694,7 +1699,7 @@ export default function TradingViewChart({
         fetchFlowData(activeFlowIndicator)
       }
     }
-  }, [symbol, period, chartData.length])
+  }, [symbol, period, exchange, chartData.length])
 
   return (
     <div className="relative w-full h-full">

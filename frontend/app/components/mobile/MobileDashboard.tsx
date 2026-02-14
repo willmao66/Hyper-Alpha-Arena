@@ -59,8 +59,12 @@ export default function MobileDashboard() {
     setPnlResult(null)
     try {
       const result = await updateArenaPnl()
-      setPnlResult(result.message || t('feed.pnlUpdated', 'PnL data updated'))
-      loadData()
+      if (result.success) {
+        setPnlResult(t('feed.pnlUpdated', 'PnL data updated'))
+        loadData()
+      } else {
+        setPnlResult(result.errors?.[0] || t('feed.pnlUpdateFailed', 'Failed to update PnL'))
+      }
     } catch (error) {
       setPnlResult(t('feed.pnlUpdateFailed', 'Failed to update PnL'))
     } finally {

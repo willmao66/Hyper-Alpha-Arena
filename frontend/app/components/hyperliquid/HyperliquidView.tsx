@@ -35,6 +35,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
   const [chartRefreshKey, setChartRefreshKey] = useState(0)
   const [selectedAccount, setSelectedAccount] = useState<number | 'all'>('all')
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
+  const [selectedExchange, setSelectedExchange] = useState<'all' | 'hyperliquid' | 'binance'>('all')
   const [tradeMarkers, setTradeMarkers] = useState<TradeMarker[]>([])
   const environment = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
 
@@ -55,7 +56,8 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
           side: t.side,
           symbol: t.symbol,
           account_id: t.account_id,
-          price: t.price
+          price: t.price,
+          exchange: t.exchange || 'hyperliquid'
         }))
         setTradeMarkers(markers)
       } catch (error) {
@@ -73,9 +75,10 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
   const accounts = positionsData?.accounts?.map((acc: any) => ({
     account_id: acc.account_id,
     account_name: acc.account_name,
+    exchange: acc.exchange || 'hyperliquid',
   })) || []
 
-  // Extract all positions with account_id for the summary component
+  // Extract all positions with account_id and exchange for the summary component
   const allPositions = positionsData?.accounts?.flatMap((acc: any) =>
     (acc.positions || []).map((pos: any) => ({
       symbol: pos.symbol,
@@ -86,6 +89,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
       unrealized_pnl: pos.unrealized_pnl,
       leverage: pos.leverage || 1,
       account_id: acc.account_id,
+      exchange: acc.exchange || 'hyperliquid',
     }))
   ) || []
 
@@ -112,6 +116,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
               selectedAccount={selectedAccount}
               trades={tradeMarkers}
               selectedSymbol={selectedSymbol}
+              selectedExchange={selectedExchange}
             />
           ) : (
             <div className="bg-card border border-border rounded-lg h-full flex items-center justify-center">
@@ -137,6 +142,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0, onPageChange }:
             selectedAccount={selectedAccount}
             onSelectedAccountChange={setSelectedAccount}
             onSelectedSymbolChange={setSelectedSymbol}
+            onSelectedExchangeChange={setSelectedExchange}
             onPageChange={onPageChange}
           />
         </div>

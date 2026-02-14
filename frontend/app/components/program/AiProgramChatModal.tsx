@@ -56,6 +56,7 @@ interface Message {
   toolCalls?: ToolCallEntry[]
   toolCallsLog?: ToolCallLogEntry[]  // From API, for displaying full args
   saveSuggestion?: SaveSuggestion | null
+  reasoningSnapshot?: string | null
 }
 
 interface Conversation {
@@ -149,10 +150,11 @@ export default function AiProgramChatModal({
       if (response.ok) {
         const data = await response.json()
         // Map API fields to frontend format
-        const mappedMessages = data.map((m: Message & { is_complete?: boolean; tool_calls_log?: ToolCallLogEntry[] }) => ({
+        const mappedMessages = data.map((m: Message & { is_complete?: boolean; tool_calls_log?: ToolCallLogEntry[]; reasoning_snapshot?: string }) => ({
           ...m,
           isInterrupted: m.role === 'assistant' && m.is_complete === false,
-          toolCallsLog: m.tool_calls_log || []
+          toolCallsLog: m.tool_calls_log || [],
+          reasoningSnapshot: m.reasoning_snapshot || null
         }))
         setMessages(mappedMessages || [])
         const suggestions: SaveSuggestion[] = []
@@ -579,6 +581,17 @@ function ChatArea({
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </details>
+                )}
+                {/* Reasoning snapshot for loaded messages */}
+                {!msg.isStreaming && msg.reasoningSnapshot && (
+                  <details className="mt-3 text-xs border rounded-md">
+                    <summary className="px-3 py-2 cursor-pointer bg-muted/50 hover:bg-muted font-medium">
+                      {t('program.aiChat.reasoningProcess', 'Reasoning process')}
+                    </summary>
+                    <div className="p-3 max-h-96 overflow-y-auto">
+                      <pre className="whitespace-pre-wrap text-muted-foreground">{msg.reasoningSnapshot}</pre>
                     </div>
                   </details>
                 )}

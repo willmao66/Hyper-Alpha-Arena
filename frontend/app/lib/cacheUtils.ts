@@ -103,13 +103,13 @@ export function clearCache(key: string): void {
 /**
  * Generate cache key for API Usage
  */
-export function getApiUsageCacheKey(accountId: number, environment: string): string {
-  return `api_usage_${accountId}_${environment}`;
+export function getApiUsageCacheKey(accountId: number, environment: string, exchange: string = 'hyperliquid'): string {
+  return `api_usage_${accountId}_${environment}_${exchange}`;
 }
 
 /**
  * Generate cache key for Trading Stats
  */
-export function getTradingStatsCacheKey(accountId: number, environment: string): string {
-  return `trading_stats_${accountId}_${environment}`;
+export function getTradingStatsCacheKey(accountId: number, environment: string, exchange: string = 'hyperliquid'): string {
+  return `trading_stats_${accountId}_${environment}_${exchange}`;
 }

@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TrendingUp, AlertTriangle, Eye, Zap } from 'lucide-react'
-import { getHyperliquidBalance, getWalletRateLimit, getTradingStats, TradingStats } from '@/lib/hyperliquidApi'
+import { getHyperliquidBalance, getWalletRateLimit, getTradingStats, getBinanceTradingStats, TradingStats, getBinanceSummary, getBinanceDailyQuota } from '@/lib/hyperliquidApi'
 import { getModelLogo } from './logoAssets'
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid'
 import type { HyperliquidBalance } from '@/lib/types/hyperliquid'
@@ -18,6 +18,7 @@ import {
   getCacheTimestamp,
 } from '@/lib/cacheUtils'
 import TraderDetailModal from './TraderDetailModal'
+import QuotaUpgradeModal from '@/components/binance/QuotaUpgradeModal'
 
 // Position type from parent component
 export interface Position {
@@ -29,6 +30,7 @@ export interface Position {
   unrealized_pnl: number
   leverage: number
   account_id: number
+  exchange?: string  // 'hyperliquid' | 'binance'
 }
 
 interface RateLimitData {
@@ -43,6 +45,7 @@ interface RateLimitData {
 interface AccountBalance {
   accountId: number
   accountName: string
+  exchange: string
   balance: HyperliquidBalance | null
   error: string | null
   loading: boolean
@@ -50,10 +53,17 @@ interface AccountBalance {
   rateLimitUpdated: number | null
   tradingStats: TradingStats | null
   tradingStatsUpdated: number | null
+  quota?: {
+    limited: boolean
+    used: number
+    limit: number
+    remaining: number
+    reset_at?: number
+  } | null
 }
 
 interface HyperliquidMultiAccountSummaryProps {
-  accounts: Array<{ account_id: number; account_name: string }>
+  accounts: Array<{ account_id: number; account_name: string; exchange?: string }>
   refreshKey?: number
   selectedAccount?: number | 'all'
   positions?: Position[]
@@ -99,6 +109,8 @@ export default function HyperliquidMultiAccountSummary({
   const [globalLastUpdate, setGlobalLastUpdate] = useState<string | null>(null)
   const [selectedTraderForModal, setSelectedTraderForModal] = useState<AccountBalance | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isQuotaModalOpen, setIsQuotaModalOpen] = useState(false)
+  const [selectedQuotaAccount, setSelectedQuotaAccount] = useState<AccountBalance | null>(null)
 
   // Filter accounts based on selectedAccount - memoized to prevent infinite loops
   const filteredAccounts = useMemo(() => {
@@ -116,26 +128,71 @@ export default function HyperliquidMultiAccountSummary({
     // Step 1: Load balances quickly with cached data
     const balanceResults = await Promise.allSettled(
       filteredAccounts.map(async (acc) => {
+        const exchange = acc.exchange || 'hyperliquid'
         try {
-          const balance = await getHyperliquidBalance(acc.account_id)
-          // Read from cache immediately (no API call)
-          const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment)
-          const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment)
+          let balance: HyperliquidBalance | null = null
+          let rateLimit: RateLimitData | null = null
+
+          if (exchange === 'binance') {
+            // Binance: use summary endpoint for balance + rate limit
+            const summary = await getBinanceSummary(acc.account_id)
+            balance = {
+              totalEquity: summary.equity,
+              availableBalance: summary.available_balance,
+              usedMargin: summary.used_margin,
+              marginUsagePercent: summary.margin_usage,
+              unrealizedPnl: summary.unrealized_pnl,
+              lastUpdated: summary.last_updated
+                ? (typeof summary.last_updated === 'number'
+                    ? new Date(summary.last_updated).toISOString()
+                    : summary.last_updated)
+                : new Date().toISOString(),
+            } as HyperliquidBalance
+            if (summary.rate_limit) {
+              rateLimit = {
+                cumVlm: 0,
+                nRequestsUsed: summary.rate_limit.used_weight,
+                nRequestsCap: summary.rate_limit.weight_cap,
+                remaining: summary.rate_limit.remaining,
+                usagePercent: summary.rate_limit.usage_percent,
+                isOverLimit: summary.rate_limit.usage_percent >= 100,
+              }
+            }
+          } else {
+            balance = await getHyperliquidBalance(acc.account_id)
+          }
+
+          // Fetch daily quota for Binance mainnet accounts
+          let quota = null
+          if (exchange === 'binance' && environment === 'mainnet') {
+            try {
+              const quotaData = await getBinanceDailyQuota(acc.account_id)
+              if (quotaData.limited) {
+                quota = quotaData
+              }
+            } catch (e) { /* ignore quota fetch errors */ }
+          }
+
+          const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment, exchange)
+          const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment, exchange)
           return {
             accountId: acc.account_id,
             accountName: acc.account_name,
+            exchange,
             balance,
             error: null,
             loading: false,
-            rateLimit: getCachedData<RateLimitData>(apiUsageCacheKey),
-            rateLimitUpdated: getCacheTimestamp(apiUsageCacheKey),
+            rateLimit: rateLimit || getCachedData<RateLimitData>(apiUsageCacheKey),
+            rateLimitUpdated: rateLimit ? Date.now() : getCacheTimestamp(apiUsageCacheKey),
             tradingStats: getCachedData<TradingStats>(statsCacheKey),
             tradingStatsUpdated: getCacheTimestamp(statsCacheKey),
+            quota,
           }
         } catch (error: any) {
           return {
             accountId: acc.account_id,
             accountName: acc.account_name,
+            exchange,
             balance: null,
             error: error.message || 'Failed to load',
             loading: false,
@@ -153,6 +210,7 @@ export default function HyperliquidMultiAccountSummary({
       return {
         accountId: filteredAccounts[index].account_id,
         accountName: filteredAccounts[index].account_name,
+        exchange: filteredAccounts[index].exchange || 'hyperliquid',
         balance: null,
         error: 'Failed to load',
         loading: false,
@@ -173,10 +231,14 @@ export default function HyperliquidMultiAccountSummary({
       .reverse()[0]
     if (latestUpdate) setGlobalLastUpdate(formatDateTime(latestUpdate))
 
-    // Step 2: Async load API Usage and Trading Stats for accounts missing cache
+    // Step 2: Async load API Usage and Trading Stats for Hyperliquid accounts missing cache
     filteredAccounts.forEach(async (acc) => {
-      const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment)
-      const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment)
+      // Skip Binance accounts - their rate limit is already loaded in Step 1
+      if ((acc.exchange || 'hyperliquid') === 'binance') return
+
+      const accExchange = acc.exchange || 'hyperliquid'
+      const apiUsageCacheKey = getApiUsageCacheKey(acc.account_id, environment, accExchange)
+      const statsCacheKey = getTradingStatsCacheKey(acc.account_id, environment, accExchange)
       let needsUpdate = false
       let newRateLimit = getCachedData<RateLimitData>(apiUsageCacheKey)
       let newRateLimitUpdated = getCacheTimestamp(apiUsageCacheKey)
@@ -199,7 +261,9 @@ export default function HyperliquidMultiAccountSummary({
       // Fetch Trading Stats if not cached
       if (!newTradingStats) {
         try {
-          const res = await getTradingStats(acc.account_id, environment)
+          const res = accExchange === 'binance'
+            ? await getBinanceTradingStats(acc.account_id, environment)
+            : await getTradingStats(acc.account_id, environment)
           if (res.success && res.stats) {
             newTradingStats = res.stats
             setCachedData(statsCacheKey, newTradingStats)
@@ -212,7 +276,7 @@ export default function HyperliquidMultiAccountSummary({
       // Update state if new data fetched
       if (needsUpdate) {
         setAccountBalances(prev => prev.map(a =>
-          a.accountId === acc.account_id
+          (a.accountId === acc.account_id && a.exchange === (acc.exchange || 'hyperliquid'))
             ? { ...a, rateLimit: newRateLimit, rateLimitUpdated: newRateLimitUpdated, tradingStats: newTradingStats, tradingStatsUpdated: newTradingStatsUpdated }
             : a
         ))
@@ -233,6 +297,7 @@ export default function HyperliquidMultiAccountSummary({
         filteredAccounts.map((acc) => ({
           accountId: acc.account_id,
           accountName: acc.account_name,
+          exchange: acc.exchange || 'hyperliquid',
           balance: null,
           error: null,
           loading: true,
@@ -247,9 +312,9 @@ export default function HyperliquidMultiAccountSummary({
     loadAllBalances()
   }, [filteredAccounts, tradingMode, refreshKey])
 
-  // Get positions for a specific account
-  const getAccountPositions = (accountId: number) => {
-    return positions.filter(p => p.account_id === accountId)
+  // Get positions for a specific account and exchange
+  const getAccountPositions = (accountId: number, exchange: string) => {
+    return positions.filter(p => p.account_id === accountId && (p.exchange || 'hyperliquid') === exchange)
   }
 
   // Handle opening modal
@@ -295,7 +360,7 @@ export default function HyperliquidMultiAccountSummary({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t('account.accountStatus', 'Hyperliquid Account Status')}</h2>
+        <h2 className="text-lg font-semibold">{t('account.accountStatus', 'Account Status')}</h2>
         <Badge
           variant={environment === 'testnet' ? 'default' : 'destructive'}
           className="uppercase text-xs"
@@ -322,11 +387,13 @@ export default function HyperliquidMultiAccountSummary({
           const marginStatus = account.balance
             ? getMarginStatus(account.balance.marginUsagePercent, t)
             : null
-          const accountPositions = getAccountPositions(account.accountId)
+          const accountPositions = getAccountPositions(account.accountId, account.exchange)
+          const isBinance = account.exchange === 'binance'
+          const exchangeLogo = isBinance ? '/static/binance_logo.svg' : '/static/hyperliquid_logo.svg'
 
           return (
             <Card
-              key={account.accountId}
+              key={`${account.accountId}_${account.exchange}`}
               className="p-4 space-y-3 hover:shadow-md transition-shadow"
             >
               {/* Account header with logo and View Details button */}
@@ -342,18 +409,49 @@ export default function HyperliquidMultiAccountSummary({
                   <span className="font-semibold text-sm truncate">
                     {account.accountName}
                   </span>
+                  <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-slate-800/80">
+                    <img
+                      src={exchangeLogo}
+                      alt={isBinance ? 'Binance' : 'Hyperliquid'}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className="text-[10px] font-medium text-slate-200">
+                      {isBinance ? 'Binance' : 'Hyperliquid'}
+                    </span>
+                  </div>
                 </div>
-                {account.balance && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-[10px] h-6 px-2"
-                    onClick={() => handleViewDetails(account)}
-                  >
-                    <Eye className="w-3 h-3 mr-1" />
-                    {t('common.details', 'Details')}
-                  </Button>
-                )}
+                <div className="flex items-center gap-2">
+                  {/* Quota upgrade button for Binance mainnet limited accounts */}
+                  {account.quota && account.quota.limited && (
+                    <button
+                      onClick={() => {
+                        setSelectedQuotaAccount(account)
+                        setIsQuotaModalOpen(true)
+                      }}
+                      className="px-2 py-1 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-200 rounded text-[10px] font-medium transition-colors"
+                      title={account.quota.reset_at ? `Resets at ${new Date(account.quota.reset_at * 1000).toLocaleString()}` : undefined}
+                    >
+                      {account.quota.remaining}/{account.quota.limit}
+                      {account.quota.reset_at && (
+                        <span className="ml-1 opacity-75">
+                          · Reset at {new Date(account.quota.reset_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                      <span className="ml-1">· Upgrade</span>
+                    </button>
+                  )}
+                  {account.balance && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-[10px] h-6 px-2"
+                      onClick={() => handleViewDetails(account)}
+                    >
+                      <Eye className="w-3 h-3 mr-1" />
+                      {t('common.details', 'Details')}
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {/* Error state */}
@@ -385,12 +483,20 @@ export default function HyperliquidMultiAccountSummary({
 
                   {/* API Usage */}
                   <div>
-                    <div className="text-[10px] text-muted-foreground">API</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {isBinance ? t('account.apiWeight', 'Weight/min') : 'API'}
+                    </div>
                     {account.rateLimit ? (
-                      <div className={`text-sm font-medium ${getApiUsageColor(account.rateLimit.usagePercent)}`}>
-                        {(100 - account.rateLimit.usagePercent).toFixed(0)}%
-                        <span className="text-[10px] text-muted-foreground ml-1">{t('account.left', 'left')}</span>
-                      </div>
+                      isBinance ? (
+                        <div className={`text-sm font-medium ${getApiUsageColor(account.rateLimit.usagePercent)}`}>
+                          {account.rateLimit.nRequestsUsed}/{account.rateLimit.nRequestsCap}
+                        </div>
+                      ) : (
+                        <div className={`text-sm font-medium ${getApiUsageColor(account.rateLimit.usagePercent)}`}>
+                          {(100 - account.rateLimit.usagePercent).toFixed(0)}%
+                          <span className="text-[10px] text-muted-foreground ml-1">{t('account.left', 'left')}</span>
+                        </div>
+                      )
                     ) : (
                       <div className="text-sm text-muted-foreground">--</div>
                     )}
@@ -399,7 +505,9 @@ export default function HyperliquidMultiAccountSummary({
                   {/* Win Rate */}
                   <div>
                     <div className="text-[10px] text-muted-foreground">{t('account.winRate', 'Win Rate')}</div>
-                    {account.tradingStats && account.tradingStats.total_trades > 0 ? (
+                    {isBinance ? (
+                      <div className="text-sm text-muted-foreground">N/A</div>
+                    ) : account.tradingStats && account.tradingStats.total_trades > 0 ? (
                       <div className="text-sm font-medium">
                         {account.tradingStats.win_rate.toFixed(0)}%
                         <span className="text-[10px] text-muted-foreground ml-1">
@@ -468,10 +576,17 @@ export default function HyperliquidMultiAccountSummary({
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           account={selectedTraderForModal}
-          positions={getAccountPositions(selectedTraderForModal.accountId)}
+          positions={getAccountPositions(selectedTraderForModal.accountId, selectedTraderForModal.exchange)}
           environment={environment}
         />
       )}
+
+      {/* Quota Upgrade Modal */}
+      <QuotaUpgradeModal
+        isOpen={isQuotaModalOpen}
+        onClose={() => setIsQuotaModalOpen(false)}
+        quota={selectedQuotaAccount?.quota || undefined}
+      />
     </div>
   )
 }

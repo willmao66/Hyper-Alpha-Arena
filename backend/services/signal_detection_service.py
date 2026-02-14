@@ -128,10 +128,17 @@ class SignalDetectionService:
             self._trigger_callbacks.remove(callback)
             logger.info(f"Signal trigger callback unregistered: {callback.__name__ if hasattr(callback, '__name__') else callback}")
 
-    def detect_signals(self, symbol: str, market_data: Dict[str, Any]) -> List[dict]:
+    def detect_signals(
+        self, symbol: str, market_data: Dict[str, Any], exchange: str = None
+    ) -> List[dict]:
         """
         Detect triggered signals for a symbol based on current market data.
         Returns list of triggered pools (edge-triggered at pool level).
+
+        Args:
+            symbol: Trading symbol (e.g., "BTC")
+            market_data: Current market data context
+            exchange: Filter by exchange ("hyperliquid", "binance", or None for all)
 
         Pool-level logic:
         - OR: Pool triggers when ANY signal condition is met (and pool was not active)
@@ -147,6 +154,7 @@ class SignalDetectionService:
             relevant_pools = [
                 pool for pool in self._signal_pools_cache
                 if pool.get("enabled") and symbol in pool.get("symbols", [])
+                and (exchange is None or pool.get("exchange", "hyperliquid") == exchange)
             ]
 
             if not relevant_pools:
@@ -198,7 +206,7 @@ class SignalDetectionService:
             try:
                 # Load enabled signal pools
                 result = db.execute(
-                    text("SELECT id, pool_name, signal_ids, symbols, enabled, logic FROM signal_pools WHERE enabled = true")
+                    text("SELECT id, pool_name, signal_ids, symbols, enabled, logic, exchange FROM signal_pools WHERE enabled = true")
                 )
                 self._signal_pools_cache = []
                 for row in result.fetchall():
@@ -221,12 +229,13 @@ class SignalDetectionService:
                         "signal_ids": signal_ids or [],
                         "symbols": symbols or [],
                         "enabled": row[4],
-                        "logic": row[5] or "OR"
+                        "logic": row[5] or "OR",
+                        "exchange": row[6] or "hyperliquid"
                     })
 
                 # Load all enabled signals
                 result = db.execute(
-                    text("SELECT id, signal_name, description, trigger_condition, enabled FROM signal_definitions WHERE enabled = true")
+                    text("SELECT id, signal_name, description, trigger_condition, enabled, exchange FROM signal_definitions WHERE enabled = true")
                 )
                 self._signals_cache = {}
                 for row in result.fetchall():
@@ -242,7 +251,8 @@ class SignalDetectionService:
                         "signal_name": row[1],
                         "description": row[2],
                         "trigger_condition": trigger_cond,
-                        "enabled": row[4]
+                        "enabled": row[4],
+                        "exchange": row[5] or "hyperliquid"
                     }
 
                 self._cache_time = now
@@ -304,6 +314,10 @@ class SignalDetectionService:
         was_active = pool_state.is_active
         should_trigger = pool_condition_met and not was_active
 
+        # DEBUG LOG: Edge detection state (only when state changes or trigger happens)
+        if should_trigger or (pool_condition_met != was_active):
+            print(f"[EdgeDetect] pool={pool_id}:{pool_name} symbol={symbol} was_active={was_active} pool_met={pool_condition_met} trigger={should_trigger}", flush=True)
+
         # Update pool state
         pool_state.is_active = pool_condition_met
         pool_state.signal_conditions_met = signals_met
@@ -348,13 +362,18 @@ class SignalDetectionService:
         condition = signal_def.get("trigger_condition", {})
         metric = condition.get("metric")
         time_window = condition.get("time_window", "5m")
+        exchange = signal_def.get("exchange", "hyperliquid")
 
         if not metric:
             return None
 
         # Handle taker_volume composite signal
         if metric == "taker_volume":
-            return self._check_taker_condition(signal_id, signal_def, symbol, condition, time_window)
+            return self._check_taker_condition(signal_id, signal_def, symbol, condition, time_window, exchange)
+
+        # Handle MACD event-based signal
+        if metric == "macd":
+            return self._check_macd_condition(signal_id, signal_def, symbol, condition, time_window, exchange)
 
         # Standard single-value signal
         operator = condition.get("operator")
@@ -363,11 +382,14 @@ class SignalDetectionService:
         if not all([operator, threshold is not None]):
             return None
 
-        current_value = self._get_metric_value(metric, symbol, market_data, time_window)
+        current_value = self._get_metric_value(metric, symbol, market_data, time_window, exchange)
         if current_value is None:
             return None
 
         condition_met = self._evaluate_condition(current_value, operator, threshold)
+
+        # DEBUG LOG: Standard signal condition check (all exchanges, all metrics)
+        print(f"[SignalCheck] signal={signal_id} symbol={symbol} metric={metric} exchange={exchange} period={time_window} value={current_value:.6f} op={operator} thresh={threshold} met={condition_met}", flush=True)
 
         return {
             "signal_id": signal_id,
@@ -379,6 +401,7 @@ class SignalDetectionService:
             "current_value": current_value,
             "condition_met": condition_met,
             "time_window": time_window,
+            "exchange": exchange,
         }
 
     def _check_signal_trigger(
@@ -391,6 +414,7 @@ class SignalDetectionService:
         condition = signal_def.get("trigger_condition", {})
         metric = condition.get("metric")
         time_window = condition.get("time_window", "5m")
+        exchange = signal_def.get("exchange", "hyperliquid")
 
         if not metric:
             return None
@@ -398,7 +422,7 @@ class SignalDetectionService:
         # Handle taker_volume composite signal
         if metric == "taker_volume":
             return self._check_taker_volume_trigger(
-                signal_id, signal_def, symbol, condition, time_window
+                signal_id, signal_def, symbol, condition, time_window, exchange
             )
 
         # Standard single-value signal
@@ -409,7 +433,7 @@ class SignalDetectionService:
             return None
 
         # Get current metric value
-        current_value = self._get_metric_value(metric, symbol, market_data, time_window)
+        current_value = self._get_metric_value(metric, symbol, market_data, time_window, exchange)
         if current_value is None:
             return None
 
@@ -466,7 +490,8 @@ class SignalDetectionService:
         return None
 
     def _get_metric_value(
-        self, metric: str, symbol: str, market_data: Dict[str, Any], time_window: int
+        self, metric: str, symbol: str, market_data: Dict[str, Any], time_window: int,
+        exchange: str = "hyperliquid"
     ) -> Optional[float]:
         """
         Get the current value of a metric from market data or indicators.
@@ -514,7 +539,12 @@ class SignalDetectionService:
 
             db = SessionLocal()
             try:
-                return get_indicator_value(db, symbol, indicator_type, period)
+                from datetime import datetime
+                current_time_ms = int(datetime.utcnow().timestamp() * 1000)
+                value = get_indicator_value(db, symbol, indicator_type, period, current_time_ms=current_time_ms, exchange=exchange)
+                # DEBUG LOG: Record the exact timestamp used for indicator calculation
+                print(f"[MetricValue] symbol={symbol} metric={metric} exchange={exchange} period={period} ts={current_time_ms} value={value}", flush=True)
+                return value
             finally:
                 db.close()
 
@@ -522,7 +552,7 @@ class SignalDetectionService:
             logger.error(f"Error getting metric {metric} for {symbol}: {e}")
             return None
 
-    def _get_funding_current_rate(self, symbol: str, time_window) -> Optional[float]:
+    def _get_funding_current_rate(self, symbol: str, time_window, exchange: str = "hyperliquid") -> Optional[float]:
         """Get current funding rate in bps for context."""
         try:
             from database.connection import SessionLocal
@@ -538,7 +568,7 @@ class SignalDetectionService:
 
             db = SessionLocal()
             try:
-                data = _get_funding_data(db, symbol, period, interval_ms, current_time_ms)
+                data = _get_funding_data(db, symbol, period, interval_ms, current_time_ms, exchange)
                 return data.get("current") if data else None
             finally:
                 db.close()
@@ -547,7 +577,8 @@ class SignalDetectionService:
             return None
 
     def _check_taker_condition(
-        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str
+        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str,
+        exchange: str = "hyperliquid"
     ) -> Optional[dict]:
         """Check taker_volume condition (without edge detection)."""
         direction = condition.get("direction", "any")
@@ -565,9 +596,12 @@ class SignalDetectionService:
         interval_ms = TIMEFRAME_MS[period]
         current_time_ms = int(datetime.utcnow().timestamp() * 1000)
 
+        # For Binance, include debug snapshot for troubleshooting
+        include_debug = (exchange == "binance")
+
         db = SessionLocal()
         try:
-            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms)
+            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange, include_debug)
         finally:
             db.close()
 
@@ -598,7 +632,11 @@ class SignalDetectionService:
                     condition_met = True
                     actual_direction = "sell"
 
-        return {
+        # DEBUG LOG: Taker volume condition check (all exchanges)
+        ratio_str = f"{actual_ratio:.4f}" if actual_ratio else "N/A"
+        print(f"[TakerCheck] signal={signal_id} symbol={symbol} exchange={exchange} period={period} ts={current_time_ms} buy={buy:.2f} sell={sell:.2f} ratio={ratio_str} met={condition_met}", flush=True)
+
+        result = {
             "signal_id": signal_id,
             "signal_name": signal_def.get("signal_name"),
             "metric": "taker_volume",
@@ -610,6 +648,115 @@ class SignalDetectionService:
             "ratio": actual_ratio,
             "ratio_threshold": ratio_threshold,
             "volume_threshold": volume_threshold,
+            "time_window": time_window,
+            "exchange": exchange,
+        }
+
+        # Include debug snapshot for Binance
+        if include_debug and "debug_snapshot" in taker_data:
+            result["debug_snapshot"] = taker_data["debug_snapshot"]
+
+        return result
+
+    def _check_macd_condition(
+        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str,
+        exchange: str = "hyperliquid"
+    ) -> Optional[dict]:
+        """
+        Check MACD event-based condition (without edge detection).
+        Supports multiple event types: golden_cross, death_cross, histogram_positive,
+        histogram_negative, macd_above_zero, macd_below_zero.
+        """
+        from database.connection import SessionLocal
+        from services.technical_indicators import get_macd_for_signal
+        from datetime import datetime
+
+        event_types = condition.get("event_types", [])
+        if not event_types:
+            return None
+
+        period = time_window if isinstance(time_window, str) else self._time_window_to_period(time_window)
+        current_time_ms = int(datetime.utcnow().timestamp() * 1000)
+
+        db = SessionLocal()
+        try:
+            macd_data = get_macd_for_signal(db, symbol, period, current_time_ms, exchange)
+        finally:
+            db.close()
+
+        if not macd_data:
+            return None
+
+        curr = macd_data['current']
+        prev = macd_data['previous']
+
+        # Check each event type
+        triggered_event = None
+        condition_met = False
+
+        for event_type in event_types:
+            if event_type == "golden_cross":
+                # Golden cross: histogram crosses from negative to positive
+                if prev['histogram'] <= 0 and curr['histogram'] > 0:
+                    triggered_event = "golden_cross"
+                    condition_met = True
+                    break
+            elif event_type == "death_cross":
+                # Death cross: histogram crosses from positive to negative
+                if prev['histogram'] >= 0 and curr['histogram'] < 0:
+                    triggered_event = "death_cross"
+                    condition_met = True
+                    break
+            elif event_type == "histogram_positive":
+                # Histogram turns positive (same as golden cross)
+                if prev['histogram'] <= 0 and curr['histogram'] > 0:
+                    triggered_event = "histogram_positive"
+                    condition_met = True
+                    break
+            elif event_type == "histogram_negative":
+                # Histogram turns negative (same as death cross)
+                if prev['histogram'] >= 0 and curr['histogram'] < 0:
+                    triggered_event = "histogram_negative"
+                    condition_met = True
+                    break
+            elif event_type == "macd_above_zero":
+                # MACD line crosses above zero
+                if prev['macd'] <= 0 and curr['macd'] > 0:
+                    triggered_event = "macd_above_zero"
+                    condition_met = True
+                    break
+            elif event_type == "macd_below_zero":
+                # MACD line crosses below zero
+                if prev['macd'] >= 0 and curr['macd'] < 0:
+                    triggered_event = "macd_below_zero"
+                    condition_met = True
+                    break
+
+        # DEBUG LOG
+        print(f"[MACDCheck] signal={signal_id} symbol={symbol} exchange={exchange} period={period} "
+              f"events={event_types} curr_hist={curr['histogram']:.6f} prev_hist={prev['histogram']:.6f} "
+              f"triggered={triggered_event} met={condition_met}", flush=True)
+
+        return {
+            "signal_id": signal_id,
+            "signal_name": signal_def.get("signal_name"),
+            "description": signal_def.get("description"),
+            "metric": "macd",
+            "event_types": event_types,
+            "triggered_event": triggered_event,
+            "condition_met": condition_met,
+            "time_window": time_window,
+            "exchange": exchange,
+            "values": {
+                "macd": curr['macd'],
+                "signal": curr['signal'],
+                "histogram": curr['histogram'],
+                "prev_macd": prev['macd'],
+                "prev_signal": prev['signal'],
+                "prev_histogram": prev['histogram'],
+            },
+            "cross_strength": macd_data['cross_strength'],
+            "latest_kline_ts": macd_data['latest_kline_ts'],
         }
 
     def _log_pool_trigger(self, trigger_result: dict) -> int | None:
@@ -626,7 +773,7 @@ class SignalDetectionService:
             db = SessionLocal()
             try:
                 def _format_signal_for_log(s: dict) -> dict:
-                    """Format signal data for logging, handling both standard and taker_volume signals."""
+                    """Format signal data for logging, handling standard, taker_volume, and macd signals."""
                     base = {
                         "signal_id": s["signal_id"],
                         "signal_name": s["signal_name"],
@@ -639,19 +786,40 @@ class SignalDetectionService:
                         base["direction"] = s.get("actual_direction")
                         base["volume"] = s.get("total")
                         base["volume_threshold"] = s.get("volume_threshold")
+                    elif s["metric"] == "macd":
+                        # MACD event-based signal
+                        base["event_types"] = s.get("event_types")
+                        base["triggered_event"] = s.get("triggered_event")
+                        base["values"] = s.get("values")
+                        base["cross_strength"] = s.get("cross_strength")
                     else:
                         base["current_value"] = s.get("current_value")
                         base["threshold"] = s.get("threshold")
                         base["operator"] = s.get("operator")
                     return base
 
-                trigger_value_json = json.dumps({
+                # Build trigger value data
+                trigger_value_data = {
                     "logic": trigger_result["logic"],
                     "signals_triggered": [
                         _format_signal_for_log(s)
                         for s in trigger_result["signals_triggered"]
                     ],
-                })
+                }
+
+                # Add debug snapshots for Binance triggers (for troubleshooting)
+                debug_snapshots = []
+                for s in trigger_result["signals_triggered"]:
+                    if "debug_snapshot" in s:
+                        debug_snapshots.append({
+                            "signal_id": s["signal_id"],
+                            "signal_name": s["signal_name"],
+                            "snapshot": s["debug_snapshot"]
+                        })
+                if debug_snapshots:
+                    trigger_value_data["debug_snapshots"] = debug_snapshots
+
+                trigger_value_json = json.dumps(trigger_value_data)
 
                 # Determine the most common time_window from triggered signals
                 time_windows = [
@@ -732,7 +900,8 @@ class SignalDetectionService:
             return "4h"
 
     def _check_taker_volume_trigger(
-        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str
+        self, signal_id: int, signal_def: dict, symbol: str, condition: dict, time_window: str,
+        exchange: str = "hyperliquid"
     ) -> Optional[dict]:
         """
         Check taker_volume composite signal trigger.
@@ -769,7 +938,7 @@ class SignalDetectionService:
 
         db = SessionLocal()
         try:
-            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms)
+            taker_data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange)
         finally:
             db.close()
 

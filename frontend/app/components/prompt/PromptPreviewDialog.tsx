@@ -15,17 +15,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-// Checkbox component replacement with native HTML
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { copyToClipboard } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
 
 interface PromptPreviewDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   templateKey: string
   templateName: string
-  templateText: string  // Current template text from editor (for preview before save)
+  templateText: string
 }
 
 export default function PromptPreviewDialog({
@@ -37,11 +37,13 @@ export default function PromptPreviewDialog({
 }: PromptPreviewDialogProps) {
   const [accounts, setAccounts] = useState<TradingAccount[]>([])
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
+  const [selectedExchanges, setSelectedExchanges] = useState<string[]>(['hyperliquid'])
   const [previews, setPreviews] = useState<PromptPreviewItem[]>([])
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [hyperliquidWatchlist, setHyperliquidWatchlist] = useState<string[]>([])
   const [watchlistLoading, setWatchlistLoading] = useState(false)
+  const { t } = useTranslation()
 
   useEffect(() => {
     if (open) {
@@ -58,8 +60,6 @@ export default function PromptPreviewDialog({
       const list = await getAccounts()
       const aiAccounts = list.filter((acc) => acc.account_type === 'AI')
       setAccounts(aiAccounts)
-
-      // Auto-select first account if available
       if (aiAccounts.length > 0 && selectedAccountId === null) {
         setSelectedAccountId(aiAccounts[0].id)
       }
@@ -88,18 +88,33 @@ export default function PromptPreviewDialog({
     setSelectedAccountId(accountId)
   }
 
+  const handleExchangeToggle = (exchange: string) => {
+    setSelectedExchanges((prev) => {
+      if (prev.includes(exchange)) {
+        if (prev.length === 1) return prev
+        return prev.filter((e) => e !== exchange)
+      }
+      return [...prev, exchange]
+    })
+  }
+
   const handleGeneratePreview = async () => {
     if (selectedAccountId === null) {
       toast.error('Please select an AI trader')
+      return
+    }
+    if (selectedExchanges.length === 0) {
+      toast.error('Please select at least one exchange')
       return
     }
 
     setGenerating(true)
     try {
       const result = await previewPrompt({
-        templateText: templateText,  // Use current editor content (preview before save)
-        promptTemplateKey: templateKey,  // Fallback (for backward compatibility)
+        templateText: templateText,
+        promptTemplateKey: templateKey,
         accountIds: [selectedAccountId],
+        exchanges: selectedExchanges,
       })
       setPreviews(result.previews)
       toast.success(`Generated ${result.previews.length} preview(s)`)
@@ -120,13 +135,24 @@ export default function PromptPreviewDialog({
     }
   }
 
+  const getTabKey = (preview: PromptPreviewItem) => {
+    return `${preview.accountId}-${preview.exchange || 'default'}`
+  }
+
+  const getTabLabel = (preview: PromptPreviewItem) => {
+    const exchangeLabel = preview.exchange
+      ? preview.exchange === 'hyperliquid' ? 'HL' : 'BN'
+      : ''
+    return exchangeLabel ? `${preview.accountName} (${exchangeLabel})` : preview.accountName
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Prompt Preview: {templateName}</DialogTitle>
           <DialogDescription>
-            Select AI traders and symbols to preview the filled prompt with real-time data
+            Select AI traders and exchanges to preview the filled prompt with real-time data
           </DialogDescription>
         </DialogHeader>
 
@@ -168,6 +194,39 @@ export default function PromptPreviewDialog({
               )}
             </div>
 
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-semibold mb-2">{t('strategy.exchange', 'Exchange')}</h3>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="exchange-hyperliquid"
+                    checked={selectedExchanges.includes('hyperliquid')}
+                    onChange={() => handleExchangeToggle('hyperliquid')}
+                    className="w-4 h-4 cursor-pointer"
+                  />
+                  <label htmlFor="exchange-hyperliquid" className="text-sm cursor-pointer">
+                    {t('strategy.exchangeHyperliquid', 'Hyperliquid')}
+                  </label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="exchange-binance"
+                    checked={selectedExchanges.includes('binance')}
+                    onChange={() => handleExchangeToggle('binance')}
+                    className="w-4 h-4 cursor-pointer"
+                  />
+                  <label htmlFor="exchange-binance" className="text-sm cursor-pointer">
+                    {t('strategy.exchangeBinance', 'Binance')}
+                  </label>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                {t('strategy.exchangeHintMulti', 'Select exchanges to compare data sources')}
+              </p>
+            </div>
+
             {templateKey === 'hyperliquid' && (
               <div className="border-t pt-4">
                 <h3 className="text-sm font-semibold mb-2">Hyperliquid Watchlist</h3>
@@ -197,7 +256,7 @@ export default function PromptPreviewDialog({
 
             <Button
               onClick={handleGeneratePreview}
-              disabled={generating || selectedAccountId === null}
+              disabled={generating || selectedAccountId === null || selectedExchanges.length === 0}
               className="mt-4"
             >
               {generating ? 'Generating...' : 'Generate Preview'}
@@ -214,33 +273,34 @@ export default function PromptPreviewDialog({
                 </div>
               </div>
             ) : (
-              <Tabs defaultValue={`${previews[0].accountId}`} className="flex-1 flex flex-col">
+              <Tabs defaultValue={getTabKey(previews[0])} className="flex-1 flex flex-col">
                 <TabsList className="w-full justify-start overflow-x-auto flex-shrink-0">
                   {previews.map((preview) => (
                     <TabsTrigger
-                      key={preview.accountId}
-                      value={`${preview.accountId}`}
+                      key={getTabKey(preview)}
+                      value={getTabKey(preview)}
                       className="text-xs"
                     >
-                      {preview.accountName}
+                      {getTabLabel(preview)}
                     </TabsTrigger>
                   ))}
                 </TabsList>
 
                 {previews.map((preview) => (
                   <TabsContent
-                    key={preview.accountId}
-                    value={`${preview.accountId}`}
+                    key={getTabKey(preview)}
+                    value={getTabKey(preview)}
                     className="flex-1 flex flex-col overflow-hidden mt-0"
                   >
                     <div className="flex items-center justify-between p-3 border-b">
                       <div>
                         <p className="text-sm font-semibold">{preview.accountName}</p>
-                        {preview.symbols && preview.symbols.length > 0 && (
-                          <p className="text-xs text-muted-foreground">
-                            Symbols: {preview.symbols.join(', ')}
-                          </p>
-                        )}
+                        <p className="text-xs text-muted-foreground">
+                          {preview.exchange === 'binance' ? 'Binance' : 'Hyperliquid'}
+                          {preview.symbols && preview.symbols.length > 0 && (
+                            <span> | Symbols: {preview.symbols.join(', ')}</span>
+                          )}
+                        </p>
                       </div>
                       <Button
                         variant="outline"

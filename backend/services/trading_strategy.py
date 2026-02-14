@@ -32,12 +32,16 @@ STRATEGY_REFRESH_INTERVAL = 60.0  # seconds
 
 
 def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
-    """Ensure stored timestamps are timezone-aware UTC."""
+    """Ensure stored timestamps are timezone-aware UTC.
+
+    Note: Database stores UTC time in 'timestamp without time zone' columns.
+    The naive datetime from DB is already UTC, just missing the timezone marker.
+    """
     if dt is None:
         return None
     if dt.tzinfo is None:
-        local_tz = datetime.now().astimezone().tzinfo
-        return dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
+        # Database stores UTC time, so treat naive datetime as UTC
+        return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
 
@@ -50,6 +54,7 @@ class StrategyState:
     enabled: bool
     scheduled_trigger_enabled: bool  # Enable/disable scheduled trigger
     last_trigger_at: Optional[datetime]
+    exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
     running: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -169,6 +174,7 @@ class StrategyManager:
                         enabled=strategy.enabled == "true",
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
+                        exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
                     )
                     self.strategies[strategy.account_id] = state
 
@@ -265,10 +271,17 @@ class StrategyManager:
                     logger.debug(f"Account {account_id} auto trading disabled, skipping strategy execution")
                     return
 
-            # Execute AI trading decision with trigger context
-            logger.info(f"Account {account_id} executing Hyperliquid trading (trigger: {trigger_type})")
-            from services.trading_commands import place_ai_driven_hyperliquid_order
-            place_ai_driven_hyperliquid_order(account_id=account_id, trigger_context=trigger_context)
+            # Execute AI trading decision based on exchange configuration
+            exchange = state.exchange
+            logger.info(f"Account {account_id} executing {exchange} trading (trigger: {trigger_type})")
+
+            if exchange == "binance":
+                from services.trading_commands import place_ai_driven_binance_order
+                place_ai_driven_binance_order(account_id=account_id, trigger_context=trigger_context)
+            else:
+                # Default to Hyperliquid
+                from services.trading_commands import place_ai_driven_hyperliquid_order
+                place_ai_driven_hyperliquid_order(account_id=account_id, trigger_context=trigger_context)
 
         except Exception as e:
             logger.error(f"Error executing strategy for account {account_id}: {e}")
@@ -409,13 +422,14 @@ class HyperliquidStrategyManager(StrategyManager):
                         enabled=strategy.enabled == "true",
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
+                        exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
                     )
                     self.strategies[strategy.account_id] = state
 
                     print(
                         f"[HyperliquidStrategy DEBUG] Loaded strategy for account {strategy.account_id} ({account.name}): "
                         f"interval={strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min), "
-                        f"signal_pool_ids={pool_ids}, enabled={strategy.enabled}, "
+                        f"signal_pool_ids={pool_ids}, enabled={strategy.enabled}, exchange={state.exchange}, "
                         f"scheduled_trigger={strategy.scheduled_trigger_enabled}, "
                         f"last_trigger={state.last_trigger_at}"
                     )

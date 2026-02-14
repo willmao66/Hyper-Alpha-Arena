@@ -281,6 +281,7 @@ class AccountStrategyConfig(Base):
     signal_pool_ids = Column(Text, nullable=True)  # JSON array of signal pool IDs, e.g. "[1, 2, 3]"
     enabled = Column(String(10), nullable=False, default="true")
     scheduled_trigger_enabled = Column(Boolean, nullable=False, default=True)  # Enable/disable scheduled trigger
+    exchange = Column(String(20), nullable=False, default="hyperliquid")  # "hyperliquid" or "binance"
     last_trigger_at = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
@@ -346,7 +347,9 @@ class AIDecisionLog(Base):
     # Decision tracking fields for analysis
     prompt_template_id = Column(Integer, nullable=True, index=True)  # Link to strategy/prompt template OR program
     signal_trigger_id = Column(Integer, nullable=True, index=True)  # Link to signal trigger
-    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID from Hyperliquid
+    # NOTE: hyperliquid_order_id is used as exchange_order_id for attribution analysis
+    # It stores order IDs from any exchange (Hyperliquid, Binance, etc.), not just Hyperliquid
+    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID (exchange-agnostic)
     tp_order_id = Column(String(100), nullable=True)  # Take profit order ID
     sl_order_id = Column(String(100), nullable=True)  # Stop loss order ID
     realized_pnl = Column(DECIMAL(18, 6), nullable=True)  # Realized PnL (filled on user refresh)
@@ -355,6 +358,10 @@ class AIDecisionLog(Base):
     # Decision source type: "prompt_template" (AI Trader) or "program" (Program Trader)
     # NULL for old data, treated as "prompt_template" for backward compatibility
     decision_source_type = Column(String(20), nullable=True)
+
+    # Exchange identifier: "hyperliquid" or "binance"
+    # NULL for historical data, treated as "hyperliquid" for backward compatibility
+    exchange = Column(String(20), nullable=True)
 
     # Relationships
     account = relationship("Account")
@@ -588,6 +595,83 @@ class KlineCollectionTask(Base):
     )
 
 
+class BinanceWallet(Base):
+    """Store Binance Futures API credentials per AI Trader per environment"""
+    __tablename__ = "binance_wallets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False)  # 'testnet' or 'mainnet'
+    api_key_encrypted = Column(String(500), nullable=False)
+    secret_key_encrypted = Column(String(500), nullable=False)
+    max_leverage = Column(Integer, nullable=False, default=20)
+    default_leverage = Column(Integer, nullable=False, default=1)
+    is_active = Column(String(10), nullable=False, default="true")
+    # Binance API broker rebate eligibility status (mainnet only)
+    # True: eligible for rebate, False: not eligible (daily quota limit applies)
+    rebate_working = Column(Boolean, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    __table_args__ = (
+        UniqueConstraint('account_id', 'environment', name='uq_binance_wallets_account_environment'),
+    )
+
+    account = relationship("Account")
+
+
+class BinanceAccountSnapshot(Base):
+    """Store Binance account state snapshots"""
+    __tablename__ = "binance_account_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, index=True)
+    snapshot_time = Column(TIMESTAMP, server_default=func.current_timestamp())
+    total_wallet_balance = Column(DECIMAL(18, 6), nullable=False)
+    available_balance = Column(DECIMAL(18, 6), nullable=False)
+    total_unrealized_profit = Column(DECIMAL(18, 6), nullable=False)
+    total_margin_balance = Column(DECIMAL(18, 6), nullable=False)
+    total_initial_margin = Column(DECIMAL(18, 6), nullable=True)
+    total_maint_margin = Column(DECIMAL(18, 6), nullable=True)
+    trigger_event = Column(String(50), nullable=True)
+    snapshot_data = Column(Text, nullable=True)
+
+    account = relationship("Account")
+
+
+class BinanceBackfillTask(Base):
+    """Store Binance data backfill task status"""
+    __tablename__ = "binance_backfill_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbols = Column(String(200), nullable=False)  # Comma-separated symbols
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+
+class HyperliquidBackfillTask(Base):
+    """Store Hyperliquid K-line backfill task status"""
+    __tablename__ = "hyperliquid_backfill_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbols = Column(String(200), nullable=False)  # Comma-separated symbols
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+
 class KlineAIAnalysisLog(Base):
     """Store K-line AI analysis logs for chart insights"""
     __tablename__ = "kline_ai_analysis_logs"
@@ -622,6 +706,7 @@ class AiPromptConversation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    prompt_id = Column(Integer, ForeignKey("prompt_templates.id"), nullable=True, index=True)
     title = Column(String(200), nullable=False, default="New Strategy Prompt")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
     updated_at = Column(
@@ -630,6 +715,7 @@ class AiPromptConversation(Base):
 
     # Relationships
     user = relationship("User")
+    prompt_template = relationship("PromptTemplate")
     messages = relationship(
         "AiPromptMessage",
         back_populates="conversation",
@@ -697,6 +783,11 @@ class AiSignalMessage(Base):
     # For assistant messages: extracted signal configs from ```signal-config``` code blocks
     signal_configs = Column(Text, nullable=True)  # JSON array of signal configurations
 
+    # Reasoning and tool call logs (aligned with other AI assistants)
+    reasoning_snapshot = Column(Text, nullable=True)  # AI reasoning process (thinking)
+    tool_calls_log = Column(Text, nullable=True)  # JSON: tool calls and results
+    is_complete = Column(Boolean, nullable=True, default=True)  # False if interrupted
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
     # Relationships
@@ -737,9 +828,10 @@ class AiAttributionMessage(Base):
     # For assistant messages: extracted diagnosis results from AI analysis
     diagnosis_result = Column(Text, nullable=True)  # JSON: diagnosis cards and prompt suggestions
 
-    # Reasoning and analysis process storage (like AIDecisionLog.reasoning_snapshot)
+    # Reasoning and tool call logs (aligned with other AI assistants)
     reasoning_snapshot = Column(Text, nullable=True)  # AI reasoning process
-    analysis_log = Column(Text, nullable=True)  # JSON: tool calls and results log
+    tool_calls_log = Column(Text, nullable=True)  # JSON: tool calls and results log
+    is_complete = Column(Boolean, nullable=True, default=True)  # False if interrupted
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
@@ -874,6 +966,26 @@ class MarketAssetMetrics(Base):
     )
 
 
+class MarketSentimentMetrics(Base):
+    """Market sentiment metrics for long/short ratio analysis (Binance-specific data)"""
+    __tablename__ = "market_sentiment_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    timestamp = Column(BigInteger, nullable=False, index=True)  # milliseconds
+    long_ratio = Column(DECIMAL(10, 6), nullable=True)  # e.g., 0.65 = 65% long
+    short_ratio = Column(DECIMAL(10, 6), nullable=True)  # e.g., 0.35 = 35% short
+    long_short_ratio = Column(DECIMAL(10, 6), nullable=True)  # e.g., 1.86 = longs/shorts
+    data_type = Column(String(30), nullable=False, default="top_position")  # top_position, top_account, global
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+    __table_args__ = (
+        UniqueConstraint('exchange', 'symbol', 'timestamp', 'data_type',
+                         name='market_sentiment_metrics_unique_key'),
+    )
+
+
 # ============================================================================
 # Signal System Tables (for signal-based trading triggers)
 # ============================================================================
@@ -887,6 +999,7 @@ class SignalDefinition(Base):
     description = Column(Text, nullable=True)
     trigger_condition = Column(Text, nullable=False)  # JSONB stored as text
     enabled = Column(Boolean, nullable=True, default=True)
+    exchange = Column(String(20), nullable=False, default="hyperliquid")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(),
                         onupdate=func.current_timestamp())
@@ -902,6 +1015,7 @@ class SignalPool(Base):
     symbols = Column(Text, nullable=False, default="[]")  # JSONB stored as text
     logic = Column(String(10), nullable=True, default="OR")  # AND/OR logic
     enabled = Column(Boolean, nullable=True, default=True)
+    exchange = Column(String(20), nullable=False, default="hyperliquid")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
 
@@ -1093,6 +1207,9 @@ class AccountProgramBinding(Base):
     # Custom params override (optional, overrides program.params)
     params_override = Column(Text, nullable=True)  # JSON
 
+    # Exchange selection for this binding (hyperliquid or binance)
+    exchange = Column(String(20), nullable=False, default="hyperliquid")
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
@@ -1136,7 +1253,9 @@ class ProgramExecutionLog(Base):
     params_snapshot = Column(Text, nullable=True)  # JSON: params used for this execution
 
     # Order tracking for Completed Trades integration
-    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID
+    # NOTE: hyperliquid_order_id is used as exchange_order_id for attribution analysis
+    # It stores order IDs from any exchange (Hyperliquid, Binance, etc.), not just Hyperliquid
+    hyperliquid_order_id = Column(String(100), nullable=True, index=True)  # Main order ID (exchange-agnostic)
     tp_order_id = Column(String(100), nullable=True)  # Take profit order ID
     sl_order_id = Column(String(100), nullable=True)  # Stop loss order ID
 
@@ -1144,6 +1263,10 @@ class ProgramExecutionLog(Base):
     environment = Column(String(20), nullable=True, index=True)  # "testnet" | "mainnet"
     realized_pnl = Column(DECIMAL(18, 6), nullable=True)  # Realized PnL (filled on user refresh)
     pnl_updated_at = Column(TIMESTAMP, nullable=True)  # When PnL was last updated
+
+    # Exchange identifier: "hyperliquid" or "binance"
+    # NULL for historical data, treated as "hyperliquid" for backward compatibility
+    exchange = Column(String(20), nullable=True)
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 

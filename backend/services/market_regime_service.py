@@ -554,7 +554,8 @@ def get_market_regime(
     timeframe: str = "5m",
     config_id: Optional[int] = None,
     timestamp_ms: Optional[int] = None,
-    use_realtime: bool = False
+    use_realtime: bool = False,
+    exchange: str = "hyperliquid"
 ) -> Dict[str, Any]:
     """
     Main entry point: Get market regime classification for a symbol.
@@ -569,6 +570,7 @@ def get_market_regime(
         config_id: Optional config ID, uses default if not specified
         timestamp_ms: Optional timestamp for historical queries (backtesting)
         use_realtime: If True, fetch current K-line from API for real-time triggers
+        exchange: Exchange to use for data ("hyperliquid" or "binance")
 
     Returns:
         Dict with regime, direction, confidence, reason, indicators, and debug info
@@ -608,7 +610,8 @@ def get_market_regime(
 
     # Fetch flow indicators using market_flow_indicators service (REUSE!)
     flow_data = get_flow_indicators_for_prompt(
-        db, symbol, timeframe, ["CVD", "TAKER", "OI_DELTA"], timestamp_ms
+        db, symbol, timeframe, ["CVD", "TAKER", "OI_DELTA"], timestamp_ms,
+        exchange=exchange
     )
 
     cvd_data = flow_data.get("CVD")

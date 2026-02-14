@@ -29,10 +29,12 @@
     "lastUpdate": "Last update",
     "details": "Details",
     "collectionDaysHint": "Hyperliquid market flow data collected for {{days}} days",
+    "binanceCollectionDaysHint": "Binance market flow data collected for {{days}} days",
     "more": "more",
     "saving": "Saving...",
     "loadMore": "Load More",
-    "keyboardHintCtrlEnter": "Press Ctrl+Enter (Cmd+Enter on Mac) to send"
+    "keyboardHintCtrlEnter": "Press Ctrl+Enter (Cmd+Enter on Mac) to send",
+    "recommended": "Recommended"
   },
   "regime": {
     "noConfig": "No configuration found",
@@ -55,8 +57,8 @@
     "noneMatched": "None of the above matched"
   },
   "trade": {
-    "title": "Hyperliquid Trade",
-    "subtitle": "Manual Trading Operations",
+    "title": "Manual Trading",
+    "subtitle": "Manual trading for learning rules and closing positions",
     "refreshingData": "Refreshing positions and balance",
     "loadingWallet": "Loading wallet data...",
     "overview": "Overview",
@@ -77,7 +79,12 @@
     "tip4": "Check liquidation price before trading",
     "tip5": "Close positions to free up margin",
     "walletDisabled": "Wallet Disabled",
-    "walletDisabledDesc": "Please re-enable this wallet in the AI Traders management page before trading."
+    "walletDisabledDesc": "Please re-enable this wallet in the AI Traders management page before trading.",
+    "selectExchange": "Exchange",
+    "selectWallet": "Select Trading Wallet",
+    "noWalletsAvailable": "No Wallets Available",
+    "noWalletsHint": "Please configure wallets for your AI Traders first.",
+    "loadingWallets": "Loading wallets..."
   },
   "aiPrompt": {
     "title": "AI Strategy Prompt Generator",
@@ -147,6 +154,8 @@
   },
   "header": {
     "exchanges": "Exchanges",
+    "supported": "Supported",
+    "supportedExchanges": "Supported Exchanges",
     "premiumDiscount": "Subscribe to Premium for FREE service fee.",
     "vipMember": "VIP Member",
     "yearlyPlan": "Yearly Plan",
@@ -182,12 +191,13 @@
     "noAccountConfigured": "No Hyperliquid account configured"
   },
   "account": {
-    "accountStatus": "Hyperliquid Account Status",
-    "noAccountsConfigured": "No Hyperliquid accounts configured",
+    "accountStatus": "Account Status",
+    "noAccountsConfigured": "No accounts configured",
     "loadingData": "Loading account data...",
     "equity": "Equity",
     "margin": "Margin",
     "left": "left",
+    "apiWeight": "Weight/min",
     "winRate": "Win Rate",
     "positions": "Positions",
     "noOpenPositions": "No open positions",
@@ -199,6 +209,7 @@
     "filter": "Filter",
     "allTraders": "All Traders",
     "allSymbols": "All Symbols",
+    "allExchanges": "All Exchanges",
     "completedTrades": "COMPLETED TRADES",
     "modelChat": "MODELCHAT",
     "program": "PROGRAM",
@@ -346,6 +357,8 @@
       "signalNamePlaceholder": "e.g., OI Surge Signal",
       "descriptionLabel": "Description",
       "descriptionPlaceholder": "What market condition does this signal detect?",
+      "exchangeLabel": "Exchange",
+      "exchangeDesc": "Select the exchange data source for this signal",
       "metricLabel": "Metric",
       "compositeConfig": "Composite Signal Configuration",
       "directionLabel": "Direction",
@@ -353,6 +366,9 @@
       "ratioThresholdDesc": "Multiplier (e.g., 1.5 = 50% more). Symmetric for buy/sell.",
       "volumeThreshold": "Volume Threshold",
       "volumeThresholdDesc": "Min volume (USD)",
+      "macdConfig": "MACD Event Configuration",
+      "eventTypes": "Event Types (select one or more)",
+      "selectAtLeastOne": "Please select at least one event type",
       "operatorLabel": "Operator",
       "thresholdLabel": "Threshold",
       "thresholdDesc": "Value to compare against",
@@ -637,6 +653,8 @@
     "openInterest": "Open Interest",
     "selectSymbol": "Select Symbol",
     "mainnetWarning": "K-line analysis is only available for Mainnet environment",
+    "binanceWarning": "K-line analysis is only available for Binance Futures production environment",
+    "indicatorUnavailable": "Not available for {{exchange}} at {{period}}",
     "backfillInProgress": "Backfilling in progress...",
     "starting": "Starting...",
     "backfillHistorical": "Backfill Historical Data",
@@ -726,6 +744,8 @@
   "exchange": {
     "chooseExchange": "Choose Exchange",
     "selectToStart": "Select an exchange to start trading",
+    "supportedExchanges": "Supported Exchanges",
+    "compareDesc": "Compare features and data collection methods",
     "active": "Active",
     "comingSoon": "Coming Soon",
     "selectionChanged": "Exchange Selection Changed",
@@ -733,7 +753,32 @@
     "saving": "Saving...",
     "saveChanges": "Save Changes",
     "proTip": "Pro Tip",
-    "referralTip": "Register through our referral links to enjoy fee discounts and support the platform development."
+    "referralTip": "Register through our referral links to enjoy fee discounts and support the platform development.",
+    "dataCollection": "Data Collection",
+    "binanceNote": "One identity = One account. Register with referral link to get fee discount.",
+    "hyperliquid": {
+      "description": "#1 Decentralized Perpetual DEX",
+      "feature1": "No KYC Required",
+      "feature2": "On-chain Settlement",
+      "feature3": "Testnet Available",
+      "button": "Open Futures"
+    },
+    "binance": {
+      "description": "#1 Global CEX by Volume",
+      "feature1": "KYC Required",
+      "feature2": "High Liquidity",
+      "feature3": "Testnet Available",
+      "button": "Register First"
+    },
+    "data": {
+      "kline": "K-line",
+      "oi": "Open Interest",
+      "funding": "Funding Rate",
+      "trades": "Trades",
+      "takerVolume": "Taker Volume",
+      "orderbook": "Orderbook",
+      "realtime": "Real-time"
+    }
   },
   "trading": {
     "mode": "Mode",
@@ -808,7 +853,12 @@
     "saveGlobalSettings": "Save Global Settings",
     "watchlistMoved": "Watchlist management has been moved to Settings.",
     "currentWatchlist": "Current watchlist",
-    "goToSettings": "Go to Settings"
+    "goToSettings": "Go to Settings",
+    "exchange": "Exchange",
+    "selectExchange": "Select exchange",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "Binance",
+    "exchangeHint": "Select exchange for market data and trade execution"
   },
   "settings": {
     "language": "Language",
@@ -834,12 +884,22 @@
     "retentionHint": "Data older than this will be automatically cleaned up (7-730 days)",
     "dataCoverage": "Data Coverage",
     "dataCoverageDesc": "Visual overview of collected data completeness",
+    "marketFlowCoverage": "Market Flow Coverage",
+    "klineCoverage": "K-line Coverage",
+    "backfillHistory": "Backfill Historical Data",
+    "backfillDesc": "K-lines (1m/15m/1h), OI (30d), Funding Rate (365d), Long/Short Ratio (30d)",
+    "hyperliquidBackfillDesc": "K-lines: 1m (~3.5d), 15m (~52d), 1h (~208d) per symbol",
+    "startBackfill": "Start Backfill",
+    "restartBackfill": "Restart",
+    "backfillRunning": "Backfilling",
+    "backfillCompleted": "Last backfill completed successfully",
+    "backfillFailed": "Last backfill failed",
     "showLast": "Show last",
     "noData": "No data available",
     "noDataCollected": "No data collected yet"
   },
   "order": {
-    "title": "Place Hyperliquid Order (Manual)",
+    "title": "Place Order (Manual)",
     "description": "Manual order placement for perpetual contracts",
     "symbol": "Symbol",
     "side": "Side",
@@ -888,6 +948,11 @@
     "usedMargin": "Used Margin",
     "wallet": "Wallet",
     "apiUsage": "API Usage",
+    "apiWeight": "API Weight (per minute)",
+    "weightUsed": "Weight Used",
+    "weightCap": "Weight Cap",
+    "binanceWeightInfo": "Binance API weight resets every minute. Each API call consumes different weight.",
+    "comingSoon": "Coming Soon",
     "cumulativeVolume": "Cumulative Volume",
     "requestsUsed": "Requests Used",
     "requestsCap": "Requests Cap",
@@ -927,6 +992,7 @@
     "thisWeek": "This Week",
     "thisMonth": "This Month",
     "allTime": "All Time",
+    "allExchanges": "All Exchanges",
     "allAccounts": "All Accounts",
     "grossPnl": "Gross PnL",
     "totalFees": "Total Fees",
@@ -1157,6 +1223,10 @@
     "status": "Status",
     "active": "Active",
     "saveBinding": "Save Binding",
+    "exchange": "Exchange",
+    "exchangeHyperliquid": "Hyperliquid",
+    "exchangeBinance": "Binance",
+    "exchangeHint": "Select exchange for market data and trade execution",
     "testRun": "Test Run",
     "testing": "Testing...",
     "triggerSymbol": "Trigger Symbol",
@@ -1277,5 +1347,30 @@
       "connectionLost": "Connection lost. Reloading saved progress...",
       "toolCallsDetail": "Tool Calls Detail ({{count}} rounds)"
     }
+  },
+  "binance": {
+    "rebateCheck": "Account Verification",
+    "rebateIneligibleMessage": "This account is already linked to another referral relationship and cannot enjoy the trading benefits of this platform.",
+    "rebateIneligibleOptions": "You can choose one of the following options to continue:",
+    "subscribePremium": "Subscribe to Premium",
+    "subscribeDescription": "Unlimited automated trades, unlock all features",
+    "registerNew": "Register New Account",
+    "registerDescription": "New to Binance? Register with our link for unlimited trades + 5% fee rebate.",
+    "continueLimited": "Continue with Limit",
+    "continueLimitedDescription": "This account is limited to 40 automated trades per day (AI Trader + Program). Subscribe or register with referral for unlimited.",
+    "continueLimitedButton": "I understand",
+    "supportTip": "Subscribing to Premium or registering through our referral links helps support platform development. Your understanding means a lot to our team.",
+    "rebateNote": "Only accounts without prior referral bindings can be used for AI trading",
+    "positionModeHint": "Requires One-way Position Mode. Go to Binance App → Futures → Settings → Position Mode → One-way Mode"
+  },
+  "quota": {
+    "executionQuota": "Quota",
+    "dailyQuota": "Daily Quota",
+    "upgradeUnlimited": "Upgrade for Unlimited",
+    "upgradeTitle": "Upgrade for Unlimited",
+    "currentUsage": "Current usage",
+    "perDay": "per day",
+    "upgradeOptions": "Choose an option to unlock unlimited automated trades:",
+    "resetAt": "Resets at"
   }
 }

@@ -140,8 +140,8 @@ class HyperliquidKlineCollector(BaseKlineCollector):
         except Exception as e:
             self.logger.warning(f"Failed to get symbols from hyperliquid_symbol_service: {e}")
 
-        # 降级到默认列表
-        return ["BTC", "ETH", "SOL", "BNB"]
+        # Fallback to BTC only
+        return ["BTC"]
 
 
 class BinanceKlineCollector(BaseKlineCollector):

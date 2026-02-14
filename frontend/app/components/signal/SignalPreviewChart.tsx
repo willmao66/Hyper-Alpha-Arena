@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { createChart, CandlestickSeries, CandlestickData, Time, IChartApi, ISeriesApi, createSeriesMarkers } from 'lightweight-charts'
+import { createChart, CandlestickSeries, CandlestickData, Time, IChartApi, ISeriesApi, createSeriesMarkers, LineSeries, HistogramSeries } from 'lightweight-charts'
 import { formatChartTime } from '../../lib/dateTime'
 
 interface KlineData {
@@ -30,6 +30,16 @@ interface TriggerData {
   volume?: number
   ratio_threshold?: number
   volume_threshold?: number
+  // MACD event-based signal fields
+  triggered_event?: string
+  event_types?: string[]
+  values?: {
+    macd: number
+    signal: number
+    histogram: number
+    prev_histogram?: number
+  }
+  cross_strength?: number
   // Market Regime classification
   market_regime?: {
     regime: string
@@ -39,11 +49,19 @@ interface TriggerData {
   }
 }
 
+// MACD indicator data from backend
+interface MacdData {
+  macd: number[]
+  signal: number[]
+  histogram: number[]
+}
+
 interface SignalPreviewChartProps {
   klines: KlineData[]
   triggers: TriggerData[]
   timeWindow: string
   signalMetric?: string // For single signal display
+  macd?: MacdData // MACD indicator data
 }
 
 // Format metric name for display
@@ -99,7 +117,7 @@ function formatRegimeName(regime: string): string {
   return names[regime] || regime
 }
 
-export default function SignalPreviewChart({ klines, triggers, timeWindow, signalMetric }: SignalPreviewChartProps) {
+export default function SignalPreviewChart({ klines, triggers, timeWindow, signalMetric, macd }: SignalPreviewChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -205,6 +223,75 @@ export default function SignalPreviewChart({ klines, triggers, timeWindow, signa
 
     candlestickSeries.setData(chartData)
 
+    // Add MACD overlay if available
+    if (macd && macd.macd && macd.signal && macd.histogram) {
+      // Calculate price range for scaling MACD
+      const prices = klines.flatMap(k => [k.high, k.low])
+      const priceMin = Math.min(...prices)
+      const priceMax = Math.max(...prices)
+      const priceRange = priceMax - priceMin
+
+      // MACD will occupy bottom 25% of the chart
+      const macdDisplayMin = priceMin - priceRange * 0.05
+      const macdDisplayMax = priceMin + priceRange * 0.20
+
+      // Find MACD value range
+      const allMacdValues = [...macd.macd, ...macd.signal, ...macd.histogram].filter(v => v !== 0)
+      if (allMacdValues.length > 0) {
+        const macdMin = Math.min(...allMacdValues)
+        const macdMax = Math.max(...allMacdValues)
+        const macdRange = macdMax - macdMin || 1
+
+        // Scale function: map MACD value to price range
+        const scaleToPrice = (v: number) => {
+          const normalized = (v - macdMin) / macdRange
+          return macdDisplayMin + normalized * (macdDisplayMax - macdDisplayMin)
+        }
+
+        // Add histogram as area/bars at bottom
+        const histogramSeries = chart.addSeries(HistogramSeries, {
+          priceScaleId: 'right',
+          priceFormat: { type: 'price' },
+          base: scaleToPrice(0),
+        })
+
+        const histogramData = klines.map((k, i) => ({
+          time: formatChartTime(k.timestamp / 1000) as Time,
+          value: scaleToPrice(macd.histogram[i] || 0),
+          color: (macd.histogram[i] || 0) >= 0 ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+        }))
+        histogramSeries.setData(histogramData)
+
+        // Add MACD line
+        const macdLineSeries = chart.addSeries(LineSeries, {
+          color: '#2962FF',
+          lineWidth: 1,
+          priceScaleId: 'right',
+          priceFormat: { type: 'price' },
+        })
+
+        const macdLineData = klines.map((k, i) => ({
+          time: formatChartTime(k.timestamp / 1000) as Time,
+          value: scaleToPrice(macd.macd[i] || 0),
+        }))
+        macdLineSeries.setData(macdLineData)
+
+        // Add Signal line
+        const signalLineSeries = chart.addSeries(LineSeries, {
+          color: '#FF6D00',
+          lineWidth: 1,
+          priceScaleId: 'right',
+          priceFormat: { type: 'price' },
+        })
+
+        const signalLineData = klines.map((k, i) => ({
+          time: formatChartTime(k.timestamp / 1000) as Time,
+          value: scaleToPrice(macd.signal[i] || 0),
+        }))
+        signalLineSeries.setData(signalLineData)
+      }
+    }
+
     // Add trigger markers - use same bucket time as triggerMap
     if (triggers.length > 0) {
       const bucketSize = getBucketSize(timeWindow)
@@ -257,7 +344,7 @@ export default function SignalPreviewChart({ klines, triggers, timeWindow, signa
       window.removeEventListener('resize', handleResize)
       chart.remove()
     }
-  }, [klines, triggers])
+  }, [klines, triggers, macd])
 
   // Render a single trigger's content
   const renderSingleTrigger = (t: TriggerData, idx?: number) => {
@@ -340,6 +427,51 @@ export default function SignalPreviewChart({ klines, triggers, timeWindow, signa
       )
     }
 
+    // MACD event-based signal trigger
+    if (t.triggered_event && t.values) {
+      const eventLabels: Record<string, string> = {
+        golden_cross: '🟢 Golden Cross',
+        death_cross: '🔴 Death Cross',
+        histogram_positive: '🟢 Histogram +',
+        histogram_negative: '🔴 Histogram -',
+        macd_above_zero: '🟢 MACD > 0',
+        macd_below_zero: '🔴 MACD < 0',
+      }
+      const eventColor = t.triggered_event.includes('golden') || t.triggered_event.includes('positive') || t.triggered_event.includes('above')
+        ? 'text-green-400' : 'text-red-400'
+      return (
+        <div key={idx} className="text-xs space-y-0.5">
+          <div>
+            <span className="text-gray-400">Event:</span>{' '}
+            <span className={`font-mono font-medium ${eventColor}`}>
+              {eventLabels[t.triggered_event] || t.triggered_event}
+            </span>
+          </div>
+          <div>
+            <span className="text-gray-400">MACD:</span>{' '}
+            <span className="text-white font-mono">{t.values.macd?.toFixed(4)}</span>
+          </div>
+          <div>
+            <span className="text-gray-400">Signal:</span>{' '}
+            <span className="text-white font-mono">{t.values.signal?.toFixed(4)}</span>
+          </div>
+          <div>
+            <span className="text-gray-400">Histogram:</span>{' '}
+            <span className="text-white font-mono">{t.values.histogram?.toFixed(4)}</span>
+            {t.values.prev_histogram !== undefined && (
+              <span className="text-gray-500 ml-1">(prev: {t.values.prev_histogram?.toFixed(4)})</span>
+            )}
+          </div>
+          {t.cross_strength !== undefined && (
+            <div>
+              <span className="text-gray-400">Strength:</span>{' '}
+              <span className="text-white font-mono">{t.cross_strength?.toFixed(4)}</span>
+            </div>
+          )}
+        </div>
+      )
+    }
+
     // Single signal trigger
     if (t.value !== undefined) {
       const metric = t.metric || signalMetric || 'value'
@@ -392,6 +524,11 @@ export default function SignalPreviewChart({ klines, triggers, timeWindow, signa
   return (
     <div className="relative w-full h-[500px]">
       <div ref={chartContainerRef} className="w-full h-full" />
+      {macd && (
+        <div className="absolute top-2 left-2 text-xs text-gray-400 bg-gray-900/70 px-2 py-1 rounded">
+          MACD (12, 26, 9)
+        </div>
+      )}
       {tooltip.visible && tooltip.content && (
         <div
           className="absolute z-50 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-lg pointer-events-none"

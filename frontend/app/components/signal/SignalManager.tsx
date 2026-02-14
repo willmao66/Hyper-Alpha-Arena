@@ -30,6 +30,29 @@ import MarketRegimeConfig from './MarketRegimeConfig'
 import PacmanLoader from '../ui/pacman-loader'
 import { useCollectionDays } from '@/lib/useCollectionDays'
 
+// Exchange SVG logos
+const HyperliquidLogo = ({ className = '' }: { className?: string }) => (
+  <svg width="16" height="16" viewBox="0 0 144 144" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <path d="M144 71.6991C144 119.306 114.866 134.582 99.5156 120.98C86.8804 109.889 83.1211 86.4521 64.116 84.0456C39.9942 81.0113 37.9057 113.133 22.0334 113.133C3.5504 113.133 0 86.2428 0 72.4315C0 58.3063 3.96809 39.0542 19.736 39.0542C38.1146 39.0542 39.1588 66.5722 62.132 65.1073C85.0007 63.5379 85.4184 34.8689 100.247 22.6271C113.195 12.0593 144 23.4641 144 71.6991Z" fill="#50e3c2"/>
+  </svg>
+)
+
+const BinanceLogo = ({ className = '' }: { className?: string }) => (
+  <img src="/static/binance_logo.svg" alt="Binance" width="16" height="16" className={className} />
+)
+
+// Exchange badge component
+const ExchangeBadge = ({ exchange, size = 'sm' }: { exchange: string; size?: 'sm' | 'xs' }) => {
+  const isHyperliquid = exchange === 'hyperliquid'
+  const textSize = size === 'xs' ? 'text-[10px]' : 'text-xs'
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${isHyperliquid ? 'bg-emerald-500/10 text-emerald-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+      {isHyperliquid ? <HyperliquidLogo /> : <BinanceLogo />}
+      <span className={textSize}>{isHyperliquid ? 'Hyperliquid' : 'Binance'}</span>
+    </span>
+  )
+}
+
 // Types
 interface SignalDefinition {
   id: number
@@ -37,6 +60,7 @@ interface SignalDefinition {
   description: string | null
   trigger_condition: TriggerCondition
   enabled: boolean
+  exchange: string
   created_at: string
   updated_at: string
 }
@@ -57,6 +81,7 @@ interface SignalPool {
   symbols: string[]
   enabled: boolean
   logic: 'OR' | 'AND'
+  exchange: string
   created_at: string
 }
 
@@ -143,6 +168,7 @@ async function createPoolFromConfig(config: {
   description?: string
   logic: string
   signals: Array<{ metric: string; operator: string; threshold: number; time_window?: string }>
+  exchange?: string
 }): Promise<{ success: boolean; pool: SignalPool; signals: SignalDefinition[] }> {
   const res = await fetch(`${API_BASE}/create-pool-from-config`, {
     method: 'POST',
@@ -242,8 +268,8 @@ interface MetricAnalysis {
   message?: string
 }
 
-async function fetchMetricAnalysis(symbol: string, metric: string, period: string): Promise<MetricAnalysis> {
-  const params = new URLSearchParams({ symbol, metric, period })
+async function fetchMetricAnalysis(symbol: string, metric: string, period: string, exchange: string = 'hyperliquid'): Promise<MetricAnalysis> {
+  const params = new URLSearchParams({ symbol, metric, period, exchange })
   const res = await fetch(`${API_BASE}/analyze?${params}`)
   if (!res.ok) throw new Error('Failed to analyze metric')
   return res.json()
@@ -259,6 +285,7 @@ const METRICS = [
   { value: 'order_imbalance', label: 'Order Imbalance', desc: 'Order book imbalance (-1 to 1). Positive=buy pressure' },
   { value: 'oi', label: 'OI (Absolute)', desc: 'Absolute Open Interest value in USD' },
   { value: 'taker_volume', label: 'Taker Volume', desc: 'Composite signal: direction + ratio + volume threshold', isComposite: true },
+  { value: 'macd', label: 'MACD', desc: 'MACD technical indicator events: golden cross, death cross, etc.', isEvent: true },
   { value: 'price_change', label: 'Price Change', desc: 'Price change % over time window. Formula: (current-prev)/prev*100. Positive=up, Negative=down' },
   { value: 'volatility', label: 'Volatility', desc: 'Price volatility % over time window. Formula: (high-low)/low*100. Always positive, detects swings' },
 ]
@@ -268,6 +295,16 @@ const TAKER_DIRECTIONS = [
   { value: 'any', label: 'Any Direction', desc: 'Trigger on either buy or sell dominance' },
   { value: 'buy', label: 'Buy Dominant', desc: 'Only trigger when buyers dominate' },
   { value: 'sell', label: 'Sell Dominant', desc: 'Only trigger when sellers dominate' },
+]
+
+// MACD event types
+const MACD_EVENT_TYPES = [
+  { value: 'golden_cross', label: 'Golden Cross', desc: 'MACD crosses above Signal line (bullish)' },
+  { value: 'death_cross', label: 'Death Cross', desc: 'MACD crosses below Signal line (bearish)' },
+  { value: 'histogram_positive', label: 'Histogram Positive', desc: 'Histogram turns positive (same as golden cross)' },
+  { value: 'histogram_negative', label: 'Histogram Negative', desc: 'Histogram turns negative (same as death cross)' },
+  { value: 'macd_above_zero', label: 'MACD Above Zero', desc: 'MACD line crosses above zero (bullish confirmation)' },
+  { value: 'macd_below_zero', label: 'MACD Below Zero', desc: 'MACD line crosses below zero (bearish confirmation)' },
 ]
 
 const OPERATORS = [
@@ -309,10 +346,13 @@ export default function SignalManager() {
     threshold: 5,
     time_window: '5m',
     enabled: true,
+    exchange: 'hyperliquid',
     // taker_volume composite fields
     direction: 'any',
     ratio_threshold: 1.5,
     volume_threshold: 50000,
+    // MACD event fields
+    event_types: ['golden_cross', 'death_cross'] as string[],
   })
 
   // Pool dialog state
@@ -324,6 +364,7 @@ export default function SignalManager() {
     symbols: [] as string[],
     enabled: true,
     logic: 'OR' as 'OR' | 'AND',
+    exchange: 'hyperliquid',
   })
 
   // Metric analysis state
@@ -515,7 +556,7 @@ export default function SignalManager() {
     return () => clearInterval(interval)
   }, [activeTab, logsFilterPool, logsFilterSymbol])
 
-  // Fetch metric analysis when dialog opens or metric/period/symbol changes
+  // Fetch metric analysis when dialog opens or metric/period/symbol/exchange changes
   useEffect(() => {
     if (!signalDialogOpen) {
       setMetricAnalysis(null)
@@ -526,7 +567,7 @@ export default function SignalManager() {
     const loadAnalysis = async () => {
       setAnalysisLoading(true)
       try {
-        const data = await fetchMetricAnalysis(analysisSymbol, signalForm.metric, signalForm.time_window)
+        const data = await fetchMetricAnalysis(analysisSymbol, signalForm.metric, signalForm.time_window, signalForm.exchange)
         setMetricAnalysis(data)
       } catch {
         setMetricAnalysis(null)
@@ -535,7 +576,7 @@ export default function SignalManager() {
       }
     }
     loadAnalysis()
-  }, [signalDialogOpen, signalForm.metric, signalForm.time_window, analysisSymbol])
+  }, [signalDialogOpen, signalForm.metric, signalForm.time_window, signalForm.exchange, analysisSymbol])
 
   const openSignalDialog = (signal?: SignalDefinition) => {
     if (signal) {
@@ -556,10 +597,13 @@ export default function SignalManager() {
         threshold: cond.threshold ?? 5,
         time_window: cond.time_window || '5m',
         enabled: signal.enabled,
+        exchange: signal.exchange || 'hyperliquid',
         // taker_volume composite fields
         direction: (cond as any).direction || 'any',
         ratio_threshold: (cond as any).ratio_threshold ?? 1.5,
         volume_threshold: (cond as any).volume_threshold ?? 50000,
+        // MACD event fields
+        event_types: (cond as any).event_types || ['golden_cross', 'death_cross'],
       })
     } else {
       setEditingSignal(null)
@@ -571,9 +615,11 @@ export default function SignalManager() {
         threshold: 5,
         time_window: '5m',
         enabled: true,
+        exchange: 'hyperliquid',
         direction: 'any',
         ratio_threshold: 1.5,
         volume_threshold: 50000,
+        event_types: ['golden_cross', 'death_cross'],
       })
     }
     setSignalDialogOpen(true)
@@ -593,6 +639,18 @@ export default function SignalManager() {
           volume_threshold: signalForm.volume_threshold,
           time_window: signalForm.time_window,
         }
+      } else if (signalForm.metric === 'macd') {
+        // MACD event-based signal
+        if (signalForm.event_types.length === 0) {
+          toast.error('Please select at least one MACD event type')
+          setSavingSignal(false)
+          return
+        }
+        trigger_condition = {
+          metric: signalForm.metric,
+          event_types: signalForm.event_types,
+          time_window: signalForm.time_window,
+        }
       } else {
         // Standard signal: operator + threshold
         trigger_condition = {
@@ -607,6 +665,7 @@ export default function SignalManager() {
         description: signalForm.description,
         trigger_condition,
         enabled: signalForm.enabled,
+        exchange: signalForm.exchange,
       }
       if (editingSignal) {
         await updateSignal(editingSignal.id, data)
@@ -638,6 +697,7 @@ export default function SignalManager() {
   const openPreviewDialog = async (signal: SignalDefinition, symbol: string = 'BTC') => {
     // Get time_window from signal's trigger condition and set as default chart timeframe
     const signalTimeWindow = signal.trigger_condition?.time_window || '5m'
+    const signalExchange = signal.exchange || 'hyperliquid'
     setChartTimeframe(signalTimeWindow)
     setPreviewSignal(signal)
     setPreviewPool(null)
@@ -649,8 +709,9 @@ export default function SignalManager() {
     try {
       // Step 1: Fetch K-lines from market API (ensures fresh data)
       // Use 500 klines to match the K-line page and provide more historical context
+      // Include MACD indicator for chart display
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${symbol}?market=hyperliquid&period=${signalTimeWindow}&count=500`
+        `/api/market/kline-with-indicators/${symbol}?market=${signalExchange}&period=${signalTimeWindow}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -685,6 +746,7 @@ export default function SignalManager() {
         ...triggerData,
         klines: formattedKlines,
         kline_count: formattedKlines.length,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to load preview data')
@@ -698,6 +760,7 @@ export default function SignalManager() {
     const firstSignalId = pool.signal_ids[0]
     const firstSignal = signals.find(s => s.id === firstSignalId)
     const poolTimeWindow = firstSignal?.trigger_condition?.time_window || '5m'
+    const poolExchange = pool.exchange || 'hyperliquid'
     setChartTimeframe(poolTimeWindow)
     setPreviewPool(pool)
     setPreviewSignal(null)
@@ -707,9 +770,9 @@ export default function SignalManager() {
     setPreviewData(null)
 
     try {
-      // Step 1: Fetch K-lines
+      // Step 1: Fetch K-lines with MACD indicator
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${symbol}?market=hyperliquid&period=${poolTimeWindow}&count=500`
+        `/api/market/kline-with-indicators/${symbol}?market=${poolExchange}&period=${poolTimeWindow}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -742,6 +805,7 @@ export default function SignalManager() {
         klines: formattedKlines,
         kline_count: formattedKlines.length,
         isPoolPreview: true,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to load pool preview data')
@@ -758,6 +822,7 @@ export default function SignalManager() {
         description: config.description || '',
         trigger_condition: config.trigger_condition,
         enabled: true,
+        exchange: config.exchange || 'hyperliquid',
       }
       await createSignal(signalData)
       toast.success(`Signal "${config.name}" created`)
@@ -781,6 +846,7 @@ export default function SignalManager() {
         description: config.description || '',
         logic: config.logic || 'AND',
         signals: config.signals || [],
+        exchange: config.exchange || 'hyperliquid',
       }
       const result = await createPoolFromConfig(poolConfig)
       toast.success(`Signal Pool "${config.name}" created with ${result.signals.length} signals`)
@@ -803,12 +869,14 @@ export default function SignalManager() {
       description: config.description || '',
       trigger_condition: config.trigger_condition,
       enabled: true,
+      exchange: config.exchange || 'hyperliquid',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
 
     const symbol = config.symbol || 'BTC'
     const tempTimeWindow = config.trigger_condition?.time_window || '5m'
+    const tempExchange = config.exchange || 'hyperliquid'
     setChartTimeframe(tempTimeWindow)
     setPreviewSignal(tempSignal)
     setPreviewSymbol(symbol)
@@ -817,9 +885,9 @@ export default function SignalManager() {
     setPreviewData(null)
 
     try {
-      // Fetch K-lines
+      // Fetch K-lines with MACD indicator
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${symbol}?market=hyperliquid&period=${tempTimeWindow}&count=500`
+        `/api/market/kline-with-indicators/${symbol}?market=${tempExchange}&period=${tempTimeWindow}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -841,6 +909,7 @@ export default function SignalManager() {
           triggerCondition: config.trigger_condition,
           klineMinTs,
           klineMaxTs,
+          exchange: tempExchange,
         }),
       })
       if (!triggerRes.ok) throw new Error('Failed to fetch trigger data')
@@ -858,6 +927,7 @@ export default function SignalManager() {
         ...triggerData,
         klines: formattedKlines,
         kline_count: formattedKlines.length,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to load preview data')
@@ -871,10 +941,13 @@ export default function SignalManager() {
     setChartTimeframe(newTimeframe)
     setPreviewLoading(true)
 
+    // Get exchange from current preview context
+    const previewExchange = previewPool?.exchange || previewSignal?.exchange || 'hyperliquid'
+
     try {
-      // Fetch K-lines with new timeframe
+      // Fetch K-lines with new timeframe and MACD indicator
       const klineRes = await fetch(
-        `/api/market/kline-with-indicators/${previewSymbol}?market=hyperliquid&period=${newTimeframe}&count=500`
+        `/api/market/kline-with-indicators/${previewSymbol}?market=${previewExchange}&period=${newTimeframe}&count=500&indicators=MACD`
       )
       if (!klineRes.ok) throw new Error('Failed to fetch K-line data')
       const klineData = await klineRes.json()
@@ -906,12 +979,13 @@ export default function SignalManager() {
               triggerCondition: previewSignal.trigger_condition,
               klineMinTs,
               klineMaxTs,
+              exchange: previewExchange,
             }),
           })
           if (!triggerRes.ok) throw new Error('Failed to fetch trigger data')
           triggerData = await triggerRes.json()
         } else {
-          // Saved signal
+          // Saved signal (backtest_signal gets exchange from DB)
           const triggerRes = await fetch(
             `/api/signals/backtest/${previewSignal.id}?symbol=${previewSymbol}&kline_min_ts=${klineMinTs}&kline_max_ts=${klineMaxTs}`
           )
@@ -934,6 +1008,7 @@ export default function SignalManager() {
         kline_count: formattedKlines.length,
         isPoolPreview: !!previewPool,
         chart_timeframe: newTimeframe,
+        macd: klineData.indicators?.MACD,
       })
     } catch (err) {
       toast.error('Failed to refresh preview')
@@ -951,10 +1026,11 @@ export default function SignalManager() {
         symbols: pool.symbols,
         enabled: pool.enabled,
         logic: pool.logic || 'OR',
+        exchange: pool.exchange || 'hyperliquid',
       })
     } else {
       setEditingPool(null)
-      setPoolForm({ pool_name: '', signal_ids: [], symbols: [], enabled: true, logic: 'OR' })
+      setPoolForm({ pool_name: '', signal_ids: [], symbols: [], enabled: true, logic: 'OR', exchange: 'hyperliquid' })
     }
     setPoolDialogOpen(true)
   }
@@ -962,11 +1038,19 @@ export default function SignalManager() {
   const handleSavePool = async () => {
     setSavingPool(true)
     try {
+      const data = {
+        pool_name: poolForm.pool_name,
+        signal_ids: poolForm.signal_ids,
+        symbols: poolForm.symbols,
+        enabled: poolForm.enabled,
+        logic: poolForm.logic,
+        exchange: poolForm.exchange,
+      }
       if (editingPool) {
-        await updatePool(editingPool.id, poolForm)
+        await updatePool(editingPool.id, data)
         toast.success('Pool updated')
       } else {
-        await createPool(poolForm)
+        await createPool(data)
         toast.success('Pool created')
       }
       setPoolDialogOpen(false)
@@ -1015,6 +1099,15 @@ export default function SignalManager() {
       const ratio = (cond as any).ratio_threshold || 1.5
       const vol = ((cond as any).volume_threshold || 0).toLocaleString()
       return `${metric} | ${dir.toUpperCase()} ≥${ratio} Vol≥$${vol} (${cond.time_window})`
+    }
+    // Handle MACD event-based signal
+    if (cond.metric === 'macd') {
+      const events = (cond as any).event_types || []
+      const eventLabels = events.map((e: string) => {
+        const found = MACD_EVENT_TYPES.find(m => m.value === e)
+        return found ? found.label : e
+      }).join(', ')
+      return `${metric} | ${eventLabels || 'No events'} (${cond.time_window})`
     }
     const op = OPERATORS.find(o => o.value === cond.operator)?.label || cond.operator
     return `${metric} ${op} ${cond.threshold} (${cond.time_window})`
@@ -1088,6 +1181,7 @@ export default function SignalManager() {
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${signal.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
                       <span className="text-xs">{signal.enabled ? t('signals.enabled', 'Enabled') : t('signals.disabled', 'Disabled')}</span>
+                      <ExchangeBadge exchange={signal.exchange || 'hyperliquid'} size="xs" />
                     </div>
                     <Button variant="outline" size="sm" onClick={() => openPreviewDialog(signal)}>
                       <Eye className="w-4 h-4 mr-1" />{t('signals.backtest', 'Backtest')}
@@ -1141,6 +1235,7 @@ export default function SignalManager() {
                       <div className="flex items-center gap-2">
                         <span className={`w-2 h-2 rounded-full ${pool.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
                         <span className="text-xs">{pool.enabled ? t('signals.enabled', 'Enabled') : t('signals.disabled', 'Disabled')}</span>
+                        <ExchangeBadge exchange={pool.exchange || 'hyperliquid'} size="xs" />
                       </div>
                       <Button
                         variant="outline"
@@ -1217,8 +1312,11 @@ export default function SignalManager() {
                       const triggerData = log.trigger_value as Record<string, unknown> | null
                       const timestamp = log.triggered_at.endsWith('Z') ? log.triggered_at : log.triggered_at + 'Z'
                       const isPoolTrigger = log.pool_id && triggerData && 'logic' in triggerData
-                      const poolName = isPoolTrigger ? pools.find(p => p.id === log.pool_id)?.pool_name : null
-                      const signalName = log.signal_id ? signals.find(s => s.id === log.signal_id)?.signal_name : null
+                      const pool = log.pool_id ? pools.find(p => p.id === log.pool_id) : null
+                      const signal = log.signal_id ? signals.find(s => s.id === log.signal_id) : null
+                      const poolName = isPoolTrigger ? pool?.pool_name : null
+                      const signalName = signal?.signal_name
+                      const logExchange = pool?.exchange || signal?.exchange || 'hyperliquid'
 
                       const formatTriggerDetails = () => {
                         if (!triggerData) return null
@@ -1241,6 +1339,8 @@ export default function SignalManager() {
                                 <div key={i} className="ml-4 text-xs">
                                   {s.metric === 'taker_volume' ? (
                                     <>• {s.signal_name}: {s.direction?.toUpperCase()} | ratio={s.current_value?.toFixed(2)} (≥{s.threshold}) | vol=${((s.volume || 0) / 1e6).toFixed(2)}M (≥${((s.volume_threshold || 0) / 1e6).toFixed(2)}M)</>
+                                  ) : s.metric === 'macd' ? (
+                                    <>• {s.signal_name}: {s.triggered_event} | MACD={s.values?.macd?.toFixed(4)} | Hist={s.values?.histogram?.toFixed(4)}</>
                                   ) : (
                                     <>• {s.signal_name}: {s.metric} = {s.current_value?.toFixed(4)} (threshold: {s.threshold})</>
                                   )}
@@ -1272,6 +1372,7 @@ export default function SignalManager() {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-primary">{log.symbol}</span>
+                              <ExchangeBadge exchange={logExchange} size="xs" />
                               {isPoolTrigger ? (
                                 <span className="text-sm px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded">
                                   Pool: {poolName || `#${log.pool_id}`}
@@ -1358,6 +1459,30 @@ export default function SignalManager() {
               />
             </div>
             <div>
+              <Label>{t('signals.dialog.exchangeLabel', 'Exchange')}</Label>
+              <Select value={signalForm.exchange} onValueChange={v => setSignalForm(prev => ({ ...prev, exchange: v }))}>
+                <SelectTrigger>
+                  <SelectValue>
+                    <span className="flex items-center gap-2">
+                      {signalForm.exchange === 'hyperliquid' ? <HyperliquidLogo /> : <BinanceLogo />}
+                      {signalForm.exchange === 'hyperliquid' ? 'Hyperliquid' : 'Binance'}
+                    </span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="hyperliquid">
+                    <span className="flex items-center gap-2"><HyperliquidLogo />Hyperliquid</span>
+                  </SelectItem>
+                  <SelectItem value="binance">
+                    <span className="flex items-center gap-2"><BinanceLogo />Binance</span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {t('signals.dialog.exchangeDesc', 'Select the exchange data source for this signal')}
+              </p>
+            </div>
+            <div>
               <Label>{t('signals.dialog.metricLabel', 'Metric')}</Label>
               <Select value={signalForm.metric} onValueChange={v => setSignalForm(prev => ({ ...prev, metric: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1410,6 +1535,39 @@ export default function SignalManager() {
                   </div>
                 </div>
               </div>
+            ) : signalForm.metric === 'macd' ? (
+              /* MACD event-based signal UI */
+              <div className="space-y-4 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
+                <div className="text-xs font-medium text-purple-400">{t('signals.dialog.macdConfig', 'MACD Event Configuration')}</div>
+                <div>
+                  <Label>{t('signals.dialog.eventTypes', 'Event Types (select one or more)')}</Label>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {MACD_EVENT_TYPES.map(evt => (
+                      <label key={evt.value} className="flex items-center gap-2 p-2 rounded border cursor-pointer hover:bg-accent">
+                        <input
+                          type="checkbox"
+                          checked={signalForm.event_types.includes(evt.value)}
+                          onChange={e => {
+                            if (e.target.checked) {
+                              setSignalForm(prev => ({ ...prev, event_types: [...prev.event_types, evt.value] }))
+                            } else {
+                              setSignalForm(prev => ({ ...prev, event_types: prev.event_types.filter(v => v !== evt.value) }))
+                            }
+                          }}
+                          className="rounded"
+                        />
+                        <div>
+                          <div className="text-sm font-medium">{evt.label}</div>
+                          <div className="text-xs text-muted-foreground">{evt.desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {signalForm.event_types.length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">{t('signals.dialog.selectAtLeastOne', 'Please select at least one event type')}</p>
+                  )}
+                </div>
+              </div>
             ) : (
               /* Standard signal UI */
               <div className="grid grid-cols-2 gap-4">
@@ -1450,7 +1608,8 @@ export default function SignalManager() {
               </p>
             </div>
 
-            {/* Statistical Analysis Preview */}
+            {/* Statistical Analysis Preview - hide for event-based signals like MACD */}
+            {signalForm.metric !== 'macd' && (
             <div className="p-3 bg-muted/50 rounded-lg border">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm font-medium">{t('signals.dialog.statisticalAnalysis', 'Statistical Analysis')}</span>
@@ -1579,6 +1738,7 @@ export default function SignalManager() {
                 <p className="text-xs text-muted-foreground">{t('signals.dialog.unableToLoadAnalysis', 'Unable to load analysis')}</p>
               )}
             </div>
+            )}
 
             <div className="flex items-center gap-2">
               <Switch checked={signalForm.enabled} onCheckedChange={v => setSignalForm(prev => ({ ...prev, enabled: v }))} />
@@ -1611,6 +1771,37 @@ export default function SignalManager() {
               />
             </div>
             <div>
+              <Label>{t('signals.dialog.exchangeLabel', 'Exchange')}</Label>
+              <Select value={poolForm.exchange} onValueChange={v => {
+                // Clear signals that don't match the new exchange
+                const matchingSignalIds = poolForm.signal_ids.filter(id => {
+                  const signal = signals.find(s => s.id === id)
+                  return signal?.exchange === v
+                })
+                setPoolForm(prev => ({ ...prev, exchange: v, signal_ids: matchingSignalIds }))
+              }}>
+                <SelectTrigger>
+                  <SelectValue>
+                    <span className="flex items-center gap-2">
+                      {poolForm.exchange === 'hyperliquid' ? <HyperliquidLogo /> : <BinanceLogo />}
+                      {poolForm.exchange === 'hyperliquid' ? 'Hyperliquid' : 'Binance'}
+                    </span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="hyperliquid">
+                    <span className="flex items-center gap-2"><HyperliquidLogo />Hyperliquid</span>
+                  </SelectItem>
+                  <SelectItem value="binance">
+                    <span className="flex items-center gap-2"><BinanceLogo />Binance</span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {t('signals.dialog.exchangeDesc', 'Select the exchange data source for this signal')}
+              </p>
+            </div>
+            <div>
               <Label>{t('signals.dialog.symbolsLabel', 'Symbols')}</Label>
               <div className="flex flex-wrap gap-2 mt-2">
                 {watchlistSymbols.length > 0 ? (
@@ -1632,15 +1823,27 @@ export default function SignalManager() {
             <div>
               <Label>{t('signals.dialog.signalsLabel', 'Signals')}</Label>
               <div className="space-y-2 mt-2 max-h-40 overflow-y-auto">
-                {signals.map(signal => (
-                  <div key={signal.id} className="flex items-center gap-2">
-                    <Switch
-                      checked={poolForm.signal_ids.includes(signal.id)}
-                      onCheckedChange={() => toggleSignalInPool(signal.id)}
-                    />
-                    <span className="text-sm">{signal.signal_name}</span>
-                  </div>
-                ))}
+                {signals.map(signal => {
+                  const isMatchingExchange = signal.exchange === poolForm.exchange
+                  const isDisabled = !isMatchingExchange
+                  return (
+                    <div key={signal.id} className={`flex items-center gap-2 ${isDisabled ? 'opacity-50' : ''}`}>
+                      <Switch
+                        checked={poolForm.signal_ids.includes(signal.id)}
+                        onCheckedChange={() => toggleSignalInPool(signal.id)}
+                        disabled={isDisabled}
+                      />
+                      <span className="text-sm flex items-center gap-1.5">
+                        {signal.signal_name}
+                        {isDisabled && (
+                          <span className="inline-flex items-center" title={`${signal.exchange} signal`}>
+                            {signal.exchange === 'binance' ? <BinanceLogo /> : <HyperliquidLogo />}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
             <div>
@@ -1678,8 +1881,9 @@ export default function SignalManager() {
       <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
         <DialogContent className="w-[1200px] max-w-[95vw] h-[860px] max-h-[95vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {previewPool ? t('signals.preview.poolPreview', { name: previewPool.pool_name, defaultValue: `Pool Preview: ${previewPool.pool_name}` }) : t('signals.preview.signalPreview', { name: previewSignal?.signal_name, defaultValue: `Signal Preview: ${previewSignal?.signal_name}` })}
+            <DialogTitle className="flex items-center gap-3">
+              <span>{previewPool ? t('signals.preview.poolPreview', { name: previewPool.pool_name, defaultValue: `Pool Preview: ${previewPool.pool_name}` }) : t('signals.preview.signalPreview', { name: previewSignal?.signal_name, defaultValue: `Signal Preview: ${previewSignal?.signal_name}` })}</span>
+              <ExchangeBadge exchange={previewPool?.exchange || previewSignal?.exchange || 'hyperliquid'} />
             </DialogTitle>
             <DialogDescription>
               {previewPool
@@ -1768,6 +1972,7 @@ export default function SignalManager() {
                   klines={previewData.klines}
                   triggers={previewData.triggers || []}
                   timeWindow={chartTimeframe}
+                  macd={previewData.macd}
                 />
               </div>
 

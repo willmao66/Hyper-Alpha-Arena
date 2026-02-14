@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 SIGNAL_SYSTEM_PROMPT = """You are an expert trading signal designer for cryptocurrency perpetual futures.
 You have access to TOOLS to query real market data. Use them to analyze indicators before setting thresholds.
 
+## SUPPORTED EXCHANGES
+- **hyperliquid**: Hyperliquid perpetual futures (default)
+- **binance**: Binance USDS-M perpetual futures
+
+Each exchange has its own market data. Signals created for one exchange only work with that exchange's data.
+
 ## CORE CONCEPT: Signal Pools are TRIGGERS, not STRATEGIES
 Signal pools detect market conditions and trigger the Trading AI to make decisions.
 The Trading AI analyzes full market context and decides whether to buy/sell/hold.
@@ -35,30 +41,33 @@ Output ONE signal pool per request - the Trading AI can only use one pool at a t
 ## IMPORTANT: GUIDED CONVERSATION FIRST
 Before using any tools, you MUST ask the user 2-3 clarifying questions to better understand their needs:
 
-1. **Trading Direction**: Are you looking for long opportunities, short opportunities, or both?
-2. **Signal Type Preference**: What market signals interest you most?
+1. **Exchange**: Which exchange do you want to create signals for? Hyperliquid or Binance?
+2. **Trading Direction**: Are you looking for long opportunities, short opportunities, or both?
+3. **Signal Type Preference**: What market signals interest you most?
    - Price/momentum changes
    - Order book depth anomalies
    - Funding rate extremes
    - Volume/OI surges
-3. **Trigger Frequency**: How often do you expect signals?
+4. **Trigger Frequency**: How often do you expect signals?
    - High frequency (multiple times per day)
    - Medium (1-2 times per day)
    - Low frequency (a few times per week)
 
 Ask these questions conversationally in ONE message. Wait for user's response before calling any tools.
-If user says "just analyze" or "skip questions", proceed directly to tool analysis.
+If user says "just analyze" or "skip questions", ask at least which exchange they want before proceeding.
 
 ## OPTIMIZED 3-STEP WORKFLOW (only 3 tool calls needed!)
 You have exactly 3 tools. Use them efficiently:
 
 **Step 1: `get_indicators_batch`** - Analyze multiple indicators in ONE call
 - Query 2-4 indicators based on user preferences
+- **IMPORTANT**: Always pass the `exchange` parameter matching user's choice
 - Returns p50/p75/p90/p95/p99 percentiles for each
 - Use percentiles to determine appropriate thresholds
 
 **Step 2: `predict_signal_combination`** - Test signal combination BEFORE creating
 - Input your proposed signal configs with thresholds
+- **IMPORTANT**: Always pass the `exchange` parameter matching user's choice
 - Choose AND (strict) or OR (loose) logic
 - Analyzes the LAST 7 DAYS of data to calculate trigger frequency
 - Returns: individual trigger counts (over 7 days), combined trigger count, sample timestamps
@@ -66,10 +75,12 @@ You have exactly 3 tools. Use them efficiently:
 
 **Step 3: `get_kline_context`** (optional) - Verify trigger quality
 - Use sample timestamps from Step 2 to check price movements
+- **IMPORTANT**: Always pass the `exchange` parameter matching user's choice
 - Confirm signals align with meaningful market moves
 
 ## CRITICAL RULES
 - NEVER output signal configs without calling `predict_signal_combination` first
+- ALWAYS use the same exchange parameter across all tool calls
 - AND logic often results in 0 triggers if thresholds are too strict - always verify!
 - Aim for 5-30 combined triggers over 7 days (approximately 1-4 triggers per day)
 - If combination fails, relax thresholds or switch AND→OR
@@ -118,6 +129,7 @@ You have exactly 3 tools. Use them efficiently:
 {
   "name": "BTC_OI_Surge",
   "symbol": "BTC",
+  "exchange": "hyperliquid",
   "description": "Detects significant OI increase",
   "trigger_condition": {
     "metric": "oi_delta_percent",
@@ -134,6 +146,7 @@ Use this format when you tested combinations with `predict_signal_combination`:
 {
   "name": "BTC_5M_MOMENTUM_SURGE",
   "symbol": "BTC",
+  "exchange": "binance",
   "description": "Detects strong momentum with multiple confirmations",
   "logic": "AND",
   "signals": [
@@ -144,12 +157,14 @@ Use this format when you tested combinations with `predict_signal_combination`:
 }
 ```
 **NOTE**: Output ONE signal pool per request. The Trading AI can only bind to one pool at a time.
+**IMPORTANT**: The `exchange` field is REQUIRED. Use the exchange the user specified.
 
 ### Option 3: taker_volume Composite Signal (special format)
 ```signal-config
 {
   "name": "BTC_TAKER_SURGE",
   "symbol": "BTC",
+  "exchange": "hyperliquid",
   "description": "Detects strong taker volume dominance",
   "trigger_condition": {
     "metric": "taker_volume",
@@ -179,7 +194,8 @@ SIGNAL_TOOLS = [
                 "properties": {
                     "symbol": {"type": "string", "description": "Trading symbol"},
                     "timestamps": {"type": "array", "items": {"type": "integer"}, "description": "List of trigger timestamps (max 10)"},
-                    "time_window": {"type": "string", "description": "K-line interval matching signal time_window"}
+                    "time_window": {"type": "string", "description": "K-line interval matching signal time_window"},
+                    "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange to fetch K-lines from. Default: hyperliquid"}
                 },
                 "required": ["symbol", "timestamps", "time_window"]
             }
@@ -189,7 +205,7 @@ SIGNAL_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_indicators_batch",
-            "description": "Get statistical distribution of MULTIPLE indicators in one call. More efficient than calling get_indicator_statistics multiple times. Returns stats for each indicator.",
+            "description": "Get statistical distribution of MULTIPLE indicators in one call. Returns stats for each indicator from the specified exchange's market data.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -199,7 +215,8 @@ SIGNAL_TOOLS = [
                         "items": {"type": "string", "enum": ["oi_delta_percent", "funding_rate", "cvd", "depth_ratio", "order_imbalance", "taker_buy_ratio", "taker_volume", "price_change", "volatility"]},
                         "description": "List of indicator metric names to analyze (max 9). Note: taker_volume is a composite indicator."
                     },
-                    "time_window": {"type": "string", "enum": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h"], "description": "Aggregation time window"}
+                    "time_window": {"type": "string", "enum": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h"], "description": "Aggregation time window"},
+                    "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange to query data from. Default: hyperliquid"}
                 },
                 "required": ["symbol", "indicators", "time_window"]
             }
@@ -209,7 +226,7 @@ SIGNAL_TOOLS = [
         "type": "function",
         "function": {
             "name": "predict_signal_combination",
-            "description": "Predict trigger count when combining multiple signals with AND/OR logic. Analyzes the LAST 7 DAYS of data to calculate trigger frequency. Use this BEFORE creating signals to ensure the combination will have reasonable trigger frequency. For taker_volume, use direction/ratio_threshold/volume_threshold instead of operator/threshold.",
+            "description": "Predict trigger count when combining multiple signals with AND/OR logic. Analyzes the LAST 7 DAYS of data from the specified exchange. Use this BEFORE creating signals to ensure the combination will have reasonable trigger frequency.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -231,7 +248,8 @@ SIGNAL_TOOLS = [
                         },
                         "description": "List of signal configurations to combine (max 5). For taker_volume, use direction/ratio_threshold/volume_threshold."
                     },
-                    "logic": {"type": "string", "enum": ["AND", "OR"], "description": "Combination logic: AND (all must trigger) or OR (any triggers)"}
+                    "logic": {"type": "string", "enum": ["AND", "OR"], "description": "Combination logic: AND (all must trigger) or OR (any triggers)"},
+                    "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange to query data from. Default: hyperliquid"}
                 },
                 "required": ["symbol", "signals", "logic"]
             }
@@ -668,10 +686,11 @@ def _tool_backtest_threshold(
 
 
 def _tool_get_kline_context(
-    db: Session, symbol: str, timestamps: List[int], time_window: str
+    db: Session, symbol: str, timestamps: List[int], time_window: str,
+    exchange: str = "hyperliquid"
 ) -> Dict[str, Any]:
     """Get K-line price data around specific timestamps."""
-    # Map time_window to Hyperliquid interval format
+    # Map time_window to interval format
     interval_map = {
         "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m",
         "30m": "30m", "1h": "1h", "2h": "2h", "4h": "4h"
@@ -684,23 +703,38 @@ def _tool_get_kline_context(
     if not timestamps:
         return {"error": "No timestamps provided"}
 
-    # Fetch K-lines from Hyperliquid API
+    # Fetch K-lines from exchange API
     try:
         # Get range covering all timestamps with some buffer
         min_ts = min(timestamps) - (10 * interval_ms)
         max_ts = max(timestamps) + (10 * interval_ms)
 
-        url = "https://api.hyperliquid.xyz/info"
-        payload = {
-            "type": "candleSnapshot",
-            "req": {
-                "coin": symbol.upper(),
+        if exchange == "binance":
+            # Binance USDS-M Futures API
+            binance_symbol = f"{symbol.upper()}USDT"
+            url = f"https://fapi.binance.com/fapi/v1/klines"
+            params = {
+                "symbol": binance_symbol,
                 "interval": interval,
                 "startTime": min_ts,
-                "endTime": max_ts
+                "endTime": max_ts,
+                "limit": 1500
             }
-        }
-        resp = requests.post(url, json=payload, timeout=10)
+            resp = requests.get(url, params=params, timeout=10)
+        else:
+            # Hyperliquid API (default)
+            url = "https://api.hyperliquid.xyz/info"
+            payload = {
+                "type": "candleSnapshot",
+                "req": {
+                    "coin": symbol.upper(),
+                    "interval": interval,
+                    "startTime": min_ts,
+                    "endTime": max_ts
+                }
+            }
+            resp = requests.post(url, json=payload, timeout=10)
+
         if resp.status_code != 200:
             return {"error": f"Failed to fetch K-lines: HTTP {resp.status_code}"}
 
@@ -708,17 +742,29 @@ def _tool_get_kline_context(
         if not klines:
             return {"error": "No K-line data returned"}
 
-        # Build K-line lookup by timestamp
+        # Build K-line lookup by timestamp (handle different exchange formats)
         kline_map = {}
         for k in klines:
-            ts = k.get("t", k.get("T", 0))
-            kline_map[ts] = {
-                "open": float(k.get("o", 0)),
-                "high": float(k.get("h", 0)),
-                "low": float(k.get("l", 0)),
-                "close": float(k.get("c", 0)),
-                "volume": float(k.get("v", 0))
-            }
+            if exchange == "binance":
+                # Binance format: [openTime, open, high, low, close, volume, ...]
+                ts = k[0]
+                kline_map[ts] = {
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5])
+                }
+            else:
+                # Hyperliquid format: {"t": timestamp, "o": open, ...}
+                ts = k.get("t", k.get("T", 0))
+                kline_map[ts] = {
+                    "open": float(k.get("o", 0)),
+                    "high": float(k.get("h", 0)),
+                    "low": float(k.get("l", 0)),
+                    "close": float(k.get("c", 0)),
+                    "volume": float(k.get("v", 0))
+                }
 
         # For each trigger timestamp, get context (before, at, after)
         contexts = []
@@ -741,6 +787,7 @@ def _tool_get_kline_context(
 
         return {
             "symbol": symbol.upper(),
+            "exchange": exchange,
             "time_window": time_window,
             "contexts": contexts
         }
@@ -750,7 +797,8 @@ def _tool_get_kline_context(
 
 
 def _tool_get_indicators_batch(
-    db: Session, symbol: str, indicators: List[str], time_window: str
+    db: Session, symbol: str, indicators: List[str], time_window: str,
+    exchange: str = "hyperliquid"
 ) -> Dict[str, Any]:
     """Get statistical distribution of multiple indicators in one call."""
     import numpy as np
@@ -768,7 +816,7 @@ def _tool_get_indicators_batch(
     }
     interval_ms = TIMEFRAME_MS.get(time_window, 300000)
 
-    results = {"symbol": symbol.upper(), "time_window": time_window, "indicators": {}}
+    results = {"symbol": symbol.upper(), "exchange": exchange, "time_window": time_window, "indicators": {}}
 
     for indicator in indicators:
         metric = metric_map.get(indicator, indicator)
@@ -783,7 +831,7 @@ def _tool_get_indicators_batch(
             continue
         signal_backtest_service._bucket_cache = {}
         bucket_values = signal_backtest_service._compute_all_bucket_values(
-            db, symbol.upper(), metric, interval_ms
+            db, symbol.upper(), metric, interval_ms, exchange
         )
 
         if not bucket_values:
@@ -946,7 +994,8 @@ def _combine_signals_with_pool_edge_detection(
 
 
 def _tool_predict_signal_combination(
-    db: Session, symbol: str, signals: List[Dict], logic: str
+    db: Session, symbol: str, signals: List[Dict], logic: str,
+    exchange: str = "hyperliquid"
 ) -> Dict[str, Any]:
     """
     Predict trigger count when combining multiple signals.
@@ -993,7 +1042,7 @@ def _tool_predict_signal_combination(
 
     for mapped_metric in required_metrics:
         raw_data = signal_backtest_service._load_raw_data_for_metric(
-            db, symbol.upper(), mapped_metric, start_time_ms, current_time_ms, interval_ms
+            db, symbol.upper(), mapped_metric, start_time_ms, current_time_ms, interval_ms, exchange
         )
         preloaded_data[mapped_metric] = raw_data
         # Build timestamp index for binary search (data is already sorted by timestamp)
@@ -1060,6 +1109,7 @@ def _tool_predict_signal_combination(
     # Build response
     response = {
         "symbol": symbol.upper(),
+        "exchange": exchange,
         "logic": logic,
         "signal_count": len(signals),
         "individual_triggers": individual_counts,
@@ -1184,26 +1234,32 @@ def _find_taker_volume_triggers(
 def _execute_tool(db: Session, tool_name: str, arguments: Dict) -> str:
     """Execute a tool and return JSON result."""
     try:
+        # Extract exchange parameter with default "hyperliquid" for backward compatibility
+        exchange = arguments.get("exchange", "hyperliquid")
+
         if tool_name == "get_kline_context":
             result = _tool_get_kline_context(
                 db=db,
                 symbol=arguments.get("symbol", "BTC"),
                 timestamps=arguments.get("timestamps", []),
-                time_window=arguments.get("time_window", "5m")
+                time_window=arguments.get("time_window", "5m"),
+                exchange=exchange
             )
         elif tool_name == "get_indicators_batch":
             result = _tool_get_indicators_batch(
                 db=db,
                 symbol=arguments.get("symbol", "BTC"),
                 indicators=arguments.get("indicators", []),
-                time_window=arguments.get("time_window", "5m")
+                time_window=arguments.get("time_window", "5m"),
+                exchange=exchange
             )
         elif tool_name == "predict_signal_combination":
             result = _tool_predict_signal_combination(
                 db=db,
                 symbol=arguments.get("symbol", "BTC"),
                 signals=arguments.get("signals", []),
-                logic=arguments.get("logic", "AND")
+                logic=arguments.get("logic", "AND"),
+                exchange=exchange
             )
         else:
             result = {"error": f"Unknown tool: {tool_name}"}
@@ -1222,14 +1278,14 @@ def _sse_event(event_type: str, data: Any) -> str:
     return f"event: {event_type}\ndata: {json_data}\n\n"
 
 
-def _format_analysis_log(analysis_log: List[Dict]) -> str:
-    """Format analysis log as Markdown for storage and display."""
-    if not analysis_log:
+def _format_tool_calls_log(tool_calls_log: List[Dict]) -> str:
+    """Format tool calls log as Markdown for storage and display."""
+    if not tool_calls_log:
         return ""
 
     lines = ["<details>", "<summary>Analysis Process</summary>", ""]
 
-    for entry in analysis_log:
+    for entry in tool_calls_log:
         if entry["type"] == "reasoning":
             # Truncate long reasoning content
             content = entry["content"]
@@ -1349,8 +1405,9 @@ def generate_signal_with_ai_stream(
         max_tool_rounds = 30
         tool_round = 0
         assistant_content = None
-        # Accumulate analysis process for white-box display
-        analysis_log = []
+        # Accumulate tool calls and reasoning for storage (aligned with other AI assistants)
+        tool_calls_log = []
+        reasoning_snapshot_parts = []
 
         while tool_round < max_tool_rounds:
             tool_round += 1
@@ -1414,8 +1471,9 @@ def generate_signal_with_ai_stream(
             # Send reasoning content if present
             if reasoning_content:
                 yield _sse_event("reasoning", {"content": reasoning_content})
-                # Log reasoning for white-box display
-                analysis_log.append({
+                # Collect reasoning for storage
+                reasoning_snapshot_parts.append(reasoning_content)
+                tool_calls_log.append({
                     "type": "reasoning",
                     "round": tool_round,
                     "content": reasoning_content
@@ -1456,8 +1514,8 @@ def generate_signal_with_ai_stream(
                         "result": tool_result_parsed
                     })
 
-                    # Log tool call for white-box display
-                    analysis_log.append({
+                    # Log tool call for storage
+                    tool_calls_log.append({
                         "type": "tool_call",
                         "round": tool_round,
                         "name": func_name,
@@ -1472,7 +1530,7 @@ def generate_signal_with_ai_stream(
                     })
             else:
                 # No tool calls - final response
-                # Don't add reasoning here - analysis_log already has it via <details> format
+                # Don't add reasoning here - tool_calls_log already has it via <details> format
                 assistant_content = _extract_text_from_message(content) if content else ""
                 break
 
@@ -1491,16 +1549,20 @@ def generate_signal_with_ai_stream(
         for config in signal_configs:
             yield _sse_event("signal_config", {"config": config})
 
-        # Format analysis log as Markdown for storage
-        analysis_markdown = _format_analysis_log(analysis_log)
+        # Format tool calls log as Markdown for storage
+        analysis_markdown = _format_tool_calls_log(tool_calls_log)
         full_content_for_storage = analysis_markdown + assistant_content if analysis_markdown else assistant_content
+        reasoning_snapshot = "\n\n---\n\n".join(reasoning_snapshot_parts) if reasoning_snapshot_parts else None
 
-        # Save assistant message with analysis process
+        # Save assistant message with tool calls log and reasoning
         assistant_msg = AiSignalMessage(
             conversation_id=conversation.id,
             role="assistant",
             content=full_content_for_storage,
-            signal_configs=json.dumps(signal_configs) if signal_configs else None
+            signal_configs=json.dumps(signal_configs) if signal_configs else None,
+            reasoning_snapshot=reasoning_snapshot,
+            tool_calls_log=json.dumps(tool_calls_log) if tool_calls_log else None,
+            is_complete=True
         )
         db.add(assistant_msg)
         db.commit()

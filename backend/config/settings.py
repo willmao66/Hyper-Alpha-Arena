@@ -38,3 +38,18 @@ HYPERLIQUID_BUILDER_CONFIG = HyperliquidBuilderConfig(
     ),
     builder_fee=int(os.getenv("HYPERLIQUID_BUILDER_FEE", "30"))  # 0.03% default
 )
+
+
+class BinanceBrokerConfig(BaseModel):
+    """Binance Broker Configuration for fee rebates"""
+    broker_id: str  # Broker ID for fee rebates
+
+
+# Binance Broker Configuration (optional, for fee rebates)
+BINANCE_BROKER_CONFIG = BinanceBrokerConfig(
+    broker_id=os.getenv("BINANCE_BROKER_ID", "")  # Empty if not a broker
+)
+
+# Binance Daily Quota for non-rebate mainnet accounts
+# This limits the number of AI-executed trades per day to prevent excessive API usage
+BINANCE_DAILY_QUOTA_LIMIT = 40

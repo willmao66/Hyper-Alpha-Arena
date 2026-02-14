@@ -90,6 +90,7 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
         tick_batch_size=1,
         enabled=(strategy.enabled == "true" and account.auto_trading_enabled == "true"),
         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
+        exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
         last_trigger_at=last_iso,
         price_threshold=strategy.price_threshold or 1.0,
         signal_pool_id=pool_ids[0] if pool_ids else None,  # Deprecated
@@ -342,6 +343,7 @@ async def update_account_strategy(
         scheduled_trigger_enabled=payload.scheduled_trigger_enabled,
         signal_pool_id=payload.signal_pool_id,  # Deprecated: for backward compatibility
         signal_pool_ids=payload.signal_pool_ids,  # New: list of pool IDs
+        exchange=payload.exchange,
     )
 
     # Reload strategies after update

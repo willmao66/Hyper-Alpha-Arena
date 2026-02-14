@@ -20,8 +20,8 @@ class KlineRealtimeCollector:
         self.collection_task = None
         self.gap_detection_task = None
 
-        # 默认采集的交易对
-        self.default_symbols = ["BTC", "ETH", "SOL", "ARB", "OP"]
+        # Fallback symbols (use watchlist when available)
+        self.default_symbols = ["BTC"]
 
         # 采集的K线周期 (1m到1h)
         self.periods = ["1m", "3m", "5m", "15m", "30m", "1h"]

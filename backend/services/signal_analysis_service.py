@@ -30,7 +30,8 @@ class SignalAnalysisService:
         symbol: str,
         metric: str,
         period: str,
-        days: int = 7
+        days: int = 7,
+        exchange: str = "hyperliquid"
     ) -> Dict[str, Any]:
         """
         Analyze a metric and provide statistical summary with threshold suggestions.
@@ -41,6 +42,7 @@ class SignalAnalysisService:
             metric: Metric type (e.g., "oi_delta_percent", "cvd")
             period: Time period (e.g., "5m", "15m")
             days: Number of days to analyze (default 7)
+            exchange: Exchange to analyze (default "hyperliquid")
 
         Returns:
             Dict with statistics and suggestions, or error info
@@ -63,11 +65,11 @@ class SignalAnalysisService:
                 current_time_ms = int(datetime.utcnow().timestamp() * 1000)
                 start_time_ms = current_time_ms - (days * 24 * 60 * 60 * 1000)
                 return self._analyze_taker_volume(
-                    db, symbol, interval_ms, start_time_ms, current_time_ms, days
+                    db, symbol, interval_ms, start_time_ms, current_time_ms, days, exchange
                 )
 
             # Get historical values for the metric
-            values, time_range = self._get_metric_history(db, symbol, metric, period, days)
+            values, time_range = self._get_metric_history(db, symbol, metric, period, days, exchange)
 
             if len(values) < MIN_SAMPLES:
                 return {
@@ -155,7 +157,8 @@ class SignalAnalysisService:
         symbol: str,
         metric: str,
         period: str,
-        days: int
+        days: int,
+        exchange: str = "hyperliquid"
     ) -> tuple[List[float], float]:
         """Get historical values for a metric. Returns (values, time_range_hours)."""
         from services.market_flow_indicators import TIMEFRAME_MS, floor_timestamp
@@ -176,40 +179,40 @@ class SignalAnalysisService:
         # cvd, taker_volume, oi, oi_delta, funding, depth_ratio, order_imbalance
         if metric == "oi_delta":
             values, min_ts, max_ts = self._get_oi_delta_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "cvd":
             values, min_ts, max_ts = self._get_cvd_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "depth_ratio":
             values, min_ts, max_ts = self._get_depth_ratio_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "order_imbalance":
             values, min_ts, max_ts = self._get_imbalance_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "taker_ratio":
             # Taker buy/sell ratio (buy/sell), aligned with K-line TAKER indicator
             values, min_ts, max_ts = self._get_taker_ratio_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "funding":
             values, min_ts, max_ts = self._get_funding_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "oi":
             values, min_ts, max_ts = self._get_oi_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "price_change":
             values, min_ts, max_ts = self._get_price_change_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         elif metric == "volatility":
             values, min_ts, max_ts = self._get_volatility_history(
-                db, symbol, interval_ms, start_time_ms, current_time_ms
+                db, symbol, interval_ms, start_time_ms, current_time_ms, exchange
             )
         else:
             raise ValueError(f"Unsupported metric: {metric}")
@@ -221,7 +224,7 @@ class SignalAnalysisService:
 
         return values, time_range_hours
 
-    def _get_oi_delta_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_oi_delta_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get OI delta percentage history."""
         from services.market_flow_indicators import floor_timestamp
         from database.models import MarketAssetMetrics
@@ -230,6 +233,7 @@ class SignalAnalysisService:
             MarketAssetMetrics.timestamp,
             MarketAssetMetrics.open_interest
         ).filter(
+            MarketAssetMetrics.exchange == exchange,
             MarketAssetMetrics.symbol == symbol.upper(),
             MarketAssetMetrics.timestamp >= start_time_ms,
             MarketAssetMetrics.timestamp <= current_time_ms
@@ -258,7 +262,7 @@ class SignalAnalysisService:
         max_ts = sorted_times[-1] if sorted_times else None
         return values, min_ts, max_ts
 
-    def _get_cvd_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_cvd_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get CVD history."""
         from services.market_flow_indicators import floor_timestamp
         from database.models import MarketTradesAggregated
@@ -268,6 +272,7 @@ class SignalAnalysisService:
             MarketTradesAggregated.taker_buy_notional,
             MarketTradesAggregated.taker_sell_notional
         ).filter(
+            MarketTradesAggregated.exchange == exchange,
             MarketTradesAggregated.symbol == symbol.upper(),
             MarketTradesAggregated.timestamp >= start_time_ms,
             MarketTradesAggregated.timestamp <= current_time_ms
@@ -291,7 +296,7 @@ class SignalAnalysisService:
         max_ts = sorted_times[-1] if sorted_times else None
         return values, min_ts, max_ts
 
-    def _get_depth_ratio_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_depth_ratio_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get depth ratio (bid/ask) history."""
         from services.market_flow_indicators import floor_timestamp
         from database.models import MarketOrderbookSnapshots
@@ -301,6 +306,7 @@ class SignalAnalysisService:
             MarketOrderbookSnapshots.bid_depth_5,
             MarketOrderbookSnapshots.ask_depth_5
         ).filter(
+            MarketOrderbookSnapshots.exchange == exchange,
             MarketOrderbookSnapshots.symbol == symbol.upper(),
             MarketOrderbookSnapshots.timestamp >= start_time_ms,
             MarketOrderbookSnapshots.timestamp <= current_time_ms
@@ -325,7 +331,7 @@ class SignalAnalysisService:
         max_ts = sorted_times[-1] if sorted_times else None
         return values, min_ts, max_ts
 
-    def _get_imbalance_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_imbalance_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get order imbalance history."""
         from services.market_flow_indicators import floor_timestamp
         from database.models import MarketOrderbookSnapshots
@@ -335,6 +341,7 @@ class SignalAnalysisService:
             MarketOrderbookSnapshots.bid_depth_5,
             MarketOrderbookSnapshots.ask_depth_5
         ).filter(
+            MarketOrderbookSnapshots.exchange == exchange,
             MarketOrderbookSnapshots.symbol == symbol.upper(),
             MarketOrderbookSnapshots.timestamp >= start_time_ms,
             MarketOrderbookSnapshots.timestamp <= current_time_ms
@@ -360,7 +367,7 @@ class SignalAnalysisService:
         max_ts = sorted_times[-1] if sorted_times else None
         return values, min_ts, max_ts
 
-    def _get_taker_ratio_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_taker_ratio_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get taker buy/sell log ratio history. Uses ln(buy/sell) for symmetry around 0.
 
         Log transformation makes the ratio symmetric:
@@ -377,6 +384,7 @@ class SignalAnalysisService:
             MarketTradesAggregated.taker_buy_notional,
             MarketTradesAggregated.taker_sell_notional
         ).filter(
+            MarketTradesAggregated.exchange == exchange,
             MarketTradesAggregated.symbol == symbol.upper(),
             MarketTradesAggregated.timestamp >= start_time_ms,
             MarketTradesAggregated.timestamp <= current_time_ms
@@ -406,7 +414,7 @@ class SignalAnalysisService:
         max_ts = sorted_times[-1] if sorted_times else None
         return values, min_ts, max_ts
 
-    def _get_funding_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_funding_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get funding rate change history. Aligned with K-line FUNDING indicator display."""
         from services.market_flow_indicators import floor_timestamp
         from database.models import MarketAssetMetrics
@@ -418,6 +426,7 @@ class SignalAnalysisService:
             MarketAssetMetrics.timestamp,
             MarketAssetMetrics.funding_rate
         ).filter(
+            MarketAssetMetrics.exchange == exchange,
             MarketAssetMetrics.symbol == symbol.upper(),
             MarketAssetMetrics.timestamp >= query_start_ms,
             MarketAssetMetrics.timestamp <= current_time_ms,
@@ -450,7 +459,7 @@ class SignalAnalysisService:
         max_ts = result_times[-1] if result_times else None
         return change_values, min_ts, max_ts
 
-    def _get_oi_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_oi_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get OI USD change history.
 
         OI change = (current_OI - previous_OI) × mark_price
@@ -467,6 +476,7 @@ class SignalAnalysisService:
             MarketAssetMetrics.open_interest,
             MarketAssetMetrics.mark_price
         ).filter(
+            MarketAssetMetrics.exchange == exchange,
             MarketAssetMetrics.symbol == symbol.upper(),
             MarketAssetMetrics.timestamp >= query_start_ms,
             MarketAssetMetrics.timestamp <= current_time_ms,
@@ -505,7 +515,7 @@ class SignalAnalysisService:
         max_ts = result_times[-1] if result_times else None
         return change_values, min_ts, max_ts
 
-    def _get_price_change_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_price_change_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get price change percentage history."""
         from services.market_flow_indicators import floor_timestamp
         from database.models import MarketTradesAggregated
@@ -514,6 +524,7 @@ class SignalAnalysisService:
             MarketTradesAggregated.timestamp,
             MarketTradesAggregated.high_price
         ).filter(
+            MarketTradesAggregated.exchange == exchange,
             MarketTradesAggregated.symbol == symbol.upper(),
             MarketTradesAggregated.timestamp >= start_time_ms,
             MarketTradesAggregated.timestamp <= current_time_ms,
@@ -546,7 +557,7 @@ class SignalAnalysisService:
         max_ts = sorted_times[-1] if sorted_times else None
         return values, min_ts, max_ts
 
-    def _get_volatility_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms):
+    def _get_volatility_history(self, db, symbol, interval_ms, start_time_ms, current_time_ms, exchange="hyperliquid"):
         """Get price volatility (high-low)/low percentage history."""
         from services.market_flow_indicators import floor_timestamp
         from database.models import MarketTradesAggregated
@@ -556,6 +567,7 @@ class SignalAnalysisService:
             MarketTradesAggregated.high_price,
             MarketTradesAggregated.low_price
         ).filter(
+            MarketTradesAggregated.exchange == exchange,
             MarketTradesAggregated.symbol == symbol.upper(),
             MarketTradesAggregated.timestamp >= start_time_ms,
             MarketTradesAggregated.timestamp <= current_time_ms,
@@ -651,7 +663,7 @@ class SignalAnalysisService:
 
         return suggestions
 
-    def _analyze_taker_volume(self, db, symbol, interval_ms, start_time_ms, current_time_ms, days):
+    def _analyze_taker_volume(self, db, symbol, interval_ms, start_time_ms, current_time_ms, days, exchange="hyperliquid"):
         """
         Analyze taker_volume composite signal.
         Returns statistics for both ratio and volume dimensions.
@@ -665,6 +677,7 @@ class SignalAnalysisService:
             MarketTradesAggregated.taker_buy_notional,
             MarketTradesAggregated.taker_sell_notional
         ).filter(
+            MarketTradesAggregated.exchange == exchange,
             MarketTradesAggregated.symbol == symbol.upper(),
             MarketTradesAggregated.timestamp >= start_time_ms,
             MarketTradesAggregated.timestamp <= current_time_ms

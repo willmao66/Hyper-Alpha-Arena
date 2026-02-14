@@ -188,6 +188,7 @@ export interface StrategyConfig {
   tick_batch_size?: number | null
   enabled: boolean
   last_trigger_at?: string | null
+  exchange?: string  // "hyperliquid" or "binance"
 }
 
 export interface StrategyConfigUpdate {
@@ -345,6 +346,7 @@ export interface PromptPreviewRequest {
   promptTemplateKey?: string  // Optional: Fallback to database template if templateText not provided
   accountIds: number[]
   symbols?: string[]
+  exchanges?: string[]  // Optional: Array of exchanges ["hyperliquid", "binance"] (default: ["hyperliquid"])
 }
 
 export interface PromptPreviewItem {
@@ -352,6 +354,7 @@ export interface PromptPreviewItem {
   accountName: string
   symbols: string[]
   filledPrompt: string
+  exchange?: string  // Which exchange this preview is for
 }
 
 export interface PromptPreviewResponse {
@@ -536,6 +539,8 @@ export interface ArenaTrade {
   prompt_template_name?: string | null
   decision_source_type?: 'prompt_template' | 'program' | null
   related_orders?: ArenaRelatedOrder[]
+  // Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+  exchange?: string
 }
 
 export interface ArenaTradesResponse {
@@ -544,13 +549,14 @@ export interface ArenaTradesResponse {
   trades: ArenaTrade[]
 }
 
-export async function getArenaTrades(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string, symbol?: string }): Promise<ArenaTradesResponse> {
+export async function getArenaTrades(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string, symbol?: string, exchange?: string }): Promise<ArenaTradesResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
   if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
   if (params?.wallet_address) search.append('wallet_address', params.wallet_address)
   if (params?.symbol) search.append('symbol', params.symbol)
+  if (params?.exchange) search.append('exchange', params.exchange)
   const query = search.toString()
   const response = await apiRequest(`/arena/trades${query ? `?${query}` : ''}`)
   return response.json()
@@ -560,14 +566,18 @@ export interface UpdatePnlEnvironmentResult {
   fills_count: number
   unique_orders: number
   trades_updated: number
+  trades_created: number
   decisions_updated: number
+  program_logs_updated: number
   skipped: number
+  historical_fixed?: number
 }
 
 export interface UpdatePnlResponse {
   success: boolean
   message?: string
-  environments: Record<string, UpdatePnlEnvironmentResult>
+  hyperliquid: Record<string, UpdatePnlEnvironmentResult>
+  binance: Record<string, UpdatePnlEnvironmentResult>
   errors: string[]
 }
 
@@ -614,6 +624,8 @@ export interface ArenaModelChatEntry {
   signal_trigger_id?: number | null
   prompt_template_id?: number | null
   prompt_template_name?: string | null
+  // Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+  exchange?: string
 }
 
 export interface ArenaModelChatResponse {
@@ -621,7 +633,7 @@ export interface ArenaModelChatResponse {
   entries: ArenaModelChatEntry[]
 }
 
-export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string; before_time?: string, symbol?: string }): Promise<ArenaModelChatResponse> {
+export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string; before_time?: string, symbol?: string, exchange?: string }): Promise<ArenaModelChatResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
@@ -629,6 +641,7 @@ export async function getArenaModelChat(params?: { limit?: number; account_id?: 
   if (params?.wallet_address) search.append('wallet_address', params.wallet_address)
   if (params?.before_time) search.append('before_time', params.before_time)
   if (params?.symbol) search.append('symbol', params.symbol)
+  if (params?.exchange) search.append('exchange', params.exchange)
   const query = search.toString()
   const response = await apiRequest(`/arena/model-chat${query ? `?${query}` : ''}`)
   return response.json()
@@ -693,6 +706,8 @@ export interface ProgramExecutionLog {
   params_snapshot: Record<string, unknown> | null
   decision_json: Record<string, unknown> | null
   created_at: string
+  // Exchange identifier (NULL treated as "hyperliquid" for backward compatibility)
+  exchange?: string
 }
 
 export async function getProgramExecutions(params?: {
@@ -701,6 +716,7 @@ export async function getProgramExecutions(params?: {
   environment?: 'testnet' | 'mainnet'
   limit?: number
   before?: string
+  exchange?: string
 }): Promise<ProgramExecutionLog[]> {
   const search = new URLSearchParams()
   if (params?.account_id) search.append('account_id', params.account_id.toString())
@@ -708,6 +724,7 @@ export async function getProgramExecutions(params?: {
   if (params?.environment) search.append('environment', params.environment)
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.before) search.append('before', params.before)
+  if (params?.exchange) search.append('exchange', params.exchange)
   const query = search.toString()
   const response = await apiRequest(`/programs/executions/${query ? `?${query}` : ''}`)
   return response.json()
@@ -842,6 +859,7 @@ export interface ArenaPositionsAccount {
   account_name: string
   model?: string | null
   environment?: string | null
+  exchange?: string
   wallet_address?: string | null
   total_unrealized_pnl: number
   available_cash: number
@@ -873,6 +891,7 @@ export async function getArenaPositions(params?: { account_id?: number; trading_
         account_name: account.account_name ?? '',
         model: account.model ?? null,
         environment: account.environment ?? null,
+        exchange: account.exchange ?? 'hyperliquid',
         wallet_address: account.wallet_address ?? null,
         total_unrealized_pnl: Number(account.total_unrealized_pnl ?? 0),
         available_cash: Number(account.available_cash ?? 0),

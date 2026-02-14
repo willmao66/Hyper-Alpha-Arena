@@ -74,7 +74,8 @@ def get_indicator_value(
     symbol: str,
     indicator: str,
     period: str,
-    current_time_ms: Optional[int] = None
+    current_time_ms: Optional[int] = None,
+    exchange: str = "hyperliquid"
 ) -> Optional[float]:
     """
     Get a single indicator's current value for signal detection.
@@ -94,6 +95,7 @@ def get_indicator_value(
             - "TAKER": Taker buy/sell ratio
         period: Time period (e.g., "1m", "5m", "15m", "1h")
         current_time_ms: Current timestamp in ms (defaults to now)
+        exchange: Exchange name (e.g., "hyperliquid", "binance")
 
     Returns:
         Current value as float, or None if data unavailable
@@ -112,31 +114,31 @@ def get_indicator_value(
 
     try:
         if indicator_upper == "OI_DELTA":
-            data = _get_oi_delta_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_oi_delta_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("current") if data else None
         elif indicator_upper == "CVD":
-            data = _get_cvd_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_cvd_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("current") if data else None
         elif indicator_upper == "DEPTH":
-            data = _get_depth_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_depth_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("ratio") if data else None
         elif indicator_upper == "IMBALANCE":
-            data = _get_imbalance_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_imbalance_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("current") if data else None
         elif indicator_upper == "TAKER":
-            data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("ratio") if data else None
         elif indicator_upper == "OI":
-            data = _get_oi_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_oi_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("current") if data else None
         elif indicator_upper == "FUNDING":
-            data = _get_funding_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_funding_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("change") if data else None  # Return change in bps
         elif indicator_upper == "PRICE_CHANGE":
-            data = _get_price_change_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_price_change_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("current") if data else None
         elif indicator_upper == "VOLATILITY":
-            data = _get_volatility_data(db, symbol, period, interval_ms, current_time_ms)
+            data = _get_volatility_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             return data.get("current") if data else None
         else:
             logger.warning(f"Unknown indicator: {indicator}")
@@ -151,7 +153,8 @@ def get_flow_indicators_for_prompt(
     symbol: str,
     period: str,
     indicators: List[str],
-    current_time_ms: Optional[int] = None
+    current_time_ms: Optional[int] = None,
+    exchange: str = "hyperliquid"
 ) -> Dict[str, Any]:
     """
     Get market flow indicator data formatted for AI prompt injection.
@@ -162,6 +165,7 @@ def get_flow_indicators_for_prompt(
         period: Time period (e.g., "15m", "1h")
         indicators: List of indicators to calculate ["CVD", "TAKER", "OI", "FUNDING", "DEPTH"]
         current_time_ms: Current timestamp in ms (defaults to now)
+        exchange: Exchange name (e.g., "hyperliquid", "binance")
 
     Returns:
         Dict with indicator name as key and raw data dict as value
@@ -182,23 +186,23 @@ def get_flow_indicators_for_prompt(
         indicator_upper = indicator.upper()
         try:
             if indicator_upper == "CVD":
-                results["CVD"] = _get_cvd_data(db, symbol, period, interval_ms, current_time_ms)
+                results["CVD"] = _get_cvd_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "TAKER":
-                results["TAKER"] = _get_taker_data(db, symbol, period, interval_ms, current_time_ms)
+                results["TAKER"] = _get_taker_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "OI":
-                results["OI"] = _get_oi_data(db, symbol, period, interval_ms, current_time_ms)
+                results["OI"] = _get_oi_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "OI_DELTA":
-                results["OI_DELTA"] = _get_oi_delta_data(db, symbol, period, interval_ms, current_time_ms)
+                results["OI_DELTA"] = _get_oi_delta_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "FUNDING":
-                results["FUNDING"] = _get_funding_data(db, symbol, period, interval_ms, current_time_ms)
+                results["FUNDING"] = _get_funding_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "DEPTH":
-                results["DEPTH"] = _get_depth_data(db, symbol, period, interval_ms, current_time_ms)
+                results["DEPTH"] = _get_depth_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "IMBALANCE":
-                results["IMBALANCE"] = _get_imbalance_data(db, symbol, period, interval_ms, current_time_ms)
+                results["IMBALANCE"] = _get_imbalance_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "PRICE_CHANGE":
-                results["PRICE_CHANGE"] = _get_price_change_data(db, symbol, period, interval_ms, current_time_ms)
+                results["PRICE_CHANGE"] = _get_price_change_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             elif indicator_upper == "VOLATILITY":
-                results["VOLATILITY"] = _get_volatility_data(db, symbol, period, interval_ms, current_time_ms)
+                results["VOLATILITY"] = _get_volatility_data(db, symbol, period, interval_ms, current_time_ms, exchange)
             else:
                 logger.warning(f"Unknown flow indicator: {indicator}")
         except Exception as e:
@@ -209,7 +213,8 @@ def get_flow_indicators_for_prompt(
 
 
 def _get_cvd_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get CVD (Cumulative Volume Delta) data.
@@ -225,6 +230,7 @@ def _get_cvd_data(
         MarketTradesAggregated.taker_sell_notional
     ).filter(
         MarketTradesAggregated.symbol == symbol.upper(),
+        MarketTradesAggregated.exchange == exchange.lower(),
         MarketTradesAggregated.timestamp >= start_time,
         MarketTradesAggregated.timestamp <= current_time_ms
     ).order_by(MarketTradesAggregated.timestamp).all()
@@ -277,12 +283,14 @@ def _get_cvd_data(
 
 
 def _get_taker_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid", include_debug: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
     Get Taker Buy/Sell Volume data.
 
     Returns buy volume, sell volume, and buy/sell ratio.
+    If include_debug=True (for Binance), includes debug_snapshot for troubleshooting.
     """
     lookback_ms = interval_ms * 10
     start_time = current_time_ms - lookback_ms
@@ -293,6 +301,7 @@ def _get_taker_data(
         MarketTradesAggregated.taker_sell_notional
     ).filter(
         MarketTradesAggregated.symbol == symbol.upper(),
+        MarketTradesAggregated.exchange == exchange.lower(),
         MarketTradesAggregated.timestamp >= start_time,
         MarketTradesAggregated.timestamp <= current_time_ms
     ).order_by(MarketTradesAggregated.timestamp).all()
@@ -333,7 +342,7 @@ def _get_taker_data(
     last_5_ratios = ratios[-5:] if len(ratios) >= 5 else ratios
     last_5_volumes = volumes[-5:] if len(volumes) >= 5 else volumes
 
-    return {
+    result = {
         "buy": current_buy,
         "sell": current_sell,
         "ratio": current_ratio,
@@ -342,9 +351,45 @@ def _get_taker_data(
         "period": period
     }
 
+    # Add debug snapshot for Binance troubleshooting
+    if include_debug:
+        # Build buckets summary for debug
+        buckets_debug = {}
+        for ts in sorted_times:
+            bucket = buckets[ts]
+            buckets_debug[str(ts)] = {
+                "buy": float(bucket["buy"]),
+                "sell": float(bucket["sell"]),
+                "total": float(bucket["buy"] + bucket["sell"])
+            }
+
+        result["debug_snapshot"] = {
+            "query_params": {
+                "current_time_ms": current_time_ms,
+                "start_time": start_time,
+                "interval_ms": interval_ms,
+                "exchange": exchange,
+                "symbol": symbol
+            },
+            "records_count": len(records),
+            "records_ts_range": [records[0][0], records[-1][0]] if records else [],
+            "buckets_count": len(buckets),
+            "buckets": buckets_debug,
+            "result_bucket_ts": sorted_times[-1],
+            "result": {
+                "buy": current_buy,
+                "sell": current_sell,
+                "total": current_buy + current_sell,
+                "ratio": current_ratio
+            }
+        }
+
+    return result
+
 
 def _get_oi_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get Open Interest USD change data.
@@ -362,6 +407,7 @@ def _get_oi_data(
         MarketAssetMetrics.mark_price
     ).filter(
         MarketAssetMetrics.symbol == symbol.upper(),
+        MarketAssetMetrics.exchange == exchange.lower(),
         MarketAssetMetrics.timestamp >= start_time,
         MarketAssetMetrics.timestamp <= current_time_ms
     ).order_by(MarketAssetMetrics.timestamp).all()
@@ -405,7 +451,8 @@ def _get_oi_data(
 
 
 def _get_oi_delta_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get Open Interest Delta (change percentage) data.
@@ -420,6 +467,7 @@ def _get_oi_delta_data(
         MarketAssetMetrics.open_interest
     ).filter(
         MarketAssetMetrics.symbol == symbol.upper(),
+        MarketAssetMetrics.exchange == exchange.lower(),
         MarketAssetMetrics.timestamp >= start_time,
         MarketAssetMetrics.timestamp <= current_time_ms
     ).order_by(MarketAssetMetrics.timestamp).all()
@@ -475,7 +523,8 @@ def _get_oi_delta_data(
 
 
 def _get_funding_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get Funding Rate data.
@@ -490,8 +539,10 @@ def _get_funding_data(
         MarketAssetMetrics.funding_rate
     ).filter(
         MarketAssetMetrics.symbol == symbol.upper(),
+        MarketAssetMetrics.exchange == exchange.lower(),
         MarketAssetMetrics.timestamp >= start_time,
-        MarketAssetMetrics.timestamp <= current_time_ms
+        MarketAssetMetrics.timestamp <= current_time_ms,
+        MarketAssetMetrics.funding_rate.isnot(None)
     ).order_by(MarketAssetMetrics.timestamp).all()
 
     if not records:
@@ -548,7 +599,8 @@ def _get_funding_data(
 
 
 def _get_depth_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get Order Book Depth data.
@@ -565,6 +617,7 @@ def _get_depth_data(
         MarketOrderbookSnapshots.spread
     ).filter(
         MarketOrderbookSnapshots.symbol == symbol.upper(),
+        MarketOrderbookSnapshots.exchange == exchange.lower(),
         MarketOrderbookSnapshots.timestamp >= start_time,
         MarketOrderbookSnapshots.timestamp <= current_time_ms
     ).order_by(MarketOrderbookSnapshots.timestamp).all()
@@ -614,7 +667,8 @@ def _get_depth_data(
 
 
 def _get_imbalance_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get Order Book Imbalance data.
@@ -631,6 +685,7 @@ def _get_imbalance_data(
         MarketOrderbookSnapshots.ask_depth_5
     ).filter(
         MarketOrderbookSnapshots.symbol == symbol.upper(),
+        MarketOrderbookSnapshots.exchange == exchange.lower(),
         MarketOrderbookSnapshots.timestamp >= start_time,
         MarketOrderbookSnapshots.timestamp <= current_time_ms
     ).order_by(MarketOrderbookSnapshots.timestamp).all()
@@ -669,7 +724,8 @@ def _get_imbalance_data(
 
 
 def _get_price_change_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get Price Change data.
@@ -691,6 +747,7 @@ def _get_price_change_data(
         MarketTradesAggregated.high_price
     ).filter(
         MarketTradesAggregated.symbol == symbol.upper(),
+        MarketTradesAggregated.exchange == exchange.lower(),
         MarketTradesAggregated.timestamp >= start_time,
         MarketTradesAggregated.timestamp <= current_time_ms,
         MarketTradesAggregated.high_price.isnot(None)
@@ -751,7 +808,8 @@ def _get_price_change_data(
 
 
 def _get_volatility_data(
-    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int
+    db: Session, symbol: str, period: str, interval_ms: int, current_time_ms: int,
+    exchange: str = "hyperliquid"
 ) -> Optional[Dict[str, Any]]:
     """
     Get Volatility (Price Range) data.
@@ -774,6 +832,7 @@ def _get_volatility_data(
         MarketTradesAggregated.low_price
     ).filter(
         MarketTradesAggregated.symbol == symbol.upper(),
+        MarketTradesAggregated.exchange == exchange.lower(),
         MarketTradesAggregated.timestamp >= start_time,
         MarketTradesAggregated.timestamp <= current_time_ms,
         MarketTradesAggregated.high_price.isnot(None),

@@ -33,13 +33,21 @@ ATTRIBUTION_SYSTEM_PROMPT = """You are a professional Trading Strategy Diagnosis
 ## YOUR ROLE
 Analyze user's trading performance data, identify problem patterns, and provide actionable improvement suggestions.
 
-## CRITICAL: ENVIRONMENT CONFIRMATION
-Before any analysis, you MUST confirm which trading environment to analyze:
-- **testnet**: Test network trades (paper trading, testing)
-- **mainnet**: Real money trades on Hyperliquid mainnet
+## CRITICAL: EXCHANGE AND ENVIRONMENT CONFIRMATION
+Before any analysis, you MUST confirm:
 
-Ask the user: "Which environment do you want to analyze - testnet or mainnet?"
-Only proceed after getting a clear answer. Pass the environment parameter to ALL tool calls.
+1. **Exchange**: Which exchange to analyze?
+   - **hyperliquid**: Hyperliquid perpetual futures
+   - **binance**: Binance USDT-M futures
+
+2. **Environment** (Hyperliquid only):
+   - **testnet**: Test network trades (paper trading, testing)
+   - **mainnet**: Real money trades
+
+For Binance, environment is always mainnet (testnet not supported yet).
+
+Ask the user: "Which exchange do you want to analyze - Hyperliquid or Binance? For Hyperliquid, also specify testnet or mainnet."
+Only proceed after getting a clear answer. Pass the exchange and environment parameters to ALL tool calls.
 
 ## ACCOUNT IDENTIFICATION
 Users typically refer to accounts by NAME (e.g., "Deepseek", "Claude", "GPT"), not by ID.
@@ -53,12 +61,13 @@ NEVER ask user for account ID directly. Instead, use `list_ai_accounts` and pres
 
 ## GUIDED CONVERSATION
 Before using analysis tools, confirm:
-1. Which environment? (testnet or mainnet) - REQUIRED
-2. Which account? (use `list_ai_accounts` to find by name)
-3. Time period? (default: 30 days)
+1. Which exchange? (hyperliquid or binance) - REQUIRED
+2. Which environment? (testnet or mainnet, for Hyperliquid only) - REQUIRED for Hyperliquid
+3. Which account? (use `list_ai_accounts` to find by name)
+4. Time period? (default: 30 days)
 
 ## WORKFLOW
-1. Confirm environment (testnet/mainnet) with user
+1. Confirm exchange and environment with user
 2. Use `list_ai_accounts` to identify account by name
 3. Use `get_attribution_summary` to get overall performance metrics
 4. Use `get_account_strategy` to understand current strategy configuration
@@ -90,7 +99,7 @@ After analysis, output diagnosis cards using this format:
 ```
 
 ## IMPORTANT RULES
-- ALWAYS confirm environment before analysis
+- ALWAYS confirm exchange and environment before analysis
 - NEVER ask for account ID - use `list_ai_accounts` to find by name
 - Always use tools to get real data before making conclusions
 - Be specific with numbers and percentages
@@ -127,10 +136,11 @@ def _define_tools():
                     "type": "object",
                     "properties": {
                         "account_id": {"type": "integer", "description": "Account ID to analyze. Use 0 for all accounts."},
-                        "environment": {"type": "string", "enum": ["testnet", "mainnet"], "description": "Trading environment to analyze. REQUIRED."},
+                        "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange to analyze trades from. REQUIRED."},
+                        "environment": {"type": "string", "enum": ["testnet", "mainnet"], "description": "Trading environment (for Hyperliquid). Use 'mainnet' for Binance."},
                         "days": {"type": "integer", "description": "Number of days to analyze (7, 30, 90)", "default": 30}
                     },
-                    "required": ["account_id", "environment"]
+                    "required": ["account_id", "exchange"]
                 }
             }
         },
@@ -185,11 +195,12 @@ def _define_tools():
                     "type": "object",
                     "properties": {
                         "account_id": {"type": "integer", "description": "Account ID"},
-                        "environment": {"type": "string", "enum": ["testnet", "mainnet"], "description": "Trading environment. REQUIRED."},
+                        "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange to query trades from. REQUIRED."},
+                        "environment": {"type": "string", "enum": ["testnet", "mainnet"], "description": "Trading environment (for Hyperliquid). Use 'mainnet' for Binance."},
                         "limit": {"type": "integer", "description": "Number of recent trades to fetch", "default": 10},
                         "filter_type": {"type": "string", "enum": ["all", "wins", "losses"], "description": "Filter by trade outcome"}
                     },
-                    "required": ["account_id", "environment"]
+                    "required": ["account_id", "exchange"]
                 }
             }
         },
@@ -294,15 +305,22 @@ def _get_fees_for_decisions(decisions: List[AIDecisionLog]) -> Dict[int, float]:
 def _tool_get_attribution_summary(db: Session, args: Dict) -> str:
     """Get trading performance summary"""
     account_id = args.get("account_id", 0)
+    exchange = args.get("exchange")
     environment = args.get("environment")
     days = args.get("days", 30)
 
-    if not environment:
-        return json.dumps({"error": "environment is required (testnet or mainnet)"})
+    if not exchange:
+        return json.dumps({"error": "exchange is required (hyperliquid or binance)"})
+
+    # For Binance, environment is always mainnet
+    if exchange == "binance":
+        environment = "mainnet"
+    elif not environment:
+        return json.dumps({"error": "environment is required for Hyperliquid (testnet or mainnet)"})
 
     start_date = datetime.now() - timedelta(days=days)
 
-    # Build query with environment filter
+    # Build query with exchange and environment filter
     # Only include trades with non-zero PnL (exclude opening trades)
     query = db.query(AIDecisionLog).filter(
         AIDecisionLog.operation.in_(["buy", "sell", "close"]),
@@ -310,6 +328,7 @@ def _tool_get_attribution_summary(db: Session, args: Dict) -> str:
         AIDecisionLog.realized_pnl.isnot(None),
         AIDecisionLog.realized_pnl != 0,  # Exclude opening trades (no settled PnL)
         AIDecisionLog.created_at >= start_date,
+        AIDecisionLog.exchange == exchange,
         AIDecisionLog.hyperliquid_environment == environment
     )
 
@@ -509,6 +528,7 @@ def _tool_get_signal_pool_config(db: Session, args: Dict) -> str:
 def _tool_get_trade_decision_chain(db: Session, args: Dict) -> str:
     """Get detailed trade decision chain"""
     account_id = args.get("account_id")
+    exchange = args.get("exchange")
     environment = args.get("environment")
     limit = args.get("limit", 10)
     filter_type = args.get("filter_type", "all")
@@ -516,13 +536,20 @@ def _tool_get_trade_decision_chain(db: Session, args: Dict) -> str:
     if not account_id:
         return json.dumps({"error": "account_id is required"})
 
-    if not environment:
-        return json.dumps({"error": "environment is required (testnet or mainnet)"})
+    if not exchange:
+        return json.dumps({"error": "exchange is required (hyperliquid or binance)"})
+
+    # For Binance, environment is always mainnet
+    if exchange == "binance":
+        environment = "mainnet"
+    elif not environment:
+        return json.dumps({"error": "environment is required for Hyperliquid (testnet or mainnet)"})
 
     query = db.query(AIDecisionLog).filter(
         AIDecisionLog.account_id == account_id,
         AIDecisionLog.executed == "true",
         AIDecisionLog.realized_pnl.isnot(None),
+        AIDecisionLog.exchange == exchange,
         AIDecisionLog.hyperliquid_environment == environment
     )
 
@@ -708,7 +735,7 @@ def generate_attribution_analysis_stream(
 
         # Collect reasoning and analysis log for storage
         all_reasoning_parts = []
-        all_analysis_log = []
+        tool_calls_log = []
 
         for round_num in range(max_rounds):
             is_last = (round_num == max_rounds - 1)
@@ -772,12 +799,12 @@ def generate_attribution_analysis_stream(
                     yield f"event: tool_result\ndata: {json.dumps({'name': func_name, 'result': json.loads(result)})}\n\n"
 
                     # Collect tool call and result for storage
-                    all_analysis_log.append({
+                    tool_calls_log.append({
                         "type": "tool_call",
                         "name": func_name,
                         "arguments": func_args
                     })
-                    all_analysis_log.append({
+                    tool_calls_log.append({
                         "type": "tool_result",
                         "name": func_name,
                         "result": json.loads(result)
@@ -799,9 +826,9 @@ def generate_attribution_analysis_stream(
         # Extract diagnosis results
         diagnosis_results = extract_diagnosis_results(assistant_content)
 
-        # Save assistant message with reasoning and analysis log
+        # Save assistant message with reasoning and tool calls log
         reasoning_snapshot = "\n\n---\n\n".join(all_reasoning_parts) if all_reasoning_parts else None
-        analysis_log_json = json.dumps(all_analysis_log) if all_analysis_log else None
+        tool_calls_log_json = json.dumps(tool_calls_log) if tool_calls_log else None
 
         assistant_msg = AiAttributionMessage(
             conversation_id=conversation.id,
@@ -809,7 +836,8 @@ def generate_attribution_analysis_stream(
             content=assistant_content,
             diagnosis_result=json.dumps(diagnosis_results) if diagnosis_results else None,
             reasoning_snapshot=reasoning_snapshot,
-            analysis_log=analysis_log_json
+            tool_calls_log=tool_calls_log_json,
+            is_complete=True
         )
         db.add(assistant_msg)
         db.commit()
@@ -865,14 +893,16 @@ def get_attribution_messages(db: Session, conversation_id: int, user_id: int = 1
                 msg_dict["diagnosis_results"] = json.loads(m.diagnosis_result)
             except:
                 pass
-        # Include reasoning and analysis log for history display
+        # Include reasoning and tool calls log for history display
         if m.reasoning_snapshot:
             msg_dict["reasoning_snapshot"] = m.reasoning_snapshot
-        if m.analysis_log:
+        if m.tool_calls_log:
             try:
-                msg_dict["analysis_log"] = json.loads(m.analysis_log)
+                msg_dict["tool_calls_log"] = json.loads(m.tool_calls_log)
             except:
                 pass
+        if hasattr(m, 'is_complete'):
+            msg_dict["is_complete"] = m.is_complete if m.is_complete is not None else True
         result.append(msg_dict)
 
     return result

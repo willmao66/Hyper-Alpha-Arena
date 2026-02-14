@@ -84,7 +84,7 @@ const PAGE_TITLES: Record<string, string> = {
   'signal-management': 'Signal System',
   'attribution': 'Attribution Analysis',
   'trader-management': 'AI Trader Management',
-  'hyperliquid': 'Hyperliquid Trading',
+  'hyperliquid': 'Manual Trading',
   'klines': 'K-Line Charts',
   'premium-features': 'Premium Features',
   'model-chat': 'Model Chat',
