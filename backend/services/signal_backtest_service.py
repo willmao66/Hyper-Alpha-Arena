@@ -1231,41 +1231,10 @@ class SignalBacktestService:
                 db, pool_def, signal_ids, symbol, kline_min_ts, kline_max_ts, exchange
             )
 
-        # For OR logic, use individual signal triggers (backtest_signal gets exchange from DB)
-        signal_triggers = {}
-        signal_names = {}
-        time_window = "5m"
-
-        for signal_id in signal_ids:
-            signal_result = self.backtest_signal(
-                db, signal_id, symbol, kline_min_ts, kline_max_ts
-            )
-            if "error" not in signal_result:
-                signal_triggers[signal_id] = {
-                    t["timestamp"]: t for t in signal_result.get("triggers", [])
-                }
-                signal_names[signal_id] = signal_result.get("signal_name", f"Signal {signal_id}")
-                time_window = signal_result.get("time_window", time_window)
-
-        if not signal_triggers:
-            return {"error": "No valid signals in pool"}
-
-        combined_triggers = self._combine_pool_triggers(
-            signal_triggers, signal_names, logic
+        # For OR logic, also use pool-level edge detection to match real-time behavior
+        return self._backtest_pool_or_logic(
+            db, pool_def, signal_ids, symbol, kline_min_ts, kline_max_ts, exchange
         )
-
-        logger.warning(f"[Backtest] END pool_id={pool_id} success, {len(combined_triggers)} combined triggers")
-        return {
-            "pool_id": pool_id,
-            "pool_name": pool_def["pool_name"],
-            "symbol": symbol,
-            "time_window": time_window,
-            "logic": logic,
-            "signal_count": len(signal_ids),
-            "signal_names": signal_names,
-            "trigger_count": len(combined_triggers),
-            "triggers": combined_triggers,
-        }
 
     def _backtest_pool_and_logic(
         self, db: Session, pool_def: Dict, signal_ids: List[int], symbol: str,
@@ -1335,60 +1304,31 @@ class SignalBacktestService:
                     # Build timestamps index for O(log n) binary search
                     metrics_timestamps_index[mapped_metric] = [r[0] for r in raw_data] if raw_data else []
 
-        # Generate check points from all data
-        all_timestamps = set()
+        # Generate check points every 15 seconds (matching real-time detection granularity)
+        # Use actual data time range to avoid generating too many empty check points
+        CHECK_INTERVAL_MS = 15000  # 15 seconds, same as data collection and real-time detection
+
+        # Find actual data time range from all metrics
+        all_data_timestamps = set()
         for data in metrics_data.values():
             if data:
-                all_timestamps.update(r[0] for r in data)
+                all_data_timestamps.update(r[0] for r in data)
 
-        # For MACD-only pools, get check points from MACD triggers
-        has_only_macd = all(
-            sig_def["trigger_condition"].get("metric") == "macd"
-            for sig_def in signal_defs.values()
-        )
-        if has_only_macd:
-            # For MACD-only pool, use MACD trigger timestamps as check points
-            for signal_id, sig_def in signal_defs.items():
-                condition = sig_def["trigger_condition"]
-                macd_triggers = self._find_macd_triggers_in_range(
-                    db, sig_def, symbol, condition.get("time_window", "15m"),
-                    kline_min_ts, kline_max_ts, exchange
-                )
-                for t in macd_triggers:
-                    all_timestamps.add(t["timestamp"])
+        if all_data_timestamps:
+            # Use data range, but respect user's requested range
+            data_min_ts = max(min(all_data_timestamps), kline_min_ts)
+            data_max_ts = min(max(all_data_timestamps), kline_max_ts)
+        else:
+            data_min_ts = kline_min_ts
+            data_max_ts = kline_max_ts
 
-        if kline_min_ts:
-            all_timestamps = {ts for ts in all_timestamps if ts >= kline_min_ts}
-        if kline_max_ts:
-            all_timestamps = {ts for ts in all_timestamps if ts <= kline_max_ts}
-
-        check_points = sorted(all_timestamps)
-
-        # =============================================================================
-        # AND Logic with Pending Edge Detection
-        # =============================================================================
-        # Design: AND trigger count should be limited by the "rarest" signal.
-        #
-        # Problem with naive approach:
-        #   If Signal A is almost always satisfied (e.g., 93% of time) and Signal B
-        #   fluctuates frequently, the AND state changes are dominated by Signal B,
-        #   causing AND triggers ≈ Signal B triggers, ignoring Signal A's constraint.
-        #
-        # Solution: Pending Edge mechanism
-        #   - Each signal maintains a "pending_edge" flag
-        #   - When a signal transitions from not-met to met, set pending_edge = True
-        #   - AND triggers ONLY when:
-        #     1. All signals are currently satisfied
-        #     2. All signals have pending_edge = True
-        #   - After AND trigger, clear all pending_edge flags
-        #
-        # This ensures AND trigger count ≤ min(individual signal trigger counts)
-        # =============================================================================
-        triggers = []
-
-        # Track each signal's previous state and pending edge
-        signal_was_met = {sid: False for sid in signal_defs}
-        signal_pending_edge = {sid: False for sid in signal_defs}
+        # Generate 15-second interval check points within data range
+        start_ts = (data_min_ts // CHECK_INTERVAL_MS) * CHECK_INTERVAL_MS
+        check_points = []
+        current_ts = start_ts
+        while current_ts <= data_max_ts:
+            check_points.append(current_ts)
+            current_ts += CHECK_INTERVAL_MS
 
         # Pre-compute all signal conditions for all check points (batch processing)
         # This is more efficient than computing on-demand for each check point
@@ -1498,12 +1438,15 @@ class SignalBacktestService:
                     } if condition_met else None
                     signal_conditions[signal_id][check_time] = (condition_met, value_info)
 
-        # Now iterate through check points with pre-computed conditions
+        # AND Logic with Pool-Level Edge Detection (matching real-time detection)
+        # Trigger when pool transitions from not-met to met (all signals satisfied)
+        triggers = []
+        was_active = False  # Pool-level state
+
         for check_time in check_points:
             all_met = True
             signal_values = []
             has_none = False
-            current_met = {}
 
             for signal_id in signal_defs:
                 result = signal_conditions[signal_id].get(check_time)
@@ -1514,7 +1457,6 @@ class SignalBacktestService:
                 if condition_met is None:
                     has_none = True
                     break
-                current_met[signal_id] = condition_met
                 if not condition_met:
                     all_met = False
                 elif value_info:
@@ -1524,41 +1466,15 @@ class SignalBacktestService:
             if has_none:
                 continue
 
-            # For MACD-only pools, skip pending edge mechanism
-            # MACD is event-based: each trigger is an independent edge event
-            if has_only_macd:
-                if all_met:
-                    triggers.append({
-                        "timestamp": check_time,
-                        "triggered_signals": signal_values,
-                        "trigger_type": "all",
-                    })
-                continue
-
-            # Update pending edges: when signal transitions from not-met to met
-            for signal_id in signal_defs:
-                if signal_id in current_met:
-                    if current_met[signal_id] and not signal_was_met[signal_id]:
-                        # Signal just became satisfied - mark pending edge
-                        signal_pending_edge[signal_id] = True
-
-            # AND trigger condition: all signals met AND all have pending edges
-            all_have_pending = all(signal_pending_edge[sid] for sid in signal_defs)
-
-            if all_met and all_have_pending:
+            # Pool-level edge detection: trigger on False -> True
+            if all_met and not was_active:
                 triggers.append({
                     "timestamp": check_time,
                     "triggered_signals": signal_values,
                     "trigger_type": "all",
                 })
-                # Clear all pending edges after trigger
-                for sid in signal_defs:
-                    signal_pending_edge[sid] = False
 
-            # Update previous state for next iteration
-            for signal_id in signal_defs:
-                if signal_id in current_met:
-                    signal_was_met[signal_id] = current_met[signal_id]
+            was_active = all_met
 
         return {
             "pool_id": pool_def["id"],
@@ -1566,6 +1482,225 @@ class SignalBacktestService:
             "symbol": symbol,
             "time_window": time_window,
             "logic": "AND",
+            "signal_count": len(signal_ids),
+            "signal_names": signal_names,
+            "trigger_count": len(triggers),
+            "triggers": triggers,
+        }
+
+    def _backtest_pool_or_logic(
+        self, db: Session, pool_def: Dict, signal_ids: List[int], symbol: str,
+        kline_min_ts: int, kline_max_ts: int, exchange: str = "hyperliquid"
+    ) -> Dict[str, Any]:
+        """
+        Backtest pool with OR logic using pool-level edge detection.
+        Triggers when pool state transitions from not-met to met (any signal satisfies).
+        This matches real-time detection behavior.
+        """
+        # Get all signal definitions (same as AND logic)
+        signal_defs = {}
+        signal_names = {}
+        time_window = "5m"
+
+        for signal_id in signal_ids:
+            result = db.execute(
+                text("""
+                    SELECT id, signal_name, trigger_condition
+                    FROM signal_definitions WHERE id = :id
+                """),
+                {"id": signal_id}
+            )
+            row = result.fetchone()
+            if row:
+                trigger_cond = row[2]
+                if isinstance(trigger_cond, str):
+                    try:
+                        trigger_cond = json.loads(trigger_cond)
+                    except json.JSONDecodeError:
+                        trigger_cond = {}
+                signal_defs[signal_id] = {
+                    "id": row[0],
+                    "signal_name": row[1],
+                    "trigger_condition": trigger_cond
+                }
+                signal_names[signal_id] = row[1]
+                time_window = trigger_cond.get("time_window", time_window)
+
+        if not signal_defs:
+            return {"error": "No valid signals in pool"}
+
+        interval_ms = TIMEFRAME_MS.get(time_window, 300000)
+
+        # Load raw data for all metrics needed (same as AND logic)
+        metrics_data = {}
+        metrics_timestamps_index = {}
+        for signal_id, sig_def in signal_defs.items():
+            condition = sig_def["trigger_condition"]
+            metric = condition.get("metric")
+            if metric:
+                if metric == "macd":
+                    continue
+                if metric == "taker_volume":
+                    mapped_metric = "taker_ratio"
+                else:
+                    metric_map = {"oi_delta_percent": "oi_delta", "taker_buy_ratio": "taker_ratio"}
+                    mapped_metric = metric_map.get(metric, metric)
+
+                if mapped_metric not in metrics_data:
+                    raw_data = self._load_raw_data_for_metric(
+                        db, symbol, mapped_metric, kline_min_ts, kline_max_ts, interval_ms, exchange
+                    )
+                    metrics_data[mapped_metric] = raw_data
+                    metrics_timestamps_index[mapped_metric] = [r[0] for r in raw_data] if raw_data else []
+
+        # Generate check points every 15 seconds (matching real-time detection granularity)
+        # Use actual data time range to avoid generating too many empty check points
+        CHECK_INTERVAL_MS = 15000  # 15 seconds, same as data collection and real-time detection
+
+        # Find actual data time range from all metrics
+        all_data_timestamps = set()
+        for data in metrics_data.values():
+            if data:
+                all_data_timestamps.update(r[0] for r in data)
+
+        if all_data_timestamps:
+            # Use data range, but respect user's requested range
+            data_min_ts = max(min(all_data_timestamps), kline_min_ts)
+            data_max_ts = min(max(all_data_timestamps), kline_max_ts)
+        else:
+            data_min_ts = kline_min_ts
+            data_max_ts = kline_max_ts
+
+        # Generate 15-second interval check points within data range
+        start_ts = (data_min_ts // CHECK_INTERVAL_MS) * CHECK_INTERVAL_MS
+        check_points = []
+        current_ts = start_ts
+        while current_ts <= data_max_ts:
+            check_points.append(current_ts)
+            current_ts += CHECK_INTERVAL_MS
+
+        # Pre-compute all signal conditions (same as AND logic)
+        signal_conditions = {sid: {} for sid in signal_defs}
+        precomputed_values = {}
+
+        for signal_id, sig_def in signal_defs.items():
+            condition = sig_def["trigger_condition"]
+            metric = condition.get("metric")
+
+            if metric == "taker_volume":
+                # Handle taker_volume composite signal
+                import math
+                direction = condition.get("direction", "any")
+                ratio_threshold = condition.get("ratio_threshold", 1.5)
+                volume_threshold = condition.get("volume_threshold", 0)
+                log_threshold = math.log(max(ratio_threshold, 1.01))
+                raw_data = metrics_data.get("taker_ratio", [])
+
+                if "taker_data" not in precomputed_values:
+                    precomputed_values["taker_data"] = self._precompute_taker_data(
+                        raw_data, interval_ms, check_points
+                    )
+
+                for check_time in check_points:
+                    taker_data = precomputed_values["taker_data"].get(check_time)
+                    if not taker_data:
+                        signal_conditions[signal_id][check_time] = (None, None)
+                        continue
+
+                    log_ratio = taker_data["log_ratio"]
+                    total = taker_data["volume"]
+
+                    if total < volume_threshold:
+                        signal_conditions[signal_id][check_time] = (False, None)
+                        continue
+
+                    condition_met = False
+                    if direction == "buy" and log_ratio >= log_threshold:
+                        condition_met = True
+                    elif direction == "sell" and log_ratio <= -log_threshold:
+                        condition_met = True
+                    elif direction == "any" and abs(log_ratio) >= log_threshold:
+                        condition_met = True
+
+                    value_info = {
+                        "signal_id": signal_id,
+                        "signal_name": sig_def["signal_name"],
+                        "value": taker_data["ratio"],
+                        "threshold": ratio_threshold,
+                    } if condition_met else None
+                    signal_conditions[signal_id][check_time] = (condition_met, value_info)
+
+            elif metric == "macd":
+                # MACD handled separately - skip for now
+                continue
+
+            elif metric:
+                # Standard metrics
+                operator = condition.get("operator", "greater_than")
+                threshold = condition.get("threshold", 0)
+                if metric == "taker_volume":
+                    mapped_metric = "taker_ratio"
+                else:
+                    metric_map = {"oi_delta_percent": "oi_delta", "taker_buy_ratio": "taker_ratio"}
+                    mapped_metric = metric_map.get(metric, metric)
+                raw_data = metrics_data.get(mapped_metric, [])
+
+                if mapped_metric not in precomputed_values:
+                    precomputed_values[mapped_metric] = self._precompute_indicator_values(
+                        raw_data, mapped_metric, interval_ms, check_points
+                    )
+
+                for check_time in check_points:
+                    value = precomputed_values[mapped_metric].get(check_time)
+                    if value is None:
+                        signal_conditions[signal_id][check_time] = (None, None)
+                        continue
+                    condition_met = self._evaluate_condition(value, operator, threshold)
+                    value_info = {
+                        "signal_id": signal_id,
+                        "signal_name": sig_def["signal_name"],
+                        "value": value,
+                        "threshold": threshold,
+                    } if condition_met else None
+                    signal_conditions[signal_id][check_time] = (condition_met, value_info)
+
+        # OR Logic with Pool-Level Edge Detection
+        triggers = []
+        was_active = False  # Pool-level state
+
+        for check_time in check_points:
+            any_met = False
+            signal_values = []
+
+            for signal_id in signal_defs:
+                result = signal_conditions[signal_id].get(check_time)
+                if result is None:
+                    continue
+                condition_met, value_info = result
+                if condition_met is None:
+                    continue
+                if condition_met:
+                    any_met = True
+                    if value_info:
+                        signal_values.append(value_info)
+
+            # Pool-level edge detection: trigger on False -> True
+            if any_met and not was_active:
+                triggers.append({
+                    "timestamp": check_time,
+                    "triggered_signals": signal_values,
+                    "trigger_type": "any",
+                })
+
+            was_active = any_met
+
+        logger.warning(f"[Backtest] OR pool {pool_def['id']} completed with {len(triggers)} triggers")
+        return {
+            "pool_id": pool_def["id"],
+            "pool_name": pool_def["pool_name"],
+            "symbol": symbol,
+            "time_window": time_window,
+            "logic": "OR",
             "signal_count": len(signal_ids),
             "signal_names": signal_names,
             "trigger_count": len(triggers),
@@ -1937,11 +2072,10 @@ class SignalBacktestService:
         return None
 
     def _calc_taker_ratio_at_time(self, data: List[tuple], interval_ms: int) -> Optional[float]:
-        """Calculate taker buy/sell log ratio at a specific time.
+        """Calculate taker buy/sell ratio at a specific time.
 
-        Uses ln(buy/sell) for symmetric ratio around 0.
+        Uses direct ratio (buy/sell) to match real-time detection in market_flow_indicators.py.
         """
-        import math
         from services.market_flow_indicators import floor_timestamp
 
         buckets = {}
@@ -1957,9 +2091,9 @@ class SignalBacktestService:
 
         sorted_times = sorted(buckets.keys())
         last = buckets[sorted_times[-1]]
-        if last["buy"] > 0 and last["sell"] > 0:
-            return math.log(last["buy"] / last["sell"])
-        return None
+        if last["sell"] > 0:
+            return last["buy"] / last["sell"]
+        return 1.0
 
     def _calc_price_change_at_time(self, data: List[tuple], interval_ms: int) -> Optional[float]:
         """Calculate price change percentage at a specific time.
@@ -2268,9 +2402,9 @@ class SignalBacktestService:
 
         elif metric == 'taker_ratio':
             last = valid_buckets[sorted_times[-1]]
-            if last["buy"] > 0 and last["sell"] > 0:
-                return math.log(last["buy"] / last["sell"])
-            return None
+            if last["sell"] > 0:
+                return last["buy"] / last["sell"]
+            return 1.0
 
         elif metric == 'volatility':
             last = valid_buckets[sorted_times[-1]]

@@ -1,6 +1,7 @@
 """Signal system API routes"""
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,6 +9,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database.connection import SessionLocal
+
+logger = logging.getLogger(__name__)
 from schemas.signal import (
     SignalDefinitionCreate,
     SignalDefinitionUpdate,
