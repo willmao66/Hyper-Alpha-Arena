@@ -53,8 +53,6 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      # Inherit host timezone for consistent time handling
-      - /etc/localtime:/etc/localtime:ro
       # ========== Selective Backend Mounts for Hot Reload ==========
       # Mount individual directories and files to enable hot reload while preserving
       # the built frontend static files in the container image.
