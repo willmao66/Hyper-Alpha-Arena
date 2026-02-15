@@ -18,8 +18,8 @@ class BacktestConfig:
     start_time_ms: int                     # Backtest start time (UTC milliseconds)
     end_time_ms: int                       # Backtest end time (UTC milliseconds)
 
-    # Scheduled trigger (optional)
-    scheduled_interval: Optional[str] = None  # "1h", "4h", "1d", None
+    # Scheduled trigger (optional) - interval in seconds
+    scheduled_interval_sec: Optional[int] = None  # e.g., 600 for 10 minutes
 
     # Capital and risk settings
     initial_balance: float = 10000.0

@@ -67,7 +67,7 @@ class ProgramBacktestEngine:
             signal_triggers = self._generate_trigger_events(config)
 
             # Allow backtest even with no signal triggers if scheduled triggers are enabled
-            if not signal_triggers and not config.scheduled_interval:
+            if not signal_triggers and not config.scheduled_interval_sec:
                 return BacktestResult(
                     success=False,
                     error="No trigger events generated. Check signal pools and time range."
@@ -193,10 +193,10 @@ class ProgramBacktestEngine:
         equity_curve: List[Dict[str, Any]] = []
         all_triggers: List[TriggerEvent] = []  # Track all triggers for logging
 
-        # Scheduled trigger state
+        # Scheduled trigger state - now uses seconds directly
         scheduled_interval_ms = None
-        if config.scheduled_interval and config.scheduled_interval in INTERVAL_MS:
-            scheduled_interval_ms = INTERVAL_MS[config.scheduled_interval]
+        if config.scheduled_interval_sec:
+            scheduled_interval_ms = config.scheduled_interval_sec * 1000
 
         # Initialize: next scheduled trigger is start_time + interval
         last_trigger_time = config.start_time_ms
@@ -314,10 +314,10 @@ class ProgramBacktestEngine:
         Estimate total trigger count including dynamic scheduled triggers.
         Uses same algorithm as run_event_loop_generator but only counts.
         """
-        if not config.scheduled_interval or config.scheduled_interval not in INTERVAL_MS:
+        if not config.scheduled_interval_sec:
             return len(signal_triggers)
 
-        scheduled_interval_ms = INTERVAL_MS[config.scheduled_interval]
+        scheduled_interval_ms = config.scheduled_interval_sec * 1000
         total = 0
         last_trigger_time = config.start_time_ms
 
@@ -360,10 +360,10 @@ class ProgramBacktestEngine:
         executor = SandboxExecutor(timeout_seconds=5)
         all_trades: List[BacktestTradeRecord] = []  # Track all trades for recent_trades
 
-        # Scheduled trigger state
+        # Scheduled trigger state - now uses seconds directly
         scheduled_interval_ms = None
-        if config.scheduled_interval and config.scheduled_interval in INTERVAL_MS:
-            scheduled_interval_ms = INTERVAL_MS[config.scheduled_interval]
+        if config.scheduled_interval_sec:
+            scheduled_interval_ms = config.scheduled_interval_sec * 1000
 
         last_trigger_time = config.start_time_ms
 
@@ -371,18 +371,18 @@ class ProgramBacktestEngine:
             last_time_ms: int,
             current_time_ms: int,
         ) -> List[BacktestTradeRecord]:
-            """Check TP/SL using kline high/low between two trigger points."""
+            """Check TP/SL using 1m kline high/low for maximum accuracy."""
             all_tp_sl_trades = []
 
-            # Get klines between triggers for each symbol with positions
+            # Get 1m klines between triggers for each symbol with positions
             for symbol in config.symbols:
                 pos = account.get_position(symbol)
                 if not pos:
                     continue
 
-                # Get 5m klines between triggers
+                # Use 1m klines for precise TP/SL detection
                 klines = data_provider.get_klines_between(
-                    symbol, last_time_ms, current_time_ms, "5m"
+                    symbol, last_time_ms, current_time_ms, "1m"
                 )
 
                 if klines:

@@ -1780,14 +1780,10 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
     if not symbols:
         symbols = {"BTC"}
 
-    # Determine scheduled interval
-    scheduled_interval = None
+    # Determine scheduled interval (in seconds)
+    scheduled_interval_sec = None
     if binding.scheduled_trigger_enabled and binding.trigger_interval:
-        interval_sec = binding.trigger_interval
-        for name, ms in INTERVAL_MS.items():
-            if ms // 1000 == interval_sec:
-                scheduled_interval = name
-                break
+        scheduled_interval_sec = binding.trigger_interval  # Already in seconds
 
     # Create backtest config
     config = BacktestConfig(
@@ -1796,7 +1792,7 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
         symbols=list(symbols),
         start_time_ms=request.start_time_ms,
         end_time_ms=request.end_time_ms,
-        scheduled_interval=scheduled_interval,
+        scheduled_interval_sec=scheduled_interval_sec,
         initial_balance=request.initial_balance,
         slippage_percent=request.slippage_percent,
         fee_rate=request.fee_rate,
@@ -1815,7 +1811,7 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
             triggers = engine._generate_trigger_events(config)
 
             # Allow backtest with no signal triggers if scheduled triggers are enabled
-            if not triggers and not config.scheduled_interval:
+            if not triggers and not config.scheduled_interval_sec:
                 yield f"data: {json.dumps({'type': 'error', 'message': 'No triggers generated. Add signal pools or enable scheduled trigger.'})}\n\n"
                 return
 
@@ -1827,7 +1823,7 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
                 config=json.dumps({
                     "signal_pool_ids": signal_pool_ids,
                     "symbols": list(symbols),
-                    "scheduled_interval": scheduled_interval,
+                    "scheduled_interval_sec": scheduled_interval_sec,
                     "slippage_percent": request.slippage_percent,
                     "fee_rate": request.fee_rate,
                 }),
@@ -1904,9 +1900,8 @@ async def _run_backtest_with_progress(engine, config, signal_triggers, db, backt
     # Estimate total triggers for progress (signal + estimated scheduled)
     # This is approximate since scheduled triggers are dynamic
     estimated_total = len(signal_triggers)
-    if config.scheduled_interval:
-        from backtest.engine import INTERVAL_MS
-        interval_ms = INTERVAL_MS.get(config.scheduled_interval, 0)
+    if config.scheduled_interval_sec:
+        interval_ms = config.scheduled_interval_sec * 1000
         if interval_ms > 0:
             duration_ms = config.end_time_ms - config.start_time_ms
             estimated_total += int(duration_ms / interval_ms)

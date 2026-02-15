@@ -31,6 +31,7 @@ class HistoricalDataProvider:
         symbols: List[str],
         start_time_ms: int,
         end_time_ms: int,
+        exchange: str = "hyperliquid",
     ):
         """
         Initialize historical data provider.
@@ -40,12 +41,14 @@ class HistoricalDataProvider:
             symbols: List of symbols to load data for
             start_time_ms: Backtest start time (milliseconds)
             end_time_ms: Backtest end time (milliseconds)
+            exchange: Exchange to use for data (default: hyperliquid)
         """
         self.db = db
         self.symbols = symbols
         self.start_time_ms = start_time_ms
         self.end_time_ms = end_time_ms
         self.current_time_ms = start_time_ms
+        self.exchange = exchange
 
         # Caches
         self._kline_cache: Dict[str, List[Dict]] = {}
@@ -63,8 +66,8 @@ class HistoricalDataProvider:
         logger.info(f"Preloading data for {len(self.symbols)} symbols...")
 
         for symbol in self.symbols:
-            # Preload common periods
-            for period in ["5m", "15m", "1h", "4h", "1d"]:
+            # Preload common periods (1m for price accuracy, others for indicators)
+            for period in ["1m", "5m", "15m", "1h", "4h", "1d"]:
                 self._load_klines_to_cache(symbol, period)
 
         logger.info(f"Preload complete. Cache size: {len(self._kline_cache)} entries")
@@ -115,29 +118,46 @@ class HistoricalDataProvider:
         return prices
 
     def _get_price_at_time(self, symbol: str, timestamp_ms: int) -> Optional[float]:
-        """Get price at specific timestamp from cached klines."""
-        timestamp_sec = timestamp_ms // 1000
-        cache_key = f"{symbol}_5m"
+        """Get price at specific timestamp.
 
-        # Try to get from cache first
+        Priority:
+        1. market_asset_metrics.mark_price (15-second granularity, most accurate)
+        2. 1m kline close price (fallback)
+        """
+        # Try market_asset_metrics first (15-second granularity)
+        try:
+            result = self.db.execute(text("""
+                SELECT mark_price FROM market_asset_metrics
+                WHERE symbol = :symbol AND exchange = :exchange
+                AND timestamp <= :ts
+                ORDER BY timestamp DESC LIMIT 1
+            """), {"symbol": symbol, "exchange": self.exchange, "ts": timestamp_ms})
+            row = result.fetchone()
+            if row and row[0]:
+                return float(row[0])
+        except Exception as e:
+            logger.debug(f"Failed to get mark_price for {symbol}: {e}")
+
+        # Fallback to 1m kline close price
+        timestamp_sec = timestamp_ms // 1000
+        cache_key = f"{symbol}_1m"
+
         if cache_key in self._kline_cache:
             klines = self._kline_cache[cache_key]
-            # Binary search for the closest kline <= timestamp
             for k in reversed(klines):
                 if k["timestamp"] <= timestamp_sec:
                     return k["close"]
-            # If no kline found before timestamp, return first available
             if klines:
                 return klines[0]["close"]
 
-        # Fallback to DB query if not in cache
+        # Final fallback: DB query for kline
         try:
             result = self.db.execute(text("""
                 SELECT close_price FROM crypto_klines
-                WHERE symbol = :symbol AND period = '5m'
+                WHERE symbol = :symbol AND period = '1m' AND exchange = :exchange
                 AND timestamp <= :ts
                 ORDER BY timestamp DESC LIMIT 1
-            """), {"symbol": symbol, "ts": timestamp_sec})
+            """), {"symbol": symbol, "exchange": self.exchange, "ts": timestamp_sec})
             row = result.fetchone()
             if row:
                 return float(row[0])
@@ -151,6 +171,8 @@ class HistoricalDataProvider:
         Get historical K-line data up to current_time_ms.
 
         Returns Kline objects compatible with DataProvider.
+        Includes a virtual "current" K-line built from 15-second mark_price data
+        to match real-time API behavior (which returns incomplete current candle).
         """
         from program_trader.models import Kline
 
@@ -164,6 +186,17 @@ class HistoricalDataProvider:
         # Filter klines up to current time and return last 'count'
         all_klines = self._kline_cache.get(cache_key, [])
         filtered = [k for k in all_klines if k["timestamp"] <= timestamp_sec]
+
+        # Build virtual current K-line to match real-time API behavior
+        virtual_kline = self._build_virtual_kline(symbol, period, timestamp_sec)
+        if virtual_kline:
+            # Check if we need to replace or append
+            if filtered and filtered[-1]["timestamp"] == virtual_kline["timestamp"]:
+                # Same period start - replace with virtual (more up-to-date)
+                filtered[-1] = virtual_kline
+            else:
+                # New period - append virtual kline
+                filtered.append(virtual_kline)
 
         # Convert to Kline objects
         result = []
@@ -212,10 +245,11 @@ class HistoricalDataProvider:
             result = self.db.execute(text("""
                 SELECT timestamp, open_price, high_price, low_price, close_price, volume
                 FROM crypto_klines
-                WHERE symbol = :symbol AND period = :period
+                WHERE symbol = :symbol AND period = :period AND exchange = :exchange
                 AND timestamp >= :start_ts AND timestamp <= :end_ts
                 ORDER BY timestamp ASC
-            """), {"symbol": symbol, "period": period, "start_ts": start_sec, "end_ts": end_sec})
+            """), {"symbol": symbol, "period": period, "exchange": self.exchange,
+                   "start_ts": start_sec, "end_ts": end_sec})
 
             klines = []
             for row in result:
@@ -234,6 +268,71 @@ class HistoricalDataProvider:
         except Exception as e:
             logger.error(f"Failed to load klines for {symbol} {period}: {e}")
             self._kline_cache[cache_key] = []
+
+    def _build_virtual_kline(self, symbol: str, period: str, current_time_sec: int) -> Optional[Dict]:
+        """Build a virtual K-line for the current incomplete period.
+
+        Real-time API returns the current incomplete K-line with close=current_price.
+        To match this behavior, we build a virtual K-line from market_asset_metrics
+        (15-second granularity mark_price data).
+
+        Args:
+            symbol: Trading symbol
+            period: K-line period (1m, 5m, 15m, 1h, 4h, 1d)
+            current_time_sec: Current simulation time in seconds
+
+        Returns:
+            Virtual K-line dict or None if insufficient data
+        """
+        period_seconds = {
+            "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+            "1h": 3600, "4h": 14400, "1d": 86400
+        }
+        period_sec = period_seconds.get(period)
+        if not period_sec:
+            return None
+
+        # Calculate current period start time
+        period_start_sec = (current_time_sec // period_sec) * period_sec
+        period_start_ms = period_start_sec * 1000
+        current_time_ms = current_time_sec * 1000
+
+        # Query mark_price data within current period
+        try:
+            result = self.db.execute(text("""
+                SELECT timestamp, mark_price
+                FROM market_asset_metrics
+                WHERE symbol = :symbol AND exchange = :exchange
+                AND timestamp >= :start_ms AND timestamp <= :end_ms
+                ORDER BY timestamp ASC
+            """), {
+                "symbol": symbol,
+                "exchange": self.exchange,
+                "start_ms": period_start_ms,
+                "end_ms": current_time_ms
+            })
+
+            prices = []
+            for row in result:
+                if row[1]:
+                    prices.append(float(row[1]))
+
+            if not prices:
+                return None
+
+            # Build OHLC from price series
+            return {
+                "timestamp": period_start_sec,
+                "open": prices[0],
+                "high": max(prices),
+                "low": min(prices),
+                "close": prices[-1],
+                "volume": 0.0,  # Volume not available from mark_price
+            }
+
+        except Exception as e:
+            logger.debug(f"Failed to build virtual kline for {symbol} {period}: {e}")
+            return None
 
     def get_indicator(self, symbol: str, indicator: str, period: str) -> Dict[str, Any]:
         """
@@ -387,9 +486,9 @@ class HistoricalDataProvider:
             db_result = self.db.execute(text("""
                 SELECT mark_price, funding_rate, open_interest
                 FROM market_asset_metrics
-                WHERE symbol = :symbol AND timestamp <= :ts
+                WHERE symbol = :symbol AND exchange = :exchange AND timestamp <= :ts
                 ORDER BY timestamp DESC LIMIT 1
-            """), {"symbol": symbol, "ts": self.current_time_ms})
+            """), {"symbol": symbol, "exchange": self.exchange, "ts": self.current_time_ms})
             row = db_result.fetchone()
             if row:
                 result = {
