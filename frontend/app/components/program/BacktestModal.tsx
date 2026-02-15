@@ -141,7 +141,9 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
 
   // Config state
   const [startDate, setStartDate] = useState('')
+  const [startTime, setStartTime] = useState('00:00')
   const [endDate, setEndDate] = useState('')
+  const [endTime, setEndTime] = useState('23:59')
   const [initialBalance, setInitialBalance] = useState('10000')
 
   // Execution state
@@ -184,7 +186,9 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
       const start = new Date()
       start.setDate(start.getDate() - 30)
       setStartDate(start.toISOString().split('T')[0])
+      setStartTime('00:00')
       setEndDate(end.toISOString().split('T')[0])
+      setEndTime('23:59')
       setStatus('idle')
       setProgress(0)
       setResult(null)
@@ -216,6 +220,22 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
     }
   }
 
+  // Helper: Convert UTC ISO string to local date and time
+  const utcToLocalDateTime = (utcIsoString: string): { date: string; time: string } => {
+    // Append 'Z' if not present to ensure UTC parsing
+    const utcStr = utcIsoString.endsWith('Z') ? utcIsoString : utcIsoString + 'Z'
+    const localDate = new Date(utcStr)
+    const year = localDate.getFullYear()
+    const month = String(localDate.getMonth() + 1).padStart(2, '0')
+    const day = String(localDate.getDate()).padStart(2, '0')
+    const hours = String(localDate.getHours()).padStart(2, '0')
+    const minutes = String(localDate.getMinutes()).padStart(2, '0')
+    return {
+      date: `${year}-${month}-${day}`,
+      time: `${hours}:${minutes}`
+    }
+  }
+
   // Load a specific historical backtest
   const loadHistoricalBacktest = async (historyItem: BacktestHistoryItem) => {
     setLoadingHistorical(true)
@@ -223,6 +243,18 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
     setShowDetails(false)
     setTriggerLogs([])
     setSelectedTrigger(null)
+
+    // Fill date/time selectors from history (convert UTC to local)
+    if (historyItem.start_time) {
+      const { date, time } = utcToLocalDateTime(historyItem.start_time)
+      setStartDate(date)
+      setStartTime(time)
+    }
+    if (historyItem.end_time) {
+      const { date, time } = utcToLocalDateTime(historyItem.end_time)
+      setEndDate(date)
+      setEndTime(time)
+    }
 
     try {
       const res = await fetch(`/api/programs/backtest/${historyItem.id}`)
@@ -319,10 +351,9 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
     setTriggerLogs([])
 
     try {
-      // Convert user's local date selection to UTC milliseconds
-      // User selects dates in their local timezone, we need to send UTC timestamps
-      const startLocal = new Date(startDate + 'T00:00:00')
-      const endLocal = new Date(endDate + 'T23:59:59.999')
+      // Convert user's local date+time selection to UTC milliseconds
+      const startLocal = new Date(`${startDate}T${startTime}:00`)
+      const endLocal = new Date(`${endDate}T${endTime}:59`)
       const startTimeMs = startLocal.getTime()
       const endTimeMs = endLocal.getTime()
 
@@ -528,7 +559,11 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
                   </div>
                 ) : (
                   <>
-                  {historyList.map((item) => (
+                  {historyList.map((item) => {
+                    // Convert UTC to local for display
+                    const startLocal = item.start_time ? utcToLocalDateTime(item.start_time) : null
+                    const endLocal = item.end_time ? utcToLocalDateTime(item.end_time) : null
+                    return (
                     <DropdownMenuItem
                       key={item.id}
                       onClick={() => loadHistoricalBacktest(item)}
@@ -539,7 +574,7 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
                           {new Date(item.created_at).toLocaleString()}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {item.start_time?.split('T')[0]} ~ {item.end_time?.split('T')[0]}
+                          {startLocal?.date} {startLocal?.time} ~ {endLocal?.date} {endLocal?.time}
                         </div>
                       </div>
                       <div className="text-right ml-2">
@@ -551,7 +586,8 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
                         </div>
                       </div>
                     </DropdownMenuItem>
-                  ))}
+                    )
+                  })}
                   {historyList.length >= 30 && (
                     <div className="p-2 text-center text-xs text-muted-foreground border-t">
                       {t('programTrader.historyLimit', 'Showing latest 30 records')}
@@ -569,48 +605,75 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
           </div>
         </DialogHeader>
 
-        {/* Config Row - Single Line */}
-        <div className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg flex-shrink-0">
-          <div className="text-sm text-muted-foreground whitespace-nowrap">
-            <span className="font-medium">{t('programTrader.signalPools')}:</span>{' '}
-            {binding.signal_pool_names?.join(', ') || '-'}
+        {/* Config Area - Two Rows */}
+        <div className="flex flex-col gap-2 p-3 bg-muted/30 rounded-lg flex-shrink-0">
+          {/* Row 1: Trigger Config */}
+          <div className="flex items-center gap-4 text-sm">
+            <div className="text-muted-foreground whitespace-nowrap flex items-center gap-1.5">
+              <span className="font-medium">{t('programTrader.signalPools', 'Signal Pools')}:</span>
+              <span className="text-foreground bg-blue-500/15 px-2 py-0.5 rounded">{binding.signal_pool_names?.join(', ') || '-'}</span>
+            </div>
+            {binding.scheduled_trigger_enabled && binding.trigger_interval && (
+              <div className="text-muted-foreground whitespace-nowrap flex items-center gap-1.5">
+                <span className="font-medium">{t('programTrader.scheduledTrigger', 'Scheduled')}:</span>
+                <span className="text-foreground bg-orange-500/15 px-2 py-0.5 rounded">{binding.trigger_interval}s</span>
+              </div>
+            )}
+            {/* Reserved space for exchange tag */}
           </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs whitespace-nowrap">{t('programTrader.startDate', 'Start')}</Label>
-            <Input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+
+          {/* Row 2: Backtest Parameters */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                disabled={status === 'calculating' || status === 'running'}
+                className="w-32 h-8"
+              />
+              <Input
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                disabled={status === 'calculating' || status === 'running'}
+                className="w-24 h-8"
+              />
+            </div>
+            <span className="text-muted-foreground">~</span>
+            <div className="flex items-center gap-1">
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                disabled={status === 'calculating' || status === 'running'}
+                className="w-32 h-8"
+              />
+              <Input
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                disabled={status === 'calculating' || status === 'running'}
+                className="w-24 h-8"
+              />
+            </div>
+            <div className="flex items-center gap-2 ml-2">
+              <Label className="text-xs whitespace-nowrap">{t('programTrader.initialBalance', 'Balance')}</Label>
+              <Input
+                type="number"
+                value={initialBalance}
+                onChange={(e) => setInitialBalance(e.target.value)}
+                disabled={status === 'calculating' || status === 'running'}
+                className="w-28 h-8"
+              />
+            </div>
+            <Button
+              onClick={startBacktest}
               disabled={status === 'calculating' || status === 'running'}
-              className="w-36 h-8"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs whitespace-nowrap">{t('programTrader.endDate', 'End')}</Label>
-            <Input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              disabled={status === 'calculating' || status === 'running'}
-              className="w-36 h-8"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs whitespace-nowrap">{t('programTrader.initialBalance', 'Balance')}</Label>
-            <Input
-              type="number"
-              value={initialBalance}
-              onChange={(e) => setInitialBalance(e.target.value)}
-              disabled={status === 'calculating' || status === 'running'}
-              className="w-28 h-8"
-            />
-          </div>
-          <Button
-            onClick={startBacktest}
-            disabled={status === 'calculating' || status === 'running'}
-            size="sm"
-          >
-            {status === 'calculating' ? (
+              size="sm"
+              className="ml-auto"
+            >
+              {status === 'calculating' ? (
               <>
                 <Calculator className="h-4 w-4 mr-1 animate-pulse" />
                 {t('programTrader.calculating', 'Calculating...')}
@@ -627,6 +690,7 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
               </>
             )}
           </Button>
+          </div>
         </div>
 
         {/* Progress bar - shown when running */}
