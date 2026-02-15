@@ -1287,13 +1287,16 @@
     "viewDetails": "View Trigger Details",
     "hideDetails": "Hide Details",
     "triggerDetails": "Trigger Details",
+    "triggerType": "Trigger",
     "loadMore": "Load More",
     "action": "Action",
     "history": "History",
     "noHistory": "No backtest history",
     "historyLimit": "Showing latest 30 records",
     "runBacktestFirst": "Run backtest to see trigger details",
-    "collectionDaysHint": "Backtest signal triggers rely on market flow data, collected for {{days}} days"
+    "collectionDaysHint": "Backtest signal triggers rely on market flow data, collected for {{days}} days",
+    "dataSource": "Data Source",
+    "poolExchangeMismatch": "Exchange mismatch"
   },
   "program": {
     "aiChat": {

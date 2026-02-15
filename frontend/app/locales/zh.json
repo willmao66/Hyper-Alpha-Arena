@@ -1306,13 +1306,16 @@
     "viewDetails": "查看触发详情",
     "hideDetails": "隐藏详情",
     "triggerDetails": "触发详情",
+    "triggerType": "触发类型",
     "loadMore": "加载更多",
     "action": "操作",
     "history": "历史记录",
     "noHistory": "暂无回测历史",
     "historyLimit": "仅显示最近 30 条记录",
     "runBacktestFirst": "运行回测后查看触发详情",
-    "collectionDaysHint": "回测信号触发依赖资金流数据，已累计采集 {{days}} 天"
+    "collectionDaysHint": "回测信号触发依赖资金流数据，已累计采集 {{days}} 天",
+    "dataSource": "数据源",
+    "poolExchangeMismatch": "交易所不匹配"
   },
   "program": {
     "aiChat": {

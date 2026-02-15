@@ -52,6 +52,7 @@ interface Binding {
   scheduled_trigger_enabled: boolean
   is_active: boolean
   wallets: WalletInfo[]
+  exchange?: string
 }
 
 interface BacktestModalProps {
@@ -65,6 +66,7 @@ type BacktestStatus = 'idle' | 'calculating' | 'running' | 'complete' | 'error'
 interface EquityPoint {
   timestamp: number
   equity: number
+  trigger_type?: string  // "signal", "scheduled", "tp", "sl"
 }
 
 interface BacktestResult {
@@ -129,6 +131,7 @@ interface BacktestHistoryItem {
   win_rate: number
   status: string
   created_at: string
+  exchange?: string  // "hyperliquid" or "binance", null for historical data
 }
 
 export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProps) {
@@ -175,6 +178,9 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
 
   // Loading historical backtest
   const [loadingHistorical, setLoadingHistorical] = useState(false)
+
+  // Current backtest exchange (for display)
+  const [currentExchange, setCurrentExchange] = useState<string>('hyperliquid')
 
   // SSE ref
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -243,6 +249,7 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
     setShowDetails(false)
     setTriggerLogs([])
     setSelectedTrigger(null)
+    setCurrentExchange(historyItem.exchange || 'hyperliquid')
 
     // Fill date/time selectors from history (convert UTC to local)
     if (historyItem.start_time) {
@@ -349,6 +356,7 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
     setEquityCurve([])
     setShowDetails(false)
     setTriggerLogs([])
+    setCurrentExchange(binding.exchange || 'hyperliquid')
 
     try {
       // Convert user's local date+time selection to UTC milliseconds
@@ -563,6 +571,7 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
                     // Convert UTC to local for display
                     const startLocal = item.start_time ? utcToLocalDateTime(item.start_time) : null
                     const endLocal = item.end_time ? utcToLocalDateTime(item.end_time) : null
+                    const itemExchange = item.exchange || 'hyperliquid'
                     return (
                     <DropdownMenuItem
                       key={item.id}
@@ -570,8 +579,13 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
                       className="flex justify-between items-center cursor-pointer"
                     >
                       <div className="flex-1">
-                        <div className="text-xs">
+                        <div className="text-xs flex items-center gap-1.5">
                           {new Date(item.created_at).toLocaleString()}
+                          <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${
+                            itemExchange === 'hyperliquid' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-yellow-500/15 text-yellow-500'
+                          }`}>
+                            {itemExchange === 'hyperliquid' ? 'HL' : 'BN'}
+                          </span>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {startLocal?.date} {startLocal?.time} ~ {endLocal?.date} {endLocal?.time}
@@ -712,6 +726,15 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
         <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
           {/* Left Side: Stats + Chart */}
           <div className="w-1/2 flex flex-col gap-3 overflow-hidden border rounded-lg p-3">
+            {/* Exchange Badge */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-xs text-muted-foreground">{t('programTrader.dataSource', 'Data Source')}:</span>
+              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                currentExchange === 'hyperliquid' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-yellow-500/15 text-yellow-500'
+              }`}>
+                {currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Binance'}
+              </span>
+            </div>
             {/* Stats Cards */}
             <div className="grid grid-cols-4 gap-2 flex-shrink-0">
               <div className="p-2 bg-muted/30 rounded-lg text-center">
@@ -807,6 +830,7 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
                         <tr>
                           <th className="p-2 text-left">#</th>
                           <th className="p-2 text-left">{t('programTrader.time', 'Time')}</th>
+                          <th className="p-2 text-left">{t('programTrader.triggerType', 'Trigger')}</th>
                           <th className="p-2 text-left">{t('programTrader.action', 'Action')}</th>
                           <th className="p-2 text-right">Unrealized</th>
                           <th className="p-2 text-right">Realized</th>
@@ -837,6 +861,19 @@ export function BacktestModal({ open, onOpenChange, binding }: BacktestModalProp
                               </td>
                               <td className="p-2 whitespace-nowrap text-xs">
                                 {new Date(log.trigger_time).toLocaleString()}
+                              </td>
+                              <td className="p-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                  log.trigger_type === 'signal' ? 'bg-blue-500/15 text-blue-500' :
+                                  log.trigger_type === 'scheduled' ? 'bg-orange-500/15 text-orange-500' :
+                                  log.trigger_type === 'tp' ? 'bg-green-500/15 text-green-500' :
+                                  log.trigger_type === 'sl' ? 'bg-red-500/15 text-red-500' :
+                                  'bg-muted text-muted-foreground'
+                                }`}>
+                                  {log.trigger_type === 'signal' ? 'SIG' :
+                                   log.trigger_type === 'scheduled' ? 'SCH' :
+                                   log.trigger_type?.toUpperCase() || '-'}
+                                </span>
                               </td>
                               <td className={`p-2 font-medium ${
                                 isTpSl ? 'text-purple-500' :

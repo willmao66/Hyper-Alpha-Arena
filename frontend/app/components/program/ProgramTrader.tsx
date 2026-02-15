@@ -71,6 +71,7 @@ interface SignalPool {
   pool_name: string
   symbols: string[]
   enabled: boolean
+  exchange: string
 }
 
 interface AITrader {
@@ -931,7 +932,15 @@ export default function ProgramTrader() {
                 <label className="text-xs uppercase text-muted-foreground">{t('programTrader.exchange')}</label>
                 <Select
                   value={bindingExchange}
-                  onValueChange={setBindingExchange}
+                  onValueChange={v => {
+                    // Clear signal pools that don't match the new exchange
+                    const matchingPoolIds = bindingPoolIds.filter(id => {
+                      const pool = signalPools.find(p => p.id === id)
+                      return (pool?.exchange || 'hyperliquid') === v
+                    })
+                    setBindingPoolIds(matchingPoolIds)
+                    setBindingExchange(v)
+                  }}
                 >
                   <SelectTrigger className="h-8">
                     <SelectValue />
@@ -950,16 +959,31 @@ export default function ProgramTrader() {
                 <div className="flex flex-wrap gap-1 mt-1">
                   {signalPools.length === 0 ? (
                     <span className="text-xs text-muted-foreground">{t('programTrader.noSignalPools')}</span>
-                  ) : signalPools.map(pool => (
-                    <button
-                      key={pool.id}
-                      type="button"
-                      onClick={() => togglePoolId(pool.id)}
-                      className={`text-xs px-2 py-1 rounded border ${bindingPoolIds.includes(pool.id) ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-                    >
-                      {pool.pool_name}
-                    </button>
-                  ))}
+                  ) : signalPools.map(pool => {
+                    const poolExchange = pool.exchange || 'hyperliquid'
+                    const isMatchingExchange = poolExchange === bindingExchange
+                    const isDisabled = !isMatchingExchange
+                    return (
+                      <button
+                        key={pool.id}
+                        type="button"
+                        onClick={() => !isDisabled && togglePoolId(pool.id)}
+                        disabled={isDisabled}
+                        className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${
+                          isDisabled ? 'opacity-50 cursor-not-allowed' :
+                          bindingPoolIds.includes(pool.id) ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                        }`}
+                        title={isDisabled ? `${t('programTrader.poolExchangeMismatch', 'Exchange mismatch')}: ${poolExchange}` : pool.pool_name}
+                      >
+                        <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${
+                          poolExchange === 'hyperliquid' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-yellow-500/20 text-yellow-500'
+                        }`}>
+                          {poolExchange === 'hyperliquid' ? 'HL' : 'BN'}
+                        </span>
+                        {pool.pool_name}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 

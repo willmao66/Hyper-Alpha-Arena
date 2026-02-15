@@ -138,6 +138,7 @@ class SignalPoolInfo(BaseModel):
     pool_name: str
     symbols: List[str]
     enabled: bool
+    exchange: str = "hyperliquid"
 
 
 class AccountInfo(BaseModel):
@@ -638,6 +639,7 @@ def list_signal_pools(db: Session = Depends(get_db)):
             pool_name=pool.pool_name,
             symbols=symbols or [],
             enabled=pool.enabled,
+            exchange=pool.exchange or "hyperliquid",
         ))
     return result
 
@@ -1756,6 +1758,9 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
 
+    # Get exchange from binding (unified source for both execution and backtest)
+    exchange = getattr(binding, 'exchange', None) or 'hyperliquid'
+
     # Get signal pool symbols
     signal_pool_ids = []
     symbols = set()
@@ -1768,13 +1773,14 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
 
         for pool_id in pool_ids:
             pool = db.query(SignalPool).filter(SignalPool.id == pool_id).first()
-            if pool and pool.symbols:
-                # symbols is a list field
-                pool_symbols = pool.symbols
-                if isinstance(pool_symbols, str):
-                    pool_symbols = json.loads(pool_symbols)
-                for sym in pool_symbols:
-                    symbols.add(sym)
+            if pool:
+                if pool.symbols:
+                    # symbols is a list field
+                    pool_symbols = pool.symbols
+                    if isinstance(pool_symbols, str):
+                        pool_symbols = json.loads(pool_symbols)
+                    for sym in pool_symbols:
+                        symbols.add(sym)
 
     # Default to BTC if no symbols found
     if not symbols:
@@ -1796,6 +1802,7 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
         initial_balance=request.initial_balance,
         slippage_percent=request.slippage_percent,
         fee_rate=request.fee_rate,
+        exchange=exchange,
     )
 
     async def generate_events():
@@ -1832,6 +1839,7 @@ async def run_backtest(request: BacktestRequest, db: Session = Depends(get_db)):
                 initial_balance=config.initial_balance,
                 total_triggers=len(triggers),
                 status="running",
+                exchange=exchange,
             )
             db.add(backtest_record)
             db.commit()
@@ -1890,6 +1898,7 @@ async def _run_backtest_with_progress(engine, config, signal_triggers, db, backt
         symbols=config.symbols,
         start_time_ms=config.start_time_ms,
         end_time_ms=config.end_time_ms,
+        exchange=config.exchange,
     )
 
     trades = []
@@ -1954,6 +1963,7 @@ async def _run_backtest_with_progress(engine, config, signal_triggers, db, backt
                 "timestamp": tp_sl_trade.exit_timestamp,
                 "equity": tp_sl_trade.equity_after,  # Use trade's own equity_after
                 "balance": account.balance,
+                "trigger_type": tp_sl_trade.exit_reason,  # "tp" or "sl"
             })
 
         # Record main trigger
@@ -1964,6 +1974,7 @@ async def _run_backtest_with_progress(engine, config, signal_triggers, db, backt
             "timestamp": trigger.timestamp,
             "equity": exec_result.equity_after,
             "balance": account.balance,
+            "trigger_type": trigger.trigger_type,  # "signal" or "scheduled"
         })
 
         # Build trigger log data

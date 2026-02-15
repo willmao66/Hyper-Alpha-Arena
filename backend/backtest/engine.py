@@ -84,6 +84,7 @@ class ProgramBacktestEngine:
                 symbols=config.symbols,
                 start_time_ms=config.start_time_ms,
                 end_time_ms=config.end_time_ms,
+                exchange=config.exchange,
             )
 
             # 3. Run event loop (returns all triggers including dynamic scheduled ones)
@@ -138,7 +139,8 @@ class ProgramBacktestEngine:
                             regime_result = get_market_regime(
                                 self.db, symbol, "5m",
                                 use_realtime=True,
-                                timestamp_ms=t["timestamp"]
+                                timestamp_ms=t["timestamp"],
+                                exchange=config.exchange
                             )
                             if regime_result:
                                 regime_data = {

@@ -1323,6 +1323,10 @@ class BacktestResult(Base):
     status = Column(String(20), default="running")  # "running" | "completed" | "error"
     error_message = Column(Text, nullable=True)
 
+    # Exchange used for data source: "hyperliquid" or "binance"
+    # NULL for historical data, treated as "hyperliquid" for backward compatibility
+    exchange = Column(String(20), nullable=True)
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     completed_at = Column(TIMESTAMP, nullable=True)
 

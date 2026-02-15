@@ -218,7 +218,7 @@ class HistoricalDataProvider:
                 "count": len(result),
                 "last": {"timestamp": last_k.timestamp, "close": last_k.close}
             }
-        self._log_query("get_klines", {"symbol": symbol, "period": period, "count": count}, result_summary)
+        self._log_query("get_klines", {"symbol": symbol, "period": period, "count": count, "exchange": self.exchange}, result_summary)
 
         return result
 
@@ -345,7 +345,7 @@ class HistoricalDataProvider:
         # Get klines (enough for indicator calculation)
         klines = self.get_klines(symbol, period, 500)
         if not klines:
-            self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period}, {})
+            self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period, "exchange": self.exchange}, {})
             return {}
 
         # Convert to format expected by calculate_indicators
@@ -385,7 +385,7 @@ class HistoricalDataProvider:
 
         # Log with result (exclude series to save space)
         log_result = {k: v for k, v in result.items() if k != 'series'} if result else {}
-        self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period}, log_result)
+        self._log_query("get_indicator", {"symbol": symbol, "indicator": indicator, "period": period, "exchange": self.exchange}, log_result)
 
         return result
 
@@ -400,13 +400,14 @@ class HistoricalDataProvider:
         result = {}
         try:
             results = get_flow_indicators_for_prompt(
-                self.db, symbol, period, [metric.upper()], self.current_time_ms
+                self.db, symbol, period, [metric.upper()], self.current_time_ms,
+                exchange=self.exchange
             )
             result = results.get(metric.upper(), {}) or {}
         except Exception as e:
             logger.warning(f"Failed to get flow {metric} for {symbol}: {e}")
 
-        self._log_query("get_flow", {"symbol": symbol, "metric": metric, "period": period}, result)
+        self._log_query("get_flow", {"symbol": symbol, "metric": metric, "period": period, "exchange": self.exchange}, result)
         return result
 
     def get_regime(self, symbol: str, period: str) -> Any:
@@ -425,7 +426,8 @@ class HistoricalDataProvider:
             result = get_market_regime(
                 self.db, symbol, period,
                 use_realtime=True,
-                timestamp_ms=self.current_time_ms
+                timestamp_ms=self.current_time_ms,
+                exchange=self.exchange
             )
             if result:
                 regime_info = RegimeInfo(
@@ -444,7 +446,7 @@ class HistoricalDataProvider:
         except Exception as e:
             logger.warning(f"Failed to get regime for {symbol}: {e}")
 
-        self._log_query("get_regime", {"symbol": symbol, "period": period}, log_result)
+        self._log_query("get_regime", {"symbol": symbol, "period": period, "exchange": self.exchange}, log_result)
         return regime_info
 
     def get_price_change(self, symbol: str, period: str) -> Dict[str, float]:
@@ -458,7 +460,8 @@ class HistoricalDataProvider:
         result = {"change_percent": 0.0, "change_usd": 0.0}
         try:
             results = get_flow_indicators_for_prompt(
-                self.db, symbol, period, ["PRICE_CHANGE"], self.current_time_ms
+                self.db, symbol, period, ["PRICE_CHANGE"], self.current_time_ms,
+                exchange=self.exchange
             )
             data = results.get("PRICE_CHANGE")
             if data:
@@ -473,7 +476,7 @@ class HistoricalDataProvider:
         except Exception:
             pass
 
-        self._log_query("get_price_change", {"symbol": symbol, "period": period}, result)
+        self._log_query("get_price_change", {"symbol": symbol, "period": period, "exchange": self.exchange}, result)
         return result
 
     def get_market_data(self, symbol: str) -> Dict[str, Any]:
@@ -501,7 +504,7 @@ class HistoricalDataProvider:
         except Exception as e:
             logger.warning(f"Failed to get market data for {symbol}: {e}")
 
-        self._log_query("get_market_data", {"symbol": symbol}, result)
+        self._log_query("get_market_data", {"symbol": symbol, "exchange": self.exchange}, result)
         return result
 
     def get_klines_between(

@@ -29,6 +29,9 @@ class BacktestConfig:
     # Execution assumptions
     execution_price: str = "close"         # "close", "open", "vwap"
 
+    # Exchange for data source
+    exchange: str = "hyperliquid"          # "hyperliquid" or "binance"
+
     @property
     def start_time(self) -> datetime:
         """Start time as datetime (UTC)."""
