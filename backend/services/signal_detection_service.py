@@ -316,7 +316,7 @@ class SignalDetectionService:
 
         # DEBUG LOG: Edge detection state (only when state changes or trigger happens)
         if should_trigger or (pool_condition_met != was_active):
-            print(f"[EdgeDetect] pool={pool_id}:{pool_name} symbol={symbol} was_active={was_active} pool_met={pool_condition_met} trigger={should_trigger}", flush=True)
+            print(f"[EdgeDetect] pool={pool_id}:{pool_name} symbol={symbol} was_active={was_active} pool_met={pool_condition_met} trigger={should_trigger} state_id={id(pool_state)} states_count={len(self.pool_states)}", flush=True)
 
         # Update pool state
         pool_state.is_active = pool_condition_met
