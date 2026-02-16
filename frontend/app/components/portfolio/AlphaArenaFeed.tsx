@@ -54,6 +54,7 @@ type FeedTab = 'trades' | 'model-chat' | 'positions' | 'program'
 
 const DEFAULT_LIMIT = 100
 const MODEL_CHAT_LIMIT = 60
+const PROGRAM_LOG_LIMIT = 50
 
 type CacheKey = string
 
@@ -391,6 +392,21 @@ export default function AlphaArenaFeed({
     })
   }, [])
 
+  // Helper function to merge and deduplicate program execution logs
+  const mergeProgramData = useCallback((existing: ProgramExecutionLog[], newData: ProgramExecutionLog[]) => {
+    const idMap = new Map(existing.map(item => [item.id, item]))
+    newData.forEach(item => {
+      if (!idMap.has(item.id)) {
+        idMap.set(item.id, item)
+      }
+    })
+    return Array.from(idMap.values()).sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0
+      return timeB - timeA
+    })
+  }, [])
+
   const loadModelChatData = useCallback(async (isBackgroundRefresh: boolean = false) => {
     try {
       setLoadingModelChat(true)
@@ -531,9 +547,18 @@ export default function AlphaArenaFeed({
       const accountId = activeAccount === 'all' ? undefined : activeAccount
       const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
       const exchange = selectedExchange === 'all' ? undefined : selectedExchange
-      const logs = await getProgramExecutions({ account_id: accountId, environment: env, limit: 50, exchange: exchange })
-      setProgramLogs(logs)
-      setHasMoreProgram(logs.length >= 50)
+      const logs = await getProgramExecutions({ account_id: accountId, environment: env, limit: PROGRAM_LOG_LIMIT, exchange: exchange })
+
+      // If background refresh and user has loaded more history, merge instead of replace
+      if (backgroundRefresh && programLogs.length > PROGRAM_LOG_LIMIT) {
+        const merged = mergeProgramData(programLogs, logs)
+        setProgramLogs(merged)
+        // Keep hasMoreProgram state unchanged during background refresh
+      } else {
+        setProgramLogs(logs)
+        setHasMoreProgram(logs.length >= PROGRAM_LOG_LIMIT)
+      }
+
       if (!backgroundRefresh) setLoadingProgram(false)
       return logs
     } catch (err) {
@@ -541,7 +566,7 @@ export default function AlphaArenaFeed({
       if (!backgroundRefresh) setLoadingProgram(false)
       return null
     }
-  }, [activeAccount, tradingMode, selectedExchange])
+  }, [activeAccount, tradingMode, selectedExchange, programLogs, mergeProgramData])
 
   // Load more program logs (lazy loading)
   const loadMoreProgramData = useCallback(async () => {
@@ -556,7 +581,7 @@ export default function AlphaArenaFeed({
       const moreLogs = await getProgramExecutions({
         account_id: accountId,
         environment: env,
-        limit: 50,
+        limit: PROGRAM_LOG_LIMIT,
         before: oldestLog.created_at,
         exchange: exchange,
       })
@@ -565,7 +590,7 @@ export default function AlphaArenaFeed({
         setHasMoreProgram(false)
       } else {
         setProgramLogs(prev => [...prev, ...moreLogs])
-        setHasMoreProgram(moreLogs.length >= 50)
+        setHasMoreProgram(moreLogs.length >= PROGRAM_LOG_LIMIT)
       }
     } catch (err) {
       console.error('[AlphaArenaFeed] Failed to load more program logs:', err)
