@@ -7,6 +7,8 @@ import { getArenaModelChat, getModelChatSnapshots, ArenaModelChatEntry, ModelCha
 import { useTradingMode } from '@/contexts/TradingModeContext'
 import { getModelLogo } from '@/components/portfolio/logoAssets'
 import { formatDateTime } from '@/lib/dateTime'
+import ExchangeIcon from '@/components/exchange/ExchangeIcon'
+import { ExchangeId, EXCHANGE_DISPLAY_NAMES } from '@/lib/types/exchange'
 
 const formatDate = (value?: string | null) => formatDateTime(value, { style: 'short' })
 
@@ -153,6 +155,12 @@ export default function MobileModelChat() {
                     <div className="flex items-center gap-2">
                       {modelLogo && <img src={modelLogo.src} alt={modelLogo.alt} className="h-5 w-5 rounded-full" />}
                       <span className="font-semibold text-foreground">{entry.account_name}</span>
+                      <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/80">
+                        <ExchangeIcon exchangeId={(entry.exchange || 'hyperliquid') as ExchangeId} size={12} />
+                        <span className="text-[10px] font-medium text-slate-200">
+                          {EXCHANGE_DISPLAY_NAMES[(entry.exchange || 'hyperliquid') as ExchangeId]}
+                        </span>
+                      </div>
                     </div>
                     <span>{formatDate(entry.decision_time)}</span>
                   </div>

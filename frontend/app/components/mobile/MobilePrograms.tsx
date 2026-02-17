@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { getProgramExecutions, ProgramExecutionLog } from '@/lib/api'
 import { useTradingMode } from '@/contexts/TradingModeContext'
 import { formatDateTime } from '@/lib/dateTime'
+import ExchangeIcon from '@/components/exchange/ExchangeIcon'
+import { ExchangeId, EXCHANGE_DISPLAY_NAMES } from '@/lib/types/exchange'
 
 const formatDate = (value?: string | null) => formatDateTime(value, { style: 'short' })
 
@@ -192,6 +194,12 @@ function ProgramCard({
           </span>
         )}
         {entry.decision_symbol && <span className="font-semibold text-xs">{entry.decision_symbol}</span>}
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/80">
+          <ExchangeIcon exchangeId={(entry.exchange || 'hyperliquid') as ExchangeId} size={12} />
+          <span className="text-[10px] font-medium text-slate-200">
+            {EXCHANGE_DISPLAY_NAMES[(entry.exchange || 'hyperliquid') as ExchangeId]}
+          </span>
+        </div>
         <span className={`px-2 py-0.5 rounded text-[10px] ${
           entry.trigger_type === 'signal' ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'
         }`}>

@@ -12,6 +12,8 @@ import {
 import { ArenaTrade } from '@/lib/api'
 import { getModelLogo } from '@/components/portfolio/logoAssets'
 import { formatDateTime } from '@/lib/dateTime'
+import ExchangeIcon from '@/components/exchange/ExchangeIcon'
+import { ExchangeId, EXCHANGE_DISPLAY_NAMES } from '@/lib/types/exchange'
 
 const formatDate = (value?: string | null) => formatDateTime(value, { style: 'short' })
 
@@ -111,6 +113,12 @@ function TradeCard({ trade, selectedAccount }: { trade: ArenaTrade; selectedAcco
         <span className="font-semibold">{trade.symbol}</span>
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${sideStyle}`}>{trade.side}</span>
         <span>@ ${trade.price?.toFixed(2)}</span>
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/80">
+          <ExchangeIcon exchangeId={(trade.exchange || 'hyperliquid') as ExchangeId} size={12} />
+          <span className="text-[10px] font-medium text-slate-200">
+            {EXCHANGE_DISPLAY_NAMES[(trade.exchange || 'hyperliquid') as ExchangeId]}
+          </span>
+        </div>
       </div>
       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
         <span>{t('feed.qty', 'Qty')}: {trade.quantity?.toFixed(4)}</span>

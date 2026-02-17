@@ -20,11 +20,14 @@ import { useTradingMode } from '@/contexts/TradingModeContext'
 import { getModelLogo } from '@/components/portfolio/logoAssets'
 import PositionsSection from './MobilePositionsSection'
 import TradesSection from './MobileTradesSection'
+import ExchangeIcon from '@/components/exchange/ExchangeIcon'
+import { ExchangeId, EXCHANGE_DISPLAY_NAMES } from '@/lib/types/exchange'
 
 export default function MobileDashboard() {
   const { t } = useTranslation()
   const { tradingMode } = useTradingMode()
-  const [selectedAccount, setSelectedAccount] = useState<number | 'all'>('all')
+  // Use composite key: "account_id:exchange" or "all"
+  const [selectedKey, setSelectedKey] = useState<string>('all')
   const [positions, setPositions] = useState<ArenaPositionsAccount[]>([])
   const [trades, setTrades] = useState<ArenaTrade[]>([])
   const [loading, setLoading] = useState(true)
@@ -72,20 +75,37 @@ export default function MobileDashboard() {
     }
   }
 
-  // Extract account list from positions data
-  const accountOptions = positions.map(p => ({ id: p.account_id, name: p.account_name }))
+  // Build account options with composite key (account_id:exchange)
+  const accountOptions = positions.map(p => ({
+    key: `${p.account_id}:${p.exchange || 'hyperliquid'}`,
+    id: p.account_id,
+    name: p.account_name,
+    exchange: (p.exchange || 'hyperliquid') as ExchangeId
+  }))
 
-  const filteredPositions = selectedAccount === 'all'
+  // Parse selected key to get account_id and exchange
+  const parseKey = (key: string) => {
+    if (key === 'all') return { accountId: null, exchange: null }
+    const [accountId, exchange] = key.split(':')
+    return { accountId: Number(accountId), exchange }
+  }
+
+  const { accountId: selectedAccountId, exchange: selectedExchange } = parseKey(selectedKey)
+
+  const filteredPositions = selectedKey === 'all'
     ? positions
-    : positions.filter(p => p.account_id === selectedAccount)
+    : positions.filter(p => p.account_id === selectedAccountId && (p.exchange || 'hyperliquid') === selectedExchange)
 
-  const filteredTrades = selectedAccount === 'all'
+  const filteredTrades = selectedKey === 'all'
     ? trades
-    : trades.filter(t => t.account_id === selectedAccount)
+    : trades.filter(t => t.account_id === selectedAccountId && (t.exchange || 'hyperliquid') === selectedExchange)
 
-  const selectedAccountName = selectedAccount === 'all'
+  const selectedOption = accountOptions.find(a => a.key === selectedKey)
+  const selectedAccountName = selectedKey === 'all'
     ? t('feed.allTraders', 'All Traders')
-    : accountOptions.find(a => a.id === selectedAccount)?.name || 'Unknown'
+    : selectedOption
+      ? `${selectedOption.name} (${EXCHANGE_DISPLAY_NAMES[selectedOption.exchange]})`
+      : 'Unknown'
 
   if (tradingMode !== 'testnet' && tradingMode !== 'mainnet') {
     return (
@@ -112,12 +132,15 @@ export default function MobileDashboard() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setSelectedAccount('all')}>
+                <DropdownMenuItem onClick={() => setSelectedKey('all')}>
                   {t('feed.allTraders', 'All Traders')}
                 </DropdownMenuItem>
                 {accountOptions.map(acc => (
-                  <DropdownMenuItem key={acc.id} onClick={() => setSelectedAccount(acc.id)}>
-                    {acc.name}
+                  <DropdownMenuItem key={acc.key} onClick={() => setSelectedKey(acc.key)}>
+                    <div className="flex items-center gap-2">
+                      <span>{acc.name}</span>
+                      <ExchangeIcon exchangeId={acc.exchange} size={12} />
+                    </div>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -136,18 +159,18 @@ export default function MobileDashboard() {
           ) : (
             <div className="space-y-2">
               {filteredPositions.map(account => (
-                <AccountSummaryCard key={account.account_id} account={account} />
+                <AccountSummaryCard key={`${account.account_id}:${account.exchange || 'hyperliquid'}`} account={account} />
               ))}
             </div>
           )}
 
           {/* Positions Section */}
-          <PositionsSection positions={filteredPositions} selectedAccount={selectedAccount} loading={loading} />
+          <PositionsSection positions={filteredPositions} selectedAccount={selectedKey === 'all' ? 'all' : selectedAccountId!} loading={loading} />
 
           {/* Trades Section */}
           <TradesSection
             trades={filteredTrades}
-            selectedAccount={selectedAccount}
+            selectedAccount={selectedKey === 'all' ? 'all' : selectedAccountId!}
             loading={loading}
             updatingPnl={updatingPnl}
             showPnlConfirm={showPnlConfirm}
@@ -165,12 +188,19 @@ function AccountSummaryCard({ account }: { account: ArenaPositionsAccount }) {
   const { t } = useTranslation()
   const logo = getModelLogo(account.account_name)
   const marginUsage = account.margin_usage_percent || 0
+  const exchange = (account.exchange || 'hyperliquid') as ExchangeId
 
   return (
     <div className="border rounded-lg bg-card p-3">
       <div className="flex items-center gap-2 mb-2">
         {logo && <img src={logo.src} alt={logo.alt} className="h-5 w-5 rounded-full" />}
         <span className="text-sm font-semibold">{account.account_name}</span>
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/80">
+          <ExchangeIcon exchangeId={exchange} size={12} />
+          <span className="text-[10px] font-medium text-slate-200">
+            {EXCHANGE_DISPLAY_NAMES[exchange]}
+          </span>
+        </div>
         {account.environment && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase">
             {account.environment}
