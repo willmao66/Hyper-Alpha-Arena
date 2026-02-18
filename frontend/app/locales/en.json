@@ -20,6 +20,7 @@
     "no": "No",
     "all": "All",
     "none": "None",
+    "notAvailable": "N/A",
     "actions": "Actions",
     "status": "Status",
     "name": "Name",
@@ -150,7 +151,11 @@
     "klines": "K-Lines",
     "systemLogs": "System Logs",
     "howToUse": "How to Use",
-    "community": "Community"
+    "community": "Community",
+    "contactUs": "Contact Us"
+  },
+  "contact": {
+    "contactAuthor": "Contact Author"
   },
   "header": {
     "exchanges": "Exchanges",

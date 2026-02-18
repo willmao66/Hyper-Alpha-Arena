@@ -20,6 +20,7 @@
     "no": "否",
     "all": "全部",
     "none": "无",
+    "notAvailable": "暂未开放",
     "actions": "操作",
     "status": "状态",
     "name": "名称",
@@ -153,7 +154,11 @@
     "klines": "K线图表",
     "systemLogs": "系统日志",
     "howToUse": "使用指南",
-    "community": "用户社区"
+    "community": "用户社区",
+    "contactUs": "联系我们"
+  },
+  "contact": {
+    "contactAuthor": "联系作者"
   },
   "header": {
     "exchanges": "交易所",

@@ -1,5 +1,6 @@
-import { BarChart3, FileText, NotebookPen, Coins, MessageSquare } from 'lucide-react'
+import { BarChart3, FileText, NotebookPen, Coins, MessageSquare, Mail } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import ContactDialog from '@/components/contact/ContactDialog'
 
 // AI Trader icon component (custom SVG)
 const AITraderIcon = ({ className }: { className?: string }) => (
@@ -44,17 +45,6 @@ const AttributionIcon = ({ className }: { className?: string }) => (
     <path d="M341.333333 426.666667a213.333333 213.333333 0 1 0 426.666667 0 213.333333 213.333333 0 0 0-426.666667 0z" opacity="0.9"/>
     <path d="M259.84 470.4c-75.605333 18.773333-131.584 86.613333-131.754667 167.253333-0.170667 93.824 78.677333 172.416 173.397334 173.013334a174.293333 174.293333 0 0 0 166.144-117.162667 33.194667 33.194667 0 0 0-19.84-41.856 240.768 240.768 0 0 1-147.328-158.293333 33.536 33.536 0 0 0-40.618667-22.997334v0.042667z" opacity="0.6"/>
     <path d="M170.666667 245.333333a74.709333 74.709333 0 0 0 112 64.682667A74.666667 74.666667 0 1 0 170.666667 245.333333zM769.152 597.333333A128.128 128.128 0 0 0 640 726.485333 128.042667 128.042667 0 0 0 766.848 853.333333 128.128 128.128 0 0 0 896 724.181333 128.128 128.128 0 0 0 769.152 597.333333z"/>
-  </svg>
-)
-
-const CommunityIcon = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" fill="none">
-    <path d="M512 512m-512 0a512 512 0 1 0 1024 0 512 512 0 1 0-1024 0Z" fill="#7AA5DA" />
-    <path d="M1023.848 500.154 796.566 273.25l-370.216 451.26 266.568 266.568C886.394 917.976 1024 731.07 1024 512c0-3.962-.062-7.91-.152-11.846z" fill="#5786B5" />
-    <path d="M767.434 267.04c20.412-7.964 41.512 9.896 37.03 31.34l-91.54 437.562c-4.276 20.514-28.376 29.754-45.27 17.342l-138.188-101.434-70.438 71.922c-12.378 12.62-33.72 7.482-39.03-9.344l-50.82-161.324-136.224-40.236c-17.894-5.276-18.928-30.168-1.586-36.96L767.434 267.04z m-67.198 97.09c5.964-5.276-.966-14.584-7.724-10.378l-294.03 182.354a13.362 13.362 0 0 0-5.724 15.342l40.098 176.08c.794 2.69 4.654 2.31 5-.482l8.964-134.188a13.268 13.268 0 0 1 4.414-8.55l249.002-220.178z" fill="#fff" />
-    <path d="M692.514 353.752c6.758-4.206 13.688 5.102 7.724 10.378l-249 220.178a13.286 13.286 0 0 0-4.414 8.55l-8.964 134.188c-.344 2.792-4.206 3.172-5 .482l-40.098-176.08a13.36 13.36 0 0 1 5.724-15.342l294.028-182.354z" fill="#9EC2E5" />
-    <path d="M434.308 729.356c-6.482-2.31-11.964-7.482-14.308-14.93l-50.82-161.324-136.224-40.236c-17.894-5.276-18.928-30.168-1.586-36.96L767.434 267.04c13.17-5.138 26.652.482 33.306 10.896a28.836 28.836 0 0 0-4.378-5.206L432.686 569.62v12.998l-2-1.448 2 81.852v65.646c.518.242 1.068.448 1.62.62v.068h.002z" fill="#fff" />
-    <path d="M805.05 291.036a29.944 29.944 0 0 1-.586 7.344l-91.54 437.562c-4.276 20.514-28.376 29.754-45.27 17.342l-138.188-101.434-96.78-69.232v-12.998l363.676-296.892a28.754 28.754 0 0 1 4.378 5.206c.242.414.482.792.724 1.172.206.414.448.828.656 1.206.206.414.414.828.586 1.242.206.448.38.862.552 1.31.138.38.31.792.448 1.242.448 1.344.792 2.724 1.034 4.172.138.896.242 1.794.31 2.758z" fill="#D1D1D1" />
   </svg>
 )
 
@@ -116,7 +106,6 @@ interface SidebarProps {
 
 export default function Sidebar({ currentPage = 'comprehensive', onPageChange, onAccountUpdated }: SidebarProps) {
   const { t, i18n } = useTranslation()
-  const communityLink = 'https://t.me/+RqxjT7Gttm9hOGEx'
 
   const desktopNav = [
     { label: t('sidebar.dashboard'), page: 'comprehensive', icon: BarChart3 },
@@ -164,14 +153,15 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
             <span>{t('sidebar.howToUse', 'How to Use')}</span>
           </button>
 
-          <button
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted text-muted-foreground"
-            onClick={() => window.open(communityLink, '_blank', 'noopener,noreferrer')}
-            title={t('sidebar.community', 'Community')}
-          >
-            <CommunityIcon className="w-5 h-5 flex-shrink-0" />
-            <span>{t('sidebar.community', 'Community')}</span>
-          </button>
+          <ContactDialog>
+            <button
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted text-muted-foreground"
+              title={t('contact.contactAuthor', 'Contact Author')}
+            >
+              <Mail className="w-5 h-5 flex-shrink-0" />
+              <span>{t('contact.contactAuthor', 'Contact Author')}</span>
+            </button>
+          </ContactDialog>
 
           {/* Settings */}
           <button
