@@ -4,12 +4,12 @@
 
 > **Multi-exchange AI trading platform with market flow signal monitoring**. Supports **Hyperliquid** and **Binance Futures**. Monitors institutional order flow, OI changes, and funding rate extremes—triggers automated trading when market structure shifts. Two trading modes: AI Trader for strategies needing market understanding (news, sentiment), or Program Trader for fixed-rule strategies (technical indicators). AI-assisted configuration throughout—no coding required to start.
 >
-> **Essential tool for crypto perpetual traders**. One-click Docker deployment, active Telegram community, frequent updates. Supports Hyperliquid testnet paper trading & mainnet real trading, plus Binance Futures. **English & 中文 supported.**
+> **Essential tool for crypto perpetual traders**. One-click Docker deployment, frequent updates. Supports Hyperliquid testnet paper trading & mainnet real trading, plus Binance Futures. **English & 中文 supported.**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Hyperliquid](https://img.shields.io/badge/Hyperliquid-Supported-00D395?style=flat&logo=data:image/svg%2bxml;base64,PHN2ZyB3aWR0aD0iMTQ0IiBoZWlnaHQ9IjE0NCIgdmlld0JveD0iMCAwIDE0NCAxNDQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHBhdGggZD0iTTE0NCA3MS42OTkxQzE0NCAxMTkuMzA2IDExNC44NjYgMTM0LjU4MiA5OS41MTU2IDEyMC45OEM4Ni44ODA0IDEwOS44ODkgODMuMTIxMSA4Ni40NTIxIDY0LjExNiA4NC4wNDU2QzM5Ljk5NDIgODEuMDExMyAzNy45MDU3IDExMy4xMzMgMjIuMDMzNCAxMTMuMTMzQzMuNTUwNCAxMTMuMTMzIDAgODYuMjQyOCAwIDcyLjQzMTVDMCA1OC4zMDYzIDMuOTY4MDkgMzkuMDU0MiAxOS43MzYgMzkuMDU0MkMzOC4xMTQ2IDM5LjA1NDIgMzkuMTU4OCA2Ni41NzIyIDYyLjEzMiA2NS4xMDczQzg1LjAwMDcgNjMuNTM3OSA4NS40MTg0IDM0Ljg2ODkgMTAwLjI0NyAyMi42MjcxQzExMy4xOTUgMTIuMDU5MyAxNDQgMjMuNDY0MSAxNDQgNzEuNjk5MVoiIGZpbGw9IndoaXRlIi8+Cjwvc3ZnPgo=)](https://hyperliquid.xyz)
 [![Binance](https://img.shields.io/badge/Binance-Supported-F0B90B?style=flat&logo=data:image/svg%2bxml;base64,PHN2ZyB3aWR0aD0iMTQ0IiBoZWlnaHQ9IjE0NCIgdmlld0JveD0iMTI2IDEyNiA3NzIgNzcyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxwYXRoIGQ9Ik02NDMuNTQxMzMzIDU2Ni42MTMzMzNsNzcuMjY5MzM0IDc3LjIyNjY2Ny0yMDkuMTUyIDIwOS4xNTItMjA5LjEwOTMzNC0yMDkuMTUyIDc3LjI2OTMzNC03Ny4yMjY2NjcgMTMxLjg0IDEzMi41MjI2NjcgMTMxLjg0LTEzMi41NjUzMzN6IG0xMzEuODgyNjY3LTEzMS45MjUzMzNMODUzLjMzMzMzMyA1MTJsLTc3LjIyNjY2NiA3Ny4yMjY2NjdMNjk4LjgzNzMzMyA1MTJsNzYuNTg2NjY3LTc3LjIyNjY2N3ogbS0yNjMuNzIyNjY3IDBsNzcuMjI2NjY3IDc2LjU4NjY2Ny03Ny4yNjkzMzMgNzcuMjY5MzMzTDQzNC40MzIgNTEybDc3LjIyNjY2Ny03Ny4yMjY2Njd6IG0tMjYzLjc2NTMzMyAwTDMyNC41NjUzMzMgNTEybC03Ni41ODY2NjYgNzYuNTg2NjY3TDE3MC42NjY2NjcgNTExLjk1NzMzM2w3Ny4yMjY2NjYtNzcuMjI2NjY2eiBtMjYzLjc2NTMzMy0yNjMuNzY1MzMzbDIwOS4xNTIgMjA4LjQ2OTMzMy03Ny4zMTIgNzcuMjI2NjY3LTEzMS44NC0xMzEuODQtMTMxLjg0IDEzMi41MjI2NjYtNzcuMzEyLTc3LjIyNjY2NiAyMDkuMTUyLTIwOS4xNTJ6IiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K)](https://binance.com)
-[![Community](https://img.shields.io/badge/Telegram-Community-blue?logo=telegram)](https://t.me/+RqxjT7Gttm9hOGEx)
+[![Twitter](https://img.shields.io/badge/Twitter-@GptHammer3309-1DA1F2?style=flat&logo=twitter&logoColor=white)](https://x.com/GptHammer3309)
 [![English](https://img.shields.io/badge/Lang-English-blue)](https://www.akooi.com/docs/)
 [![中文](https://img.shields.io/badge/语言-中文-red)](https://www.akooi.com/docs/zh/)
 
@@ -202,25 +202,29 @@ Please star and fork this repository to stay updated with development progress.
 
 **🌐 Official Website**: [https://www.akooi.com/](https://www.akooi.com/)
 
-**🐦 Contact me on Twitter/X**: [@GptHammer3309](https://x.com/GptHammer3309)
+**🐦 Twitter/X**: [@GptHammer3309](https://x.com/GptHammer3309)
 - Latest updates on Hyper Alpha Arena development
 - AI trading insights and strategy discussions
-- Technical support and Q&A
 
+**💬 Telegram**: [@hammergpt](https://t.me/hammergpt)
+- Direct contact for technical support
+- Bug reports and feature requests
 
-Join our ([Telegram group](https://t.me/+RqxjT7Gttm9hOGEx)) for real-time discussions and faster triage .
-- Report bugs (please include logs, screenshots, and steps if possible)
-- Share strategy insights or product feedback
-- Ping me about PRs/Issues so I can respond quickly
+**📝 GitHub Issues**: For bug tracking and feature requests, please use [GitHub Issues](https://github.com/HammerGPT/Hyper-Alpha-Arena/issues).
 
-Friendly reminder: Telegram is for rapid communication, but final tracking and fixes still go through GitHub Issues/Pull Requests. Never post API keys or other sensitive data in the chat.
+---
 
-欢迎加入（[Telegram 群](https://t.me/+RqxjT7Gttm9hOGEx)）：
-- 反馈 Bug（尽量附日志、截图、复现步骤）
-- 讨论策略或产品体验
-- PR / Issue 想要我关注可在群里提醒
+**🌐 官网**: [https://www.akooi.com/](https://www.akooi.com/)
 
-注意：Telegram 主要用于快速沟通，正式记录请继续使用 GitHub Issues / Pull Requests；谨记不要分享密钥等敏感信息。
+**🐦 推特**: [@GptHammer3309](https://x.com/GptHammer3309)
+- 产品更新动态
+- AI 交易策略讨论
+
+**💬 Telegram**: [@hammergpt](https://t.me/hammergpt)
+- 技术支持直接联系
+- Bug 反馈和功能建议
+
+**📝 GitHub Issues**: Bug 追踪和功能请求请使用 [GitHub Issues](https://github.com/HammerGPT/Hyper-Alpha-Arena/issues)。
 
 ## License
 
