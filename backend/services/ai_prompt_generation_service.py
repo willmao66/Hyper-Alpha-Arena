@@ -772,29 +772,34 @@ def generate_prompt_with_ai_stream(
             response = None
             last_error = None
             last_status_code = None
+            last_response_text = None  # Store full response text for error logging
 
             for retry_attempt in range(API_MAX_RETRIES):
                 response = None
-                last_error = None
+                # Don't reset last_error - preserve error from previous attempts
 
                 for ep in endpoints:
                     try:
                         logger.info(f"[AI Prompt Gen {request_id}] Round {tool_round}, trying: {ep}")
                         response = requests.post(ep, json=payload, headers=headers, timeout=120)
+                        last_status_code = response.status_code
+                        last_response_text = response.text[:2000] if response.text else None
 
                         if response.status_code == 200:
                             break
                         else:
-                            last_status_code = response.status_code
                             last_error = f"HTTP {response.status_code}"
-                            logger.warning(f"[AI Prompt Gen {request_id}] Endpoint failed: {response.status_code}")
+                            logger.warning(f"[AI Prompt Gen {request_id}] Endpoint failed: {response.status_code} - {response.text[:500]}")
 
-                    except requests.exceptions.Timeout:
-                        last_error = "timeout"
-                        logger.warning(f"[AI Prompt Gen {request_id}] Timeout on {ep}")
+                    except requests.exceptions.Timeout as e:
+                        last_error = f"Timeout after 120s: {str(e)}"
+                        logger.warning(f"[AI Prompt Gen {request_id}] Timeout on {ep}: {e}")
+                    except requests.exceptions.ConnectionError as e:
+                        last_error = f"Connection error: {str(e)}"
+                        logger.warning(f"[AI Prompt Gen {request_id}] Connection error on {ep}: {e}")
                     except Exception as e:
-                        last_error = str(e)
-                        logger.warning(f"[AI Prompt Gen {request_id}] Error: {e}")
+                        last_error = f"{type(e).__name__}: {str(e)}"
+                        logger.warning(f"[AI Prompt Gen {request_id}] Error: {type(e).__name__}: {e}")
 
                 if response and response.status_code == 200:
                     break
@@ -809,10 +814,21 @@ def generate_prompt_with_ai_stream(
                     time.sleep(delay)
 
             if not response or response.status_code != 200:
-                error_detail = last_error or "Unknown error"
+                error_parts = []
+                if last_error:
+                    error_parts.append(f"error={last_error}")
+                if last_status_code:
+                    error_parts.append(f"status={last_status_code}")
+                if last_response_text:
+                    error_parts.append(f"response={last_response_text[:500]}")
+                error_detail = "; ".join(error_parts) if error_parts else "No response from API"
+                logger.error(f"[AI Prompt Gen {request_id}] API failed at round {tool_round}: {error_detail}")
+
                 if tool_calls_log:
                     assistant_msg.content = final_content
                     assistant_msg.tool_calls_log = json.dumps(tool_calls_log)
+                    assistant_msg.is_complete = False
+                    assistant_msg.interrupt_reason = f"Round {tool_round}: {error_detail}"
                     db.commit()
                     yield f"data: {json.dumps({'type': 'interrupted', 'message_id': assistant_msg.id, 'error': error_detail})}\n\n"
                 else:

@@ -606,7 +606,8 @@ class AiChatRequest(BaseModel):
     user_message: str = Field(..., alias="userMessage")
     conversation_id: Optional[int] = Field(None, alias="conversationId")
     prompt_id: Optional[int] = Field(None, alias="promptId")
-    use_background_task: bool = Field(False, alias="useBackgroundTask")
+    # SSE direct streaming is unstable (frontend disconnect = task abort). Do NOT set to False.
+    use_background_task: bool = Field(True, alias="useBackgroundTask")
 
     class Config:
         populate_by_name = True

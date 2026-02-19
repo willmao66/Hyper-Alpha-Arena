@@ -642,7 +642,8 @@ class AiSignalChatRequest(BaseModel):
     account_id: int = Field(..., alias="accountId")
     user_message: str = Field(..., alias="userMessage")
     conversation_id: Optional[int] = Field(None, alias="conversationId")
-    use_background_task: bool = Field(False, alias="useBackgroundTask")
+    # SSE direct streaming is unstable (frontend disconnect = task abort). Do NOT set to False.
+    use_background_task: bool = Field(True, alias="useBackgroundTask")
 
     class Config:
         populate_by_name = True

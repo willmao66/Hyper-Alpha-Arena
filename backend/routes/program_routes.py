@@ -702,7 +702,8 @@ class AiProgramChatRequest(BaseModel):
     account_id: int
     conversation_id: Optional[int] = None
     program_id: Optional[int] = None
-    use_background_task: bool = False
+    # SSE direct streaming is unstable (frontend disconnect = task abort). Do NOT set to False.
+    use_background_task: bool = True
 
 
 class ConversationResponse(BaseModel):

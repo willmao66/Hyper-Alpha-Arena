@@ -211,53 +211,113 @@ export default function AiProgramChatModal({
       })
 
       if (!response.ok) throw new Error('Failed to connect')
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('No reader')
 
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finalContent = ''
-      let finalSuggestion: SaveSuggestion | null = null
-      let hasError = false
+      // Check if response is JSON (background task mode) or SSE stream
+      const contentType = response.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        // Background task mode: poll for results
+        const taskData = await response.json()
+        const taskId = taskData.task_id
+        if (!taskId) throw new Error('No task_id returned')
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        let finalContent = ''
+        let finalSuggestion: SaveSuggestion | null = null
+        let hasError = false
+        let offset = 0
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        // Poll for chunks
+        while (true) {
+          await new Promise(resolve => setTimeout(resolve, 500)) // Poll every 500ms
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              handleSSEEvent(data, tempAssistantMsgId, (updates) => {
-                if (updates.content !== undefined) finalContent = updates.content
-                if (updates.suggestion) finalSuggestion = updates.suggestion
-                if (updates.conversationId) finalConversationId = updates.conversationId
-                if (updates.error) hasError = true
-              })
-            } catch {}
+          const pollResponse = await fetch(`/api/ai-stream/${taskId}?offset=${offset}`)
+          if (!pollResponse.ok) throw new Error('Failed to poll task')
+
+          const pollData = await pollResponse.json()
+          const { chunks, status, next_offset } = pollData
+
+          // Process chunks
+          for (const chunk of chunks) {
+            handleSSEEvent(chunk.data, tempAssistantMsgId, (updates) => {
+              if (updates.content !== undefined) finalContent = updates.content
+              if (updates.suggestion) finalSuggestion = updates.suggestion
+              if (updates.conversationId) finalConversationId = updates.conversationId
+              if (updates.error) hasError = true
+            })
+          }
+
+          offset = next_offset
+
+          // Check if task is done
+          if (status === 'completed' || status === 'error') {
+            break
           }
         }
-      }
 
-      // Finalize the message
-      setMessages(prev => prev.map(m =>
-        m.id === tempAssistantMsgId
-          ? { ...m, content: finalContent, isStreaming: false, statusText: undefined }
-          : m
-      ))
+        // Finalize the message
+        setMessages(prev => prev.map(m =>
+          m.id === tempAssistantMsgId
+            ? { ...m, content: finalContent, isStreaming: false, statusText: undefined }
+            : m
+        ))
 
-      if (finalSuggestion) {
-        setAllCodeSuggestions(prev => [...prev, finalSuggestion!])
-      }
+        if (finalSuggestion) {
+          setAllCodeSuggestions(prev => [...prev, finalSuggestion!])
+        }
 
-      // Only set conversation ID if no error occurred (same as AiSignalChatModal)
-      if (!hasError && !currentConversationId && finalConversationId) {
-        setCurrentConversationId(finalConversationId)
-        loadConversations()
+        if (!hasError && !currentConversationId && finalConversationId) {
+          setCurrentConversationId(finalConversationId)
+          loadConversations()
+        }
+      } else {
+        // SSE stream mode (legacy fallback)
+        const reader = response.body?.getReader()
+        if (!reader) throw new Error('No reader')
+
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let finalContent = ''
+        let finalSuggestion: SaveSuggestion | null = null
+        let hasError = false
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6))
+                handleSSEEvent(data, tempAssistantMsgId, (updates) => {
+                  if (updates.content !== undefined) finalContent = updates.content
+                  if (updates.suggestion) finalSuggestion = updates.suggestion
+                  if (updates.conversationId) finalConversationId = updates.conversationId
+                  if (updates.error) hasError = true
+                })
+              } catch {}
+            }
+          }
+        }
+
+        // Finalize the message
+        setMessages(prev => prev.map(m =>
+          m.id === tempAssistantMsgId
+            ? { ...m, content: finalContent, isStreaming: false, statusText: undefined }
+            : m
+        ))
+
+        if (finalSuggestion) {
+          setAllCodeSuggestions(prev => [...prev, finalSuggestion!])
+        }
+
+        // Only set conversation ID if no error occurred
+        if (!hasError && !currentConversationId && finalConversationId) {
+          setCurrentConversationId(finalConversationId)
+          loadConversations()
+        }
       }
     } catch (error) {
       console.error('Chat error:', error)

@@ -366,6 +366,8 @@ def generate_signal_with_ai(
 
             response = None
             last_error = None
+            last_status_code = None
+            last_response_text = None
 
             for endpoint in endpoints:
                 try:
@@ -373,22 +375,36 @@ def generate_signal_with_ai(
                     api_start = time.time()
                     response = requests.post(endpoint, json=request_payload, headers=headers, timeout=120)
                     api_elapsed = time.time() - api_start
+                    last_status_code = response.status_code
+                    last_response_text = response.text[:2000] if response.text else None
 
                     if response.status_code == 200:
                         logger.info(f"[AI Signal Gen {request_id}] Success in {api_elapsed:.2f}s")
                         break
                     else:
-                        logger.warning(f"[AI Signal Gen {request_id}] Endpoint failed: {response.status_code}")
-                        last_error = f"HTTP {response.status_code}: {response.text[:200]}"
-                except requests.exceptions.Timeout:
-                    last_error = "Request timeout"
-                    logger.warning(f"[AI Signal Gen {request_id}] Timeout on {endpoint}")
+                        last_error = f"HTTP {response.status_code}"
+                        logger.warning(f"[AI Signal Gen {request_id}] Endpoint failed: {response.status_code} - {response.text[:500]}")
+                except requests.exceptions.Timeout as e:
+                    last_error = f"Timeout after 120s: {str(e)}"
+                    logger.warning(f"[AI Signal Gen {request_id}] Timeout on {endpoint}: {e}")
+                except requests.exceptions.ConnectionError as e:
+                    last_error = f"Connection error: {str(e)}"
+                    logger.warning(f"[AI Signal Gen {request_id}] Connection error on {endpoint}: {e}")
                 except Exception as e:
-                    last_error = str(e)
-                    logger.warning(f"[AI Signal Gen {request_id}] Error on {endpoint}: {e}")
+                    last_error = f"{type(e).__name__}: {str(e)}"
+                    logger.warning(f"[AI Signal Gen {request_id}] Error on {endpoint}: {type(e).__name__}: {e}")
 
             if not response or response.status_code != 200:
-                return {"success": False, "error": f"All endpoints failed. Last error: {last_error}"}
+                error_parts = []
+                if last_error:
+                    error_parts.append(f"error={last_error}")
+                if last_status_code:
+                    error_parts.append(f"status={last_status_code}")
+                if last_response_text:
+                    error_parts.append(f"response={last_response_text[:500]}")
+                error_detail = "; ".join(error_parts) if error_parts else "No response from API"
+                logger.error(f"[AI Signal Gen {request_id}] API failed: {error_detail}")
+                return {"success": False, "error": f"All endpoints failed: {error_detail}"}
 
             # Parse response
             try:
@@ -1437,18 +1453,39 @@ def generate_signal_with_ai_stream(
 
             # Call API
             response = None
+            last_error = None
+            last_status_code = None
+            last_response_text = None
+
             for endpoint in endpoints:
                 try:
                     response = requests.post(endpoint, json=request_payload, headers=headers, timeout=120)
+                    last_status_code = response.status_code
+                    last_response_text = response.text[:2000] if response.text else None
                     if response.status_code == 200:
                         break
+                    else:
+                        last_error = f"HTTP {response.status_code}"
+                        logger.warning(f"[AI Signal Gen Stream {request_id}] Endpoint failed: {response.status_code} - {response.text[:500]}")
+                except requests.exceptions.Timeout as e:
+                    last_error = f"Timeout after 120s: {str(e)}"
+                    logger.warning(f"[AI Signal Gen Stream {request_id}] Endpoint timeout: {e}")
+                except requests.exceptions.ConnectionError as e:
+                    last_error = f"Connection error: {str(e)}"
+                    logger.warning(f"[AI Signal Gen Stream {request_id}] Connection error: {e}")
                 except Exception as e:
-                    logger.warning(f"[AI Signal Gen Stream {request_id}] Endpoint error: {e}")
+                    last_error = f"{type(e).__name__}: {str(e)}"
+                    logger.warning(f"[AI Signal Gen Stream {request_id}] Endpoint error: {type(e).__name__}: {e}")
 
             if not response or response.status_code != 200:
-                error_detail = "No response"
-                if response:
-                    error_detail = f"HTTP {response.status_code}: {response.text[:500]}"
+                error_parts = []
+                if last_error:
+                    error_parts.append(f"error={last_error}")
+                if last_status_code:
+                    error_parts.append(f"status={last_status_code}")
+                if last_response_text:
+                    error_parts.append(f"response={last_response_text[:500]}")
+                error_detail = "; ".join(error_parts) if error_parts else "No response from API"
                 logger.error(f"[AI Signal Gen Stream {request_id}] API failed at round {tool_round}: {error_detail}")
                 system_logger.add_log("ERROR", "ai_signal_gen", f"API failed at round {tool_round}", {"error": error_detail, "request_id": request_id})
                 yield _sse_event("error", {"message": f"API request failed: {error_detail}"})

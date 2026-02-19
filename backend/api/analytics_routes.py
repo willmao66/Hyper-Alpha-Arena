@@ -656,7 +656,8 @@ class AiAttributionChatRequest(PydanticBaseModel):
     accountId: int
     userMessage: str
     conversationId: Optional[int] = None
-    useBackgroundTask: bool = False
+    # SSE direct streaming is unstable (frontend disconnect = task abort). Do NOT set to False.
+    useBackgroundTask: bool = True
 
 
 @router.post("/ai-attribution/chat-stream")

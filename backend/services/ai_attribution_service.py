@@ -757,16 +757,41 @@ def generate_attribution_analysis_stream(
                 request_payload["tool_choice"] = "auto"
 
             response = None
+            last_error = None
+            last_status_code = None
+            last_response_text = None
+
             for endpoint in endpoints:
                 try:
                     response = requests.post(endpoint, json=request_payload, headers=headers, timeout=120)
+                    last_status_code = response.status_code
+                    last_response_text = response.text[:2000] if response.text else None
                     if response.status_code == 200:
                         break
-                except:
-                    continue
+                    else:
+                        last_error = f"HTTP {response.status_code}"
+                        logger.warning(f"[AI Attribution] Endpoint failed: {response.status_code} - {response.text[:500]}")
+                except requests.exceptions.Timeout as e:
+                    last_error = f"Timeout after 120s: {str(e)}"
+                    logger.warning(f"[AI Attribution] Endpoint timeout: {e}")
+                except requests.exceptions.ConnectionError as e:
+                    last_error = f"Connection error: {str(e)}"
+                    logger.warning(f"[AI Attribution] Connection error: {e}")
+                except Exception as e:
+                    last_error = f"{type(e).__name__}: {str(e)}"
+                    logger.warning(f"[AI Attribution] Endpoint error: {type(e).__name__}: {e}")
 
             if not response or response.status_code != 200:
-                yield f"event: error\ndata: {json.dumps({'message': 'API request failed'})}\n\n"
+                error_parts = []
+                if last_error:
+                    error_parts.append(f"error={last_error}")
+                if last_status_code:
+                    error_parts.append(f"status={last_status_code}")
+                if last_response_text:
+                    error_parts.append(f"response={last_response_text[:500]}")
+                error_detail = "; ".join(error_parts) if error_parts else "No response from API"
+                logger.error(f"[AI Attribution] API failed at round {round_num + 1}: {error_detail}")
+                yield f"event: error\ndata: {json.dumps({'message': f'API request failed: {error_detail}'})}\n\n"
                 return
 
             resp_json = response.json()

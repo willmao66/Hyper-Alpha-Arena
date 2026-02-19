@@ -925,11 +925,19 @@ def _call_anthropic_streaming(endpoint: str, payload: dict, headers: dict, timeo
     current_block_index = -1
     stop_reason = None
 
-    response = requests.post(endpoint, json=payload, headers=headers, timeout=timeout, stream=True)
+    try:
+        response = requests.post(endpoint, json=payload, headers=headers, timeout=timeout, stream=True)
+    except requests.exceptions.Timeout as e:
+        raise Exception(f"Timeout after {timeout}s: {str(e)}")
+    except requests.exceptions.ConnectionError as e:
+        raise Exception(f"Connection error: {str(e)}")
+    except Exception as e:
+        raise Exception(f"{type(e).__name__}: {str(e)}")
 
     if response.status_code != 200:
         # Return error info for caller to handle
-        raise Exception(f"HTTP {response.status_code}: {response.text[:500]}")
+        error_body = response.text[:1000] if response.text else "empty response"
+        raise Exception(f"HTTP {response.status_code}: {error_body}")
 
     # Parse SSE stream - use explicit UTF-8 decoding to avoid encoding issues
     for line_bytes in response.iter_lines():
@@ -2023,11 +2031,12 @@ You are creating a new program. Start fresh and design the strategy based on use
             resp_json = None  # For Anthropic streaming, we get parsed result directly
             last_error = None
             last_status_code = None
+            last_response_text = None  # Store full response text for error logging
 
             for retry_attempt in range(API_MAX_RETRIES):
                 response = None
                 resp_json = None
-                last_error = None
+                # Don't reset last_error here - preserve error from previous attempts
 
                 for endpoint in endpoints:
                     try:
@@ -2042,15 +2051,23 @@ You are creating a new program. Start fresh and design the strategy based on use
                         else:
                             # OpenAI format - use regular request
                             response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
+                            last_status_code = response.status_code
+                            last_response_text = response.text[:2000] if response.text else None
                             logger.info(f"[AI Program {request_id}] Response status: {response.status_code}")
                             if response.status_code != 200:
+                                last_error = f"HTTP {response.status_code}"
                                 logger.warning(f"[AI Program {request_id}] Non-200 response from {endpoint}: {response.status_code} - {response.text[:500]}")
-                                last_status_code = response.status_code
                             if response.status_code == 200:
                                 break
+                    except requests.exceptions.Timeout as e:
+                        last_error = f"Timeout after 120s: {str(e)}"
+                        logger.warning(f"[AI Program {request_id}] Endpoint {endpoint} timeout: {e}")
+                    except requests.exceptions.ConnectionError as e:
+                        last_error = f"Connection error: {str(e)}"
+                        logger.warning(f"[AI Program {request_id}] Endpoint {endpoint} connection error: {e}")
                     except Exception as e:
-                        last_error = str(e)
-                        logger.warning(f"[AI Program {request_id}] Endpoint {endpoint} error: {e}")
+                        last_error = f"{type(e).__name__}: {str(e)}"
+                        logger.warning(f"[AI Program {request_id}] Endpoint {endpoint} error: {type(e).__name__}: {e}")
 
                 # Check if successful
                 if api_format == 'anthropic' and resp_json:
@@ -2070,10 +2087,17 @@ You are creating a new program. Start fresh and design the strategy based on use
                     yield f"data: {json.dumps({'type': 'retry', 'attempt': retry_attempt + 2, 'max_retries': API_MAX_RETRIES})}\n\n"
                     time.sleep(delay)
 
-            # Check for failure
+            # Check for failure - build comprehensive error detail
             if api_format == 'anthropic':
                 if not resp_json:
-                    error_detail = f"No response (last_error: {last_error})" if last_error else "No response"
+                    error_parts = []
+                    if last_error:
+                        error_parts.append(f"error={last_error}")
+                    if last_status_code:
+                        error_parts.append(f"status={last_status_code}")
+                    if last_response_text:
+                        error_parts.append(f"response={last_response_text[:500]}")
+                    error_detail = "; ".join(error_parts) if error_parts else "No response from API"
                     logger.error(f"[AI Program {request_id}] API failed at round {tool_round}: {error_detail}")
 
                     if tool_calls_log:
@@ -2092,9 +2116,16 @@ You are creating a new program. Start fresh and design the strategy based on use
                     return
             else:
                 if not response or response.status_code != 200:
-                    error_detail = f"No response (last_error: {last_error})" if last_error else "No response"
-                    if response:
-                        error_detail = f"HTTP {response.status_code}: {response.text[:500]}"
+                    error_parts = []
+                    if last_error:
+                        error_parts.append(f"error={last_error}")
+                    if last_status_code:
+                        error_parts.append(f"status={last_status_code}")
+                    if last_response_text:
+                        error_parts.append(f"response={last_response_text[:500]}")
+                    elif response and response.text:
+                        error_parts.append(f"response={response.text[:500]}")
+                    error_detail = "; ".join(error_parts) if error_parts else "No response from API"
                     logger.error(f"[AI Program {request_id}] API failed at round {tool_round}: {error_detail}")
 
                     if tool_calls_log:

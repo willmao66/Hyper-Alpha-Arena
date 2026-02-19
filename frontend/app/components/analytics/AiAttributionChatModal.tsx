@@ -187,39 +187,68 @@ export default function AiAttributionChatModal({
       })
 
       if (!response.ok) throw new Error('Failed to send message')
-      if (!response.body) throw new Error('No response body')
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
       let finalContent = ''
       let finalDiagnosisResults: DiagnosisResult[] = []
       let finalConversationId: number | null = null
 
-      let currentEventType = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+      // Check if response is JSON (background task mode) or SSE stream
+      const contentType = response.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        // Background task mode: poll for results
+        const taskData = await response.json()
+        const taskId = taskData.task_id
+        let offset = 0
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        while (true) {
+          await new Promise(resolve => setTimeout(resolve, 500))
+          const pollResponse = await fetch(`/api/ai-stream/${taskId}?offset=${offset}`)
+          const pollData = await pollResponse.json()
+          const { status, chunks } = pollData
+          offset = pollData.offset
 
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEventType = line.slice(7).trim()
-            continue
+          for (const chunk of chunks) {
+            handleSSEEvent(chunk.event, chunk.data, tempAssistantMsgId, (updates) => {
+              if (updates.content !== undefined) finalContent = updates.content
+              if (updates.diagnosisResults) finalDiagnosisResults = updates.diagnosisResults
+              if (updates.conversationId) finalConversationId = updates.conversationId
+            })
           }
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              handleSSEEvent(currentEventType, data, tempAssistantMsgId, (updates) => {
-                if (updates.content !== undefined) finalContent = updates.content
-                if (updates.diagnosisResults) finalDiagnosisResults = updates.diagnosisResults
-                if (updates.conversationId) finalConversationId = updates.conversationId
-              })
-            } catch {}
-            currentEventType = ''
+
+          if (status === 'completed' || status === 'error') break
+        }
+      } else {
+        // SSE stream mode (legacy fallback, not recommended)
+        if (!response.body) throw new Error('No response body')
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let currentEventType = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEventType = line.slice(7).trim()
+              continue
+            }
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6))
+                handleSSEEvent(currentEventType, data, tempAssistantMsgId, (updates) => {
+                  if (updates.content !== undefined) finalContent = updates.content
+                  if (updates.diagnosisResults) finalDiagnosisResults = updates.diagnosisResults
+                  if (updates.conversationId) finalConversationId = updates.conversationId
+                })
+              } catch {}
+              currentEventType = ''
+            }
           }
         }
       }
