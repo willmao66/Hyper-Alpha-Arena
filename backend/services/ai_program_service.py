@@ -545,7 +545,10 @@ class RSIStrategy:
    e. Use `quick_verify_strategy` with user's choices to run verification
    f. Analyze results based on performance metrics (see VERIFICATION STANDARDS below)
    g. If performance is poor, suggest adjustments and re-verify
-9. Use `suggest_save_code` to propose saving (only after verification passes or user skips verification)
+   h. **IMPORTANT**: Once verification passes, IMMEDIATELY call `suggest_save_code` - do NOT wait for user
+9. If user declines verification (says "no", "skip", "just save", etc.):
+   - **IMMEDIATELY** call `suggest_save_code` - do NOT ask again, do NOT wait
+10. **CRITICAL**: The workflow is NOT complete until `suggest_save_code` is called. User cannot access the code otherwise.
 
 ## VERIFICATION STANDARDS
 Analyze `quick_verify_strategy` results to determine if strategy is viable:
