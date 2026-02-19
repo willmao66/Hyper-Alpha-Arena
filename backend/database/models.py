@@ -742,6 +742,7 @@ class AiPromptMessage(Base):
 
     # Completion status for retry/continue functionality
     is_complete = Column(Boolean, default=True)  # False = interrupted, can retry
+    interrupt_reason = Column(Text, nullable=True)  # Reason for interruption (API error, timeout, etc.)
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
@@ -881,6 +882,7 @@ class AiProgramMessage(Base):
 
     # Completion status for retry/continue functionality
     is_complete = Column(Boolean, default=True)  # False = interrupted, can retry
+    interrupt_reason = Column(Text, nullable=True)  # Reason for interruption (API error, timeout, etc.)
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 

@@ -89,12 +89,16 @@ def calculate_indicators(kline_data: List[Dict[str, Any]], indicators: List[str]
 def _calculate_ema(df: pd.DataFrame, period: int) -> List[float]:
     """计算指数移动平均线"""
     ema = ta.ema(df['close'], length=period)
+    if ema is None:
+        return []
     return ema.fillna(0).tolist()
 
 
 def _calculate_sma(df: pd.DataFrame, period: int) -> List[float]:
     """计算简单移动平均线"""
     sma = ta.sma(df['close'], length=period)
+    if sma is None:
+        return []
     return sma.fillna(0).tolist()
 
 
@@ -189,6 +193,8 @@ def _calculate_bollinger_bands(df: pd.DataFrame, period: int = 20, std: float = 
 def _calculate_atr(df: pd.DataFrame, period: int) -> List[float]:
     """计算平均真实波幅"""
     atr = ta.atr(df['high'], df['low'], df['close'], length=period)
+    if atr is None:
+        return []
     return atr.fillna(0).tolist()
 
 
@@ -228,6 +234,8 @@ def _calculate_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 
 def _calculate_obv(df: pd.DataFrame) -> List[float]:
     """计算能量潮指标"""
     obv = ta.obv(df['close'], df['volume'])
+    if obv is None:
+        return []
     return obv.fillna(0).tolist()
 
 

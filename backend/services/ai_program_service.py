@@ -536,7 +536,33 @@ class RSIStrategy:
 4. Write code with appropriate thresholds based on queried data
 5. Use `validate_code` to check syntax
 6. Use `test_run_code` to test with real market data
-7. If test passes, use `suggest_save_code` to propose saving
+7. **PAUSE**: After test passes, ask user if they want to verify strategy performance on historical data
+8. If user agrees to verify:
+   a. Ask user which exchange they plan to trade on (Hyperliquid or Binance)
+   b. Use `get_signal_pools` with the chosen exchange to list available signal pools
+   c. Present signal pools to user in friendly format (name + description)
+   d. Ask user to choose signal pool AND/OR scheduled trigger interval (can use both together)
+   e. Use `quick_verify_strategy` with user's choices to run verification
+   f. Analyze results based on performance metrics (see VERIFICATION STANDARDS below)
+   g. If performance is poor, suggest adjustments and re-verify
+9. Use `suggest_save_code` to propose saving (only after verification passes or user skips verification)
+
+## VERIFICATION STANDARDS
+Analyze `quick_verify_strategy` results to determine if strategy is viable:
+
+**Good signs:**
+- total_pnl_percent > 0 (profitable)
+- win_rate > 40%
+- profit_factor > 1.5
+- max_drawdown_percent < 20%
+
+**Warning signs (suggest adjustments):**
+- total_trades = 0: Strategy never trades - conditions too strict
+- win_rate < 30%: Too many losing trades
+- max_drawdown_percent > 30%: Risk too high
+- profit_factor < 1.0: Losing money overall
+
+**Key insight:** Signal pool triggers are typically for entry signals, scheduled triggers for exit/management. Many strategies use BOTH together.
 
 ## BACKTEST ANALYSIS (only when user asks to analyze backtest results)
 When user asks to analyze strategy backtest results or performance:
@@ -654,6 +680,44 @@ PROGRAM_TOOLS = [
                     }
                 },
                 "required": ["code", "symbol"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "quick_verify_strategy",
+            "description": "Quick verify strategy code on historical data. Simulates real execution with signal pool triggers and/or scheduled triggers. Returns full backtest metrics including PnL, win rate, max drawdown, profit factor. Run this BEFORE suggesting to save code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Strategy code to verify"
+                    },
+                    "exchange": {
+                        "type": "string",
+                        "enum": ["hyperliquid", "binance"],
+                        "description": "Exchange to use for historical data"
+                    },
+                    "signal_pool_id": {
+                        "type": "integer",
+                        "description": "Signal pool ID for signal-based triggers (optional, can combine with scheduled)"
+                    },
+                    "scheduled_interval_minutes": {
+                        "type": "integer",
+                        "description": "Scheduled trigger interval in minutes (optional, can combine with signal pool)"
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "Trading symbol (default: BTC)"
+                    },
+                    "hours": {
+                        "type": "integer",
+                        "description": "Backtest duration in hours (default: 168 = 7 days)"
+                    }
+                },
+                "required": ["code", "exchange"]
             }
         }
     },
@@ -1376,6 +1440,116 @@ def _get_trigger_details(db: Session, backtest_id: int, indexes: List[int], fiel
         return json.dumps({"error": str(e)})
 
 
+def _quick_verify_strategy(
+    db: Session,
+    code: str,
+    exchange: str,
+    signal_pool_id: Optional[int] = None,
+    scheduled_interval_minutes: Optional[int] = None,
+    symbol: str = "BTC",
+    hours: int = 168
+) -> str:
+    """
+    Quick verify strategy code on historical data without storing results.
+    Reuses ProgramBacktestEngine for accurate simulation.
+    Returns core metrics from BacktestResult for AI analysis.
+    """
+    from backtest import BacktestConfig, ProgramBacktestEngine
+    from datetime import datetime, timezone
+
+    try:
+        # Must have at least one trigger source
+        if signal_pool_id is None and scheduled_interval_minutes is None:
+            return json.dumps({"error": "Must specify signal_pool_id and/or scheduled_interval_minutes"})
+
+        # Calculate time range (UTC)
+        end_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        start_time_ms = end_time_ms - (hours * 60 * 60 * 1000)
+
+        # Build config - support combined triggers
+        signal_pool_ids = [signal_pool_id] if signal_pool_id else []
+        scheduled_interval_sec = scheduled_interval_minutes * 60 if scheduled_interval_minutes else None
+
+        # Get symbols from signal pool if available
+        symbols = [symbol]
+        if signal_pool_id:
+            from database.models import SignalPool
+            pool = db.query(SignalPool).filter(SignalPool.id == signal_pool_id).first()
+            if pool and pool.symbols:
+                pool_symbols = pool.symbols
+                if isinstance(pool_symbols, str):
+                    pool_symbols = json.loads(pool_symbols)
+                if pool_symbols:
+                    symbols = pool_symbols
+
+        config = BacktestConfig(
+            code=code,
+            signal_pool_ids=signal_pool_ids,
+            symbols=symbols,
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+            scheduled_interval_sec=scheduled_interval_sec,
+            initial_balance=10000.0,
+            slippage_percent=0.05,
+            fee_rate=0.035,
+            exchange=exchange,
+        )
+
+        # Run backtest using existing engine (no DB storage)
+        engine = ProgramBacktestEngine(db)
+        result = engine.run(config)
+
+        if not result.success:
+            return json.dumps({"error": result.error or "Backtest failed"})
+
+        # Extract sample trades (max 3)
+        sample_trades = []
+        for trade in result.trades[:3]:
+            time_str = datetime.utcfromtimestamp(trade.timestamp / 1000).strftime('%Y-%m-%d %H:%M')
+            sample_trades.append({
+                "time": time_str,
+                "action": trade.operation,
+                "symbol": trade.symbol,
+                "side": trade.side,
+                "pnl": round(trade.pnl, 2) if trade.pnl else None,
+                "reason": trade.reason[:50] if trade.reason else ''
+            })
+
+        # Return core metrics from BacktestResult
+        return json.dumps({
+            "success": True,
+            "duration_hours": hours,
+            "exchange": exchange,
+            "trigger_config": {
+                "signal_pool_id": signal_pool_id,
+                "scheduled_interval_minutes": scheduled_interval_minutes
+            },
+            "triggers": {
+                "total": result.total_triggers,
+                "signal": result.signal_triggers,
+                "scheduled": result.scheduled_triggers
+            },
+            "performance": {
+                "total_pnl": round(result.total_pnl, 2),
+                "total_pnl_percent": round(result.total_pnl_percent, 2),
+                "max_drawdown_percent": round(result.max_drawdown_percent, 2),
+                "sharpe_ratio": round(result.sharpe_ratio, 2) if result.sharpe_ratio else None
+            },
+            "trades": {
+                "total": result.total_trades,
+                "winning": result.winning_trades,
+                "losing": result.losing_trades,
+                "win_rate": round(result.win_rate, 1),
+                "profit_factor": round(result.profit_factor, 2) if result.profit_factor else None
+            },
+            "sample_trades": sample_trades
+        })
+
+    except Exception as e:
+        logger.error(f"Quick verify strategy error: {e}", exc_info=True)
+        return json.dumps({"error": str(e)})
+
+
 def _execute_tool(
     tool_name: str,
     arguments: Dict[str, Any],
@@ -1418,6 +1592,18 @@ def _execute_tool(
             code = arguments.get("code", "")
             symbol = arguments.get("symbol", "BTC")
             return _test_run_code(db, code, symbol)
+
+        elif tool_name == "quick_verify_strategy":
+            code = arguments.get("code", "")
+            exchange = arguments.get("exchange", "hyperliquid")
+            signal_pool_id = arguments.get("signal_pool_id")
+            scheduled_interval_minutes = arguments.get("scheduled_interval_minutes")
+            symbol = arguments.get("symbol", "BTC")
+            hours = arguments.get("hours", 168)
+            return _quick_verify_strategy(
+                db, code, exchange,
+                signal_pool_id, scheduled_interval_minutes, symbol, hours
+            )
 
         elif tool_name == "suggest_save_code":
             code = arguments.get("code", "")
@@ -1895,6 +2081,8 @@ You are creating a new program. Start fresh and design the strategy based on use
                         assistant_msg.content = analysis_markdown + f"\n\n**[Interrupted at round {tool_round}]** {error_detail}"
                         assistant_msg.tool_calls_log = json.dumps(tool_calls_log)
                         assistant_msg.reasoning_snapshot = reasoning_snapshot if reasoning_snapshot else None
+                        assistant_msg.is_complete = False
+                        assistant_msg.interrupt_reason = f"Round {tool_round}: {error_detail}"
                         db.commit()
                         yield f"data: {json.dumps({'type': 'interrupted', 'message_id': assistant_msg.id, 'round': tool_round, 'error': error_detail})}\n\n"
                     else:
@@ -1914,6 +2102,8 @@ You are creating a new program. Start fresh and design the strategy based on use
                         assistant_msg.content = analysis_markdown + f"\n\n**[Interrupted at round {tool_round}]** {error_detail}"
                         assistant_msg.tool_calls_log = json.dumps(tool_calls_log)
                         assistant_msg.reasoning_snapshot = reasoning_snapshot if reasoning_snapshot else None
+                        assistant_msg.is_complete = False
+                        assistant_msg.interrupt_reason = f"Round {tool_round}: {error_detail}"
                         db.commit()
                         yield f"data: {json.dumps({'type': 'interrupted', 'message_id': assistant_msg.id, 'round': tool_round, 'error': error_detail})}\n\n"
                     else:

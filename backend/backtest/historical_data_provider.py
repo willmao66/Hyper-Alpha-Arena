@@ -223,17 +223,17 @@ class HistoricalDataProvider:
         return result
 
     def _load_klines_to_cache(self, symbol: str, period: str):
-        """Load all klines for symbol/period into cache."""
+        """Load all klines for symbol/period into cache.
+
+        If database has insufficient data, automatically fetch from API and persist.
+        """
         cache_key = f"{symbol}_{period}"
 
         # Calculate time range with buffer for indicator calculation
-        # Need enough history for longest period (1d) with 500 candles
-        # 500 * 86400 = 43200000 seconds = 500 days for daily candles
-        # For hourly: 500 * 3600 = 1800000 seconds = ~20.8 days
-        # Use period-aware buffer calculation
         period_seconds = {
             "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-            "1h": 3600, "4h": 14400, "1d": 86400
+            "1h": 3600, "2h": 7200, "4h": 14400, "8h": 28800,
+            "12h": 43200, "1d": 86400
         }
         period_sec = period_seconds.get(period, 300)  # default to 5m
         buffer_seconds = 500 * period_sec
@@ -241,26 +241,34 @@ class HistoricalDataProvider:
         start_sec = (self.start_time_ms // 1000) - buffer_seconds
         end_sec = self.end_time_ms // 1000
 
-        try:
-            result = self.db.execute(text("""
-                SELECT timestamp, open_price, high_price, low_price, close_price, volume
-                FROM crypto_klines
-                WHERE symbol = :symbol AND period = :period AND exchange = :exchange
-                AND timestamp >= :start_ts AND timestamp <= :end_ts
-                ORDER BY timestamp ASC
-            """), {"symbol": symbol, "period": period, "exchange": self.exchange,
-                   "start_ts": start_sec, "end_ts": end_sec})
+        # Minimum required klines for indicator calculation (EMA100 needs ~150)
+        min_required = 150
 
-            klines = []
-            for row in result:
-                klines.append({
-                    "timestamp": int(row[0]),
-                    "open": float(row[1]),
-                    "high": float(row[2]),
-                    "low": float(row[3]),
-                    "close": float(row[4]),
-                    "volume": float(row[5]) if row[5] else 0.0,
-                })
+        try:
+            # First, query from database
+            klines = self._query_klines_from_db(symbol, period, start_sec, end_sec)
+
+            # If insufficient data, try to fetch from API
+            if len(klines) < min_required:
+                logger.warning(
+                    f"[Backtest] Insufficient kline data for {symbol}/{period}/{self.exchange}: "
+                    f"got {len(klines)}, need {min_required}. Fetching from API..."
+                )
+
+                # Fetch from API and persist to database
+                fetched = self._fetch_and_persist_klines(symbol, period, count=500)
+
+                if fetched:
+                    logger.info(
+                        f"[Backtest] Fetched {len(fetched)} klines for {symbol}/{period}/{self.exchange} from API"
+                    )
+                    # Re-query from database to get persisted data
+                    klines = self._query_klines_from_db(symbol, period, start_sec, end_sec)
+                    logger.info(f"[Backtest] After sync: {len(klines)} klines available")
+                else:
+                    logger.error(
+                        f"[Backtest] Failed to fetch klines for {symbol}/{period}/{self.exchange} from API"
+                    )
 
             self._kline_cache[cache_key] = klines
             logger.debug(f"Loaded {len(klines)} klines for {symbol} {period}")
@@ -268,6 +276,110 @@ class HistoricalDataProvider:
         except Exception as e:
             logger.error(f"Failed to load klines for {symbol} {period}: {e}")
             self._kline_cache[cache_key] = []
+
+    def _query_klines_from_db(self, symbol: str, period: str, start_sec: int, end_sec: int) -> list:
+        """Query klines from database."""
+        result = self.db.execute(text("""
+            SELECT timestamp, open_price, high_price, low_price, close_price, volume
+            FROM crypto_klines
+            WHERE symbol = :symbol AND period = :period AND exchange = :exchange
+            AND timestamp >= :start_ts AND timestamp <= :end_ts
+            ORDER BY timestamp ASC
+        """), {"symbol": symbol, "period": period, "exchange": self.exchange,
+               "start_ts": start_sec, "end_ts": end_sec})
+
+        klines = []
+        for row in result:
+            klines.append({
+                "timestamp": int(row[0]),
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5]) if row[5] else 0.0,
+            })
+        return klines
+
+    def _fetch_and_persist_klines(self, symbol: str, period: str, count: int = 500) -> list:
+        """Fetch klines from API and persist to database.
+
+        Supports both Hyperliquid and Binance exchanges.
+        """
+        try:
+            if self.exchange == "binance":
+                from services.exchanges.binance_adapter import BinanceAdapter
+                adapter = BinanceAdapter(environment="mainnet")
+                unified_klines = adapter.fetch_klines(symbol, period, limit=count)
+
+                if not unified_klines:
+                    return []
+
+                # Persist to database
+                self._persist_binance_klines(symbol, period, unified_klines)
+
+                # Convert to dict format
+                return [
+                    {
+                        "timestamp": k.timestamp,
+                        "open": float(k.open_price),
+                        "high": float(k.high_price),
+                        "low": float(k.low_price),
+                        "close": float(k.close_price),
+                        "volume": float(k.volume),
+                    }
+                    for k in unified_klines
+                ]
+            else:
+                # Hyperliquid (default)
+                from services.hyperliquid_market_data import get_kline_data_from_hyperliquid
+                # persist=True will auto-save to database
+                klines = get_kline_data_from_hyperliquid(
+                    symbol=symbol,
+                    period=period,
+                    count=count,
+                    persist=True,
+                    environment="mainnet"
+                )
+                return klines or []
+
+        except Exception as e:
+            logger.error(f"Failed to fetch klines from API for {symbol}/{period}/{self.exchange}: {e}")
+            return []
+
+    def _persist_binance_klines(self, symbol: str, period: str, klines: list):
+        """Persist Binance klines to database."""
+        from database.models import CryptoKline
+
+        try:
+            for k in klines:
+                # Check if exists
+                existing = self.db.execute(text("""
+                    SELECT 1 FROM crypto_klines
+                    WHERE symbol = :symbol AND period = :period AND exchange = :exchange
+                    AND timestamp = :ts LIMIT 1
+                """), {"symbol": symbol, "period": period, "exchange": "binance", "ts": k.timestamp})
+
+                if not existing.fetchone():
+                    self.db.execute(text("""
+                        INSERT INTO crypto_klines
+                        (symbol, period, exchange, timestamp, open_price, high_price, low_price, close_price, volume)
+                        VALUES (:symbol, :period, :exchange, :ts, :open, :high, :low, :close, :volume)
+                    """), {
+                        "symbol": symbol, "period": period, "exchange": "binance",
+                        "ts": k.timestamp,
+                        "open": float(k.open_price),
+                        "high": float(k.high_price),
+                        "low": float(k.low_price),
+                        "close": float(k.close_price),
+                        "volume": float(k.volume),
+                    })
+
+            self.db.commit()
+            logger.info(f"Persisted {len(klines)} Binance klines for {symbol}/{period}")
+
+        except Exception as e:
+            logger.error(f"Failed to persist Binance klines: {e}")
+            self.db.rollback()
 
     def _build_virtual_kline(self, symbol: str, period: str, current_time_sec: int) -> Optional[Dict]:
         """Build a virtual K-line for the current incomplete period.
