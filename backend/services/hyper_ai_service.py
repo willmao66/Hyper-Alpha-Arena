@@ -170,14 +170,124 @@ def get_llm_config(db: Session) -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"Failed to decrypt API key: {e}")
 
+    # Detect API format from URL for custom provider
+    if profile.llm_provider == "custom" and base_url:
+        _, api_format = detect_api_format(base_url)
+        api_format = api_format or "openai"
+    else:
+        api_format = provider.api_format if provider else "openai"
+
     return {
         "configured": True,
         "provider": profile.llm_provider,
         "base_url": base_url,
         "model": model,
         "api_key": api_key,
-        "api_format": provider.api_format if provider else "openai"
+        "api_format": api_format
     }
+
+
+def test_llm_connection(
+    provider: str,
+    api_key: str,
+    model: str,
+    base_url: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Test LLM connection by making a simple API call.
+    Returns {"success": True} or {"success": False, "error": "message"}
+    """
+    # Get provider config
+    provider_config = get_provider(provider)
+
+    if provider == "custom":
+        if not base_url:
+            return {"success": False, "error": "Base URL is required for custom provider"}
+        # Auto-detect API format from URL (same as AI Trader)
+        url, api_format = detect_api_format(base_url)
+        if not url:
+            return {"success": False, "error": "Invalid Base URL"}
+        api_format = api_format or "openai"
+    else:
+        if not provider_config:
+            return {"success": False, "error": f"Unknown provider: {provider}"}
+        effective_base_url = base_url or provider_config.base_url
+        api_format = provider_config.api_format
+        # Build URL based on api_format
+        if api_format == "anthropic":
+            url = f"{effective_base_url.rstrip('/')}/messages"
+        else:
+            url = f"{effective_base_url.rstrip('/')}/chat/completions"
+
+    if not model:
+        model = provider_config.models[0] if provider_config and provider_config.models else "gpt-3.5-turbo"
+
+    # Check if model is a reasoning model that requires special parameter handling
+    # Reasoning models (o1, o3, deepseek-r1, etc.):
+    # - Use max_completion_tokens instead of max_tokens
+    # - Do not support temperature parameter
+    # Note: This logic must stay in sync with stream_chat_response and stream_onboarding_response
+    model_lower = model.lower()
+    is_reasoning_model = any(
+        marker in model_lower for marker in [
+            "o1-", "o1", "o3-", "o3", "o4-",  # OpenAI reasoning models
+            "deepseek-r1", "deepseek-reasoner",  # DeepSeek reasoning
+        ]
+    )
+
+    try:
+        # Build request based on API format
+        if api_format == "anthropic":
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": "Hi"}]
+            }
+        else:
+            # OpenAI format
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": "Hi"}]
+            }
+            # Use max_completion_tokens for reasoning models, max_tokens for others
+            if is_reasoning_model:
+                payload["max_completion_tokens"] = 10
+            else:
+                payload["max_tokens"] = 10
+
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+
+        if response.status_code == 200:
+            return {"success": True}
+        else:
+            error_msg = response.text[:200] if response.text else f"HTTP {response.status_code}"
+            # Try to extract error message from JSON
+            try:
+                err_json = response.json()
+                if "error" in err_json:
+                    if isinstance(err_json["error"], dict):
+                        error_msg = err_json["error"].get("message", error_msg)
+                    else:
+                        error_msg = str(err_json["error"])
+            except:
+                pass
+            return {"success": False, "error": error_msg}
+
+    except requests.exceptions.Timeout:
+        return {"success": False, "error": "Connection timeout"}
+    except requests.exceptions.ConnectionError as e:
+        return {"success": False, "error": f"Connection failed: {str(e)[:100]}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
 
 
 def save_llm_config(
@@ -386,6 +496,18 @@ def stream_chat_response(
 
     max_tokens = get_max_tokens(model)
 
+    # Check if model is a reasoning model that requires special parameter handling
+    # Reasoning models (o1, o3, deepseek-r1, etc.):
+    # - Use max_completion_tokens instead of max_tokens
+    # - Do not support temperature parameter
+    model_lower = model.lower()
+    is_reasoning_model = any(
+        marker in model_lower for marker in [
+            "o1-", "o1", "o3-", "o3", "o4-",  # OpenAI reasoning models
+            "deepseek-r1", "deepseek-reasoner",  # DeepSeek reasoning
+        ]
+    )
+
     # Build request body based on API format
     if api_format == "anthropic":
         # Extract system message
@@ -405,12 +527,17 @@ def stream_chat_response(
             "stream": True
         }
     else:
+        # OpenAI format
         body = {
             "model": model,
-            "max_tokens": max_tokens,
             "messages": messages,
             "stream": True
         }
+        # Use max_completion_tokens for reasoning models, max_tokens for others
+        if is_reasoning_model:
+            body["max_completion_tokens"] = max_tokens
+        else:
+            body["max_tokens"] = max_tokens
 
     # Make API call with retry
     response = None
@@ -612,6 +739,18 @@ def stream_onboarding_response(
 
     max_tokens = get_max_tokens(model)
 
+    # Check if model is a reasoning model that requires special parameter handling
+    # Reasoning models (o1, o3, deepseek-r1, etc.):
+    # - Use max_completion_tokens instead of max_tokens
+    # - Do not support temperature parameter
+    model_lower = model.lower()
+    is_reasoning_model = any(
+        marker in model_lower for marker in [
+            "o1-", "o1", "o3-", "o3", "o4-",  # OpenAI reasoning models
+            "deepseek-r1", "deepseek-reasoner",  # DeepSeek reasoning
+        ]
+    )
+
     if api_format == "anthropic":
         system_content = ""
         api_messages = []
@@ -628,12 +767,17 @@ def stream_onboarding_response(
             "stream": True
         }
     else:
+        # OpenAI format
         body = {
             "model": model,
-            "max_tokens": max_tokens,
             "messages": messages,
             "stream": True
         }
+        # Use max_completion_tokens for reasoning models, max_tokens for others
+        if is_reasoning_model:
+            body["max_completion_tokens"] = max_tokens
+        else:
+            body["max_tokens"] = max_tokens
 
     response = None
     for attempt in range(API_MAX_RETRIES):

@@ -16,7 +16,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Loader2, CheckCircle2, AlertCircle, ArrowRight, Bot, User } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Loader2, CheckCircle2, AlertCircle, ArrowRight, Bot, User, ChevronDown } from 'lucide-react'
 
 interface LLMProvider {
   id: string
@@ -39,7 +45,7 @@ export default function HyperAiOnboarding({ onComplete, onSkip }: HyperAiOnboard
   const [providers, setProviders] = useState<LLMProvider[]>([])
   const [selectedProvider, setSelectedProvider] = useState<string>('')
   const [apiKey, setApiKey] = useState('')
-  const [selectedModel, setSelectedModel] = useState<string>('')
+  const [modelInput, setModelInput] = useState('')
   const [customBaseUrl, setCustomBaseUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -71,9 +77,26 @@ export default function HyperAiOnboarding({ onComplete, onSkip }: HyperAiOnboard
 
   const currentProvider = providers.find(p => p.id === selectedProvider)
 
+  // Set default model when provider changes
+  useEffect(() => {
+    if (selectedProvider && currentProvider && currentProvider.models.length > 0 && !modelInput) {
+      setModelInput(currentProvider.models[0])
+    }
+  }, [selectedProvider, currentProvider])
+
+  const handleProviderChange = (value: string) => {
+    setSelectedProvider(value)
+    setModelInput('')  // Reset model when provider changes
+  }
+
   const handleTestAndContinue = async () => {
     if (!selectedProvider || !apiKey) {
       setError(t('hyperAi.onboarding.fillRequired', 'Please fill in all required fields'))
+      return
+    }
+
+    if (selectedProvider === 'custom' && !customBaseUrl) {
+      setError(t('hyperAi.onboarding.baseUrlRequired', 'Base URL is required for custom provider'))
       return
     }
 
@@ -82,25 +105,23 @@ export default function HyperAiOnboarding({ onComplete, onSkip }: HyperAiOnboard
     setTestResult(null)
 
     try {
-      // Save config first
       const saveRes = await fetch('/api/hyper-ai/profile/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: selectedProvider,
           api_key: apiKey,
-          model: selectedModel || (currentProvider?.models[0] ?? ''),
+          model: modelInput,
           base_url: selectedProvider === 'custom' ? customBaseUrl : undefined
         })
       })
 
       if (!saveRes.ok) {
         const errData = await saveRes.json()
-        throw new Error(errData.detail || 'Failed to save configuration')
+        throw new Error(errData.detail || 'Connection test failed')
       }
 
       setTestResult('success')
-      // Move to chat step after short delay
       setTimeout(() => setStep('chat'), 800)
     } catch (e: any) {
       setTestResult('error')
@@ -138,7 +159,7 @@ export default function HyperAiOnboarding({ onComplete, onSkip }: HyperAiOnboard
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>{t('hyperAi.onboarding.provider', 'AI Provider')}</Label>
-            <Select value={selectedProvider} onValueChange={setSelectedProvider}>
+            <Select value={selectedProvider} onValueChange={handleProviderChange}>
               <SelectTrigger>
                 <SelectValue placeholder={t('hyperAi.onboarding.selectProvider', 'Select provider')} />
               </SelectTrigger>
@@ -173,20 +194,34 @@ export default function HyperAiOnboarding({ onComplete, onSkip }: HyperAiOnboard
             />
           </div>
 
-          {/* Model Selection */}
-          {currentProvider && currentProvider.models.length > 0 && (
+          {/* Model Selection - Input + Dropdown */}
+          {selectedProvider && (
             <div className="space-y-2">
               <Label>{t('hyperAi.onboarding.model', 'Model')}</Label>
-              <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger>
-                  <SelectValue placeholder={currentProvider.models[0]} />
-                </SelectTrigger>
-                <SelectContent>
-                  {currentProvider.models.map(m => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-1">
+                <Input
+                  value={modelInput}
+                  onChange={e => setModelInput(e.target.value)}
+                  placeholder={t('hyperAi.onboarding.modelPlaceholder', 'Enter or select model')}
+                  className="flex-1"
+                />
+                {currentProvider && currentProvider.models.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" className="shrink-0">
+                        <ChevronDown className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-60 overflow-y-auto">
+                      {currentProvider.models.map(m => (
+                        <DropdownMenuItem key={m} onClick={() => setModelInput(m)}>
+                          {m}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
             </div>
           )}
         </div>

@@ -4,7 +4,8 @@ Hyper AI Routes - API endpoints for Hyper AI main agent
 Endpoints:
 - GET  /api/hyper-ai/providers - List available LLM providers
 - GET  /api/hyper-ai/profile - Get user profile and LLM config status
-- POST /api/hyper-ai/profile/llm - Save LLM configuration
+- POST /api/hyper-ai/profile/llm - Save LLM configuration (with connection test)
+- POST /api/hyper-ai/test-connection - Test LLM connection without saving
 - POST /api/hyper-ai/profile/preferences - Save trading preferences
 - GET  /api/hyper-ai/conversations - List conversations
 - POST /api/hyper-ai/conversations - Create new conversation
@@ -22,6 +23,7 @@ from services.hyper_ai_service import (
     get_or_create_profile,
     get_llm_config,
     save_llm_config,
+    test_llm_connection,
     get_or_create_conversation,
     get_conversation_messages,
     start_chat_task,
@@ -69,10 +71,14 @@ def get_profile(db: Session = Depends(get_db)):
     profile = get_or_create_profile(db)
     llm_config = get_llm_config(db)
 
+    # Get base_url for display
+    base_url = llm_config.get("base_url", "") if llm_config.get("configured") else ""
+
     return {
         "llm_configured": llm_config.get("configured", False),
         "llm_provider": profile.llm_provider,
         "llm_model": profile.llm_model,
+        "llm_base_url": base_url,
         "onboarding_completed": profile.onboarding_completed,
         "nickname": profile.nickname,
         "trading_style": profile.trading_style,
@@ -84,9 +90,16 @@ def get_profile(db: Session = Depends(get_db)):
     }
 
 
-@router.post("/profile/llm")
-def save_llm_configuration(request: LLMConfigRequest, db: Session = Depends(get_db)):
-    """Save LLM provider configuration."""
+class TestConnectionRequest(BaseModel):
+    provider: str
+    api_key: str
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+@router.post("/test-connection")
+def test_connection(request: TestConnectionRequest):
+    """Test LLM connection without saving configuration."""
     # Validate provider
     if request.provider != "custom":
         provider = get_provider(request.provider)
@@ -100,15 +113,70 @@ def save_llm_configuration(request: LLMConfigRequest, db: Session = Depends(get_
             detail="base_url is required for custom provider"
         )
 
+    # Get default model if not provided
+    model = request.model
+    if not model and request.provider != "custom":
+        provider = get_provider(request.provider)
+        if provider and provider.models:
+            model = provider.models[0]
+
+    result = test_llm_connection(
+        provider=request.provider,
+        api_key=request.api_key,
+        model=model or "",
+        base_url=request.base_url
+    )
+
+    return result
+
+
+@router.post("/profile/llm")
+def save_llm_configuration(request: LLMConfigRequest, db: Session = Depends(get_db)):
+    """Save LLM provider configuration after testing connection."""
+    # Validate provider
+    if request.provider != "custom":
+        provider = get_provider(request.provider)
+        if not provider:
+            raise HTTPException(status_code=400, detail="Invalid provider")
+
+    # For custom provider, base_url is required
+    if request.provider == "custom" and not request.base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="base_url is required for custom provider"
+        )
+
+    # Get default model if not provided
+    model = request.model
+    if not model and request.provider != "custom":
+        provider = get_provider(request.provider)
+        if provider and provider.models:
+            model = provider.models[0]
+
+    # Test connection before saving
+    test_result = test_llm_connection(
+        provider=request.provider,
+        api_key=request.api_key,
+        model=model or "",
+        base_url=request.base_url
+    )
+
+    if not test_result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=test_result.get("error", "Connection test failed")
+        )
+
+    # Save configuration
     profile = save_llm_config(
         db,
         provider=request.provider,
         api_key=request.api_key,
-        model=request.model,
+        model=model,
         base_url=request.base_url
     )
 
-    return {"success": True, "provider": profile.llm_provider}
+    return {"success": True, "provider": profile.llm_provider, "model": profile.llm_model}
 
 
 @router.post("/profile/preferences")

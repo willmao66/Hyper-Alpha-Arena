@@ -1,16 +1,18 @@
 /**
  * SplashScreen - Initial loading screen with logo
- * Replaces the old "Connecting to trading server..." text
+ * Waits for both minimum animation duration AND data ready before completing
  */
 import { useEffect, useState, useRef } from 'react'
 
 interface SplashScreenProps {
   onComplete: () => void
   minDuration?: number
+  isReady?: boolean  // External signal that all data is loaded
 }
 
-export default function SplashScreen({ onComplete, minDuration = 1500 }: SplashScreenProps) {
+export default function SplashScreen({ onComplete, minDuration = 1500, isReady = false }: SplashScreenProps) {
   const [progress, setProgress] = useState(0)
+  const [animationDone, setAnimationDone] = useState(false)
   const completedRef = useRef(false)
   const onCompleteRef = useRef(onComplete)
 
@@ -19,6 +21,7 @@ export default function SplashScreen({ onComplete, minDuration = 1500 }: SplashS
     onCompleteRef.current = onComplete
   }, [onComplete])
 
+  // Animation progress
   useEffect(() => {
     const startTime = Date.now()
     const interval = setInterval(() => {
@@ -26,15 +29,22 @@ export default function SplashScreen({ onComplete, minDuration = 1500 }: SplashS
       const newProgress = Math.min((elapsed / minDuration) * 100, 100)
       setProgress(newProgress)
 
-      if (elapsed >= minDuration && !completedRef.current) {
-        completedRef.current = true
+      if (elapsed >= minDuration) {
+        setAnimationDone(true)
         clearInterval(interval)
-        onCompleteRef.current()
       }
     }, 50)
 
     return () => clearInterval(interval)
-  }, [minDuration]) // Only depend on minDuration, not onComplete
+  }, [minDuration])
+
+  // Complete when both animation done AND data ready
+  useEffect(() => {
+    if (animationDone && isReady && !completedRef.current) {
+      completedRef.current = true
+      onCompleteRef.current()
+    }
+  }, [animationDone, isReady])
 
   return (
     <div className="fixed inset-0 bg-background flex flex-col items-center justify-center z-50">

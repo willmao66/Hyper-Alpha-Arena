@@ -666,9 +666,12 @@ function App() {
     positions_value: 0
   } : null)
 
-  // Show splash screen first (all init happens during splash)
+  // Data ready when user and account are loaded (or non-paper mode with effectiveOverview)
+  const isDataReady = !!(user && account && (effectiveOverview || tradingMode !== 'paper'))
+
+  // Show splash screen first (waits for both animation AND data ready)
   if (showSplash) {
-    return <SplashScreen onComplete={handleSplashComplete} />
+    return <SplashScreen onComplete={handleSplashComplete} isReady={isDataReady} />
   }
 
   // Show onboarding if Hyper AI not configured
@@ -678,18 +681,6 @@ function App() {
         onComplete={handleOnboardingComplete}
         onSkip={handleOnboardingSkip}
       />
-    )
-  }
-
-  // Show minimal loading only after init complete but WebSocket not ready
-  if (!user || !account || (!effectiveOverview && tradingMode === 'paper')) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <img src="/static/arena_logo_app_small.png" alt="Loading" className="w-16 h-16" />
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
     )
   }
 
