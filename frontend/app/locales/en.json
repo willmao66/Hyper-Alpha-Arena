@@ -35,7 +35,8 @@
     "saving": "Saving...",
     "loadMore": "Load More",
     "keyboardHintCtrlEnter": "Press Ctrl+Enter (Cmd+Enter on Mac) to send",
-    "recommended": "Recommended"
+    "recommended": "Recommended",
+    "skip": "Skip"
   },
   "regime": {
     "noConfig": "No configuration found",
@@ -1380,5 +1381,44 @@
     "perDay": "per day",
     "upgradeOptions": "Choose an option to unlock unlimited automated trades:",
     "resetAt": "Resets at"
+  },
+  "hyperAi": {
+    "title": "Hyper AI",
+    "newChat": "New Chat",
+    "messages": "messages",
+    "inputPlaceholder": "Type a message...",
+    "config": "AI Config",
+    "configTitle": "Hyper AI Config",
+    "skills": "Skills",
+    "skillsComingSoon": "Coming soon...",
+    "welcomeWithName": "Hello, {{name}}! I'm Hyper AI, your personal trading assistant.",
+    "welcomeNoName": "Hello! I'm Hyper AI, the intelligent assistant for Hyper Alpha Arena.",
+    "welcomeCapabilities": "I can help you:",
+    "capability1": "Understand system features and usage",
+    "capability2": "Generate and optimize AI trading strategies",
+    "capability3": "Manage AI traders and wallet configurations",
+    "capability4": "Analyze market data and trading performance",
+    "welcomePrompt": "Feel free to ask me anything.",
+    "onboarding": {
+      "welcome": "Welcome to Hyper Alpha Arena",
+      "configureAi": "Configure Hyper AI to get started",
+      "provider": "AI Provider",
+      "selectProvider": "Select provider",
+      "baseUrl": "Base URL",
+      "apiKey": "API Key",
+      "model": "Model",
+      "fillRequired": "Please fill in all required fields",
+      "connectionSuccess": "Connection successful!",
+      "connected": "Connected!",
+      "findMeAt": "You can find me anytime in Hyper AI.",
+      "enterSystem": "Enter System",
+      "gettingToKnow": "Getting to know you",
+      "gettingToKnowQuestions": "Getting to know you (3-4 questions)",
+      "typeMessage": "Type a message...",
+      "chatHint": "Chat with Hyper AI to personalize your experience",
+      "chatError": "Sorry, something went wrong. Please try again.",
+      "defaultGreeting": "Hello! I'm Hyper AI. Before we begin, I'd like to learn about your trading background so I can better assist you. Do you have experience with cryptocurrency trading?",
+      "profileSaved": "Your profile has been saved!"
+    }
   }
 }

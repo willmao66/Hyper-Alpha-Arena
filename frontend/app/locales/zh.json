@@ -38,7 +38,8 @@
     "binanceCollectionDaysHint": "币安资金流数据已累计采集 {{days}} 天",
     "error": "错误",
     "keyboardHintCtrlEnter": "按 Ctrl+Enter（Mac 上为 Cmd+Enter）发送",
-    "recommended": "推荐"
+    "recommended": "推荐",
+    "skip": "跳过"
   },
   "regime": {
     "noConfig": "未找到配置",
@@ -1399,5 +1400,44 @@
     "perDay": "每天",
     "upgradeOptions": "选择以下选项解锁无限次自动交易：",
     "resetAt": "重置时间"
+  },
+  "hyperAi": {
+    "title": "Hyper AI",
+    "newChat": "新对话",
+    "messages": "条消息",
+    "inputPlaceholder": "输入消息...",
+    "config": "AI 配置",
+    "configTitle": "Hyper AI 配置",
+    "skills": "技能",
+    "skillsComingSoon": "即将推出...",
+    "welcomeWithName": "你好，{{name}}！我是 Hyper AI，你的专属交易助手。",
+    "welcomeNoName": "你好！我是 Hyper AI，Hyper Alpha Arena 的智能助手。",
+    "welcomeCapabilities": "我可以帮你：",
+    "capability1": "了解系统功能和使用方法",
+    "capability2": "生成和优化 AI 交易策略",
+    "capability3": "管理 AI 交易员和钱包配置",
+    "capability4": "分析市场数据和交易表现",
+    "welcomePrompt": "有什么想了解的，直接问我就行。",
+    "onboarding": {
+      "welcome": "欢迎使用 Hyper Alpha Arena",
+      "configureAi": "配置 Hyper AI 轻松上手",
+      "provider": "AI 服务商",
+      "selectProvider": "选择服务商",
+      "baseUrl": "API 地址",
+      "apiKey": "API 密钥",
+      "model": "模型",
+      "fillRequired": "请填写所有必填项",
+      "connectionSuccess": "连接成功！",
+      "connected": "已建立连接！",
+      "findMeAt": "任何问题都可以在 Hyper AI 找到我。",
+      "enterSystem": "进入系统",
+      "gettingToKnow": "了解你的交易偏好",
+      "gettingToKnowQuestions": "了解你的交易偏好（约3-4个问题）",
+      "typeMessage": "输入消息...",
+      "chatHint": "与 Hyper AI 聊天，个性化你的体验",
+      "chatError": "抱歉，出了点问题，请重试。",
+      "defaultGreeting": "你好！我是 Hyper AI。在开始之前，我想简单了解一下你的交易背景，这样可以更好地为你服务。你之前有过加密货币交易的经验吗？",
+      "profileSaved": "你的偏好已保存！"
+    }
   }
 }

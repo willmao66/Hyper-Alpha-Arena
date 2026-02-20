@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import ReactDOM from 'react-dom/client'
 import './index.css'
 import './i18n' // Initialize i18n
@@ -40,6 +40,7 @@ import MobileDashboard from '@/components/mobile/MobileDashboard'
 import MobilePrograms from '@/components/mobile/MobilePrograms'
 import ProgramTrader from '@/components/program/ProgramTrader'
 import SettingsPage from '@/components/settings/SettingsPage'
+import { SplashScreen, HyperAiOnboarding, HyperAiPage } from '@/components/hyper-ai'
 // Remove CallbackPage import - handle inline
 import { AIDecision, getAccounts, checkMainnetAccounts, approveBuilder, type UnauthorizedAccount } from '@/lib/api'
 import { AuthorizationModal } from '@/components/hyperliquid'
@@ -77,6 +78,7 @@ interface Order { id: number; order_no: string; symbol: string; name: string; ma
 interface Trade { id: number; order_id: number; account_id: number; symbol: string; name: string; market: string; side: string; price: number; quantity: number; commission: number; trade_time: string }
 
 const PAGE_TITLES: Record<string, string> = {
+  'hyper-ai': 'Hyper AI',
   comprehensive: 'Hyper Alpha Arena',
   'system-logs': 'System Logs',
   'prompt-management': 'Prompt Templates',
@@ -105,6 +107,43 @@ function App() {
   const [hyperliquidRefreshKey, setHyperliquidRefreshKey] = useState(0)
   const [currentPage, setCurrentPage] = useState<string>('comprehensive')
   const tradingModeRef = useRef(tradingMode)
+
+  // Hyper AI states - initialization happens during splash
+  const [showSplash, setShowSplash] = useState(true)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [initComplete, setInitComplete] = useState(false)
+  const initStartedRef = useRef(false)
+
+  // Check Hyper AI configuration during splash phase
+  const checkHyperAiConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/hyper-ai/profile')
+      const data = await res.json()
+      return !data.llm_configured
+    } catch (e) {
+      console.error('Failed to check Hyper AI config:', e)
+      return false
+    }
+  }, [])
+
+  // Stable callback for splash completion - does all init checks
+  const handleSplashComplete = useCallback(async () => {
+    if (initStartedRef.current) return
+    initStartedRef.current = true
+
+    const needsOnboarding = await checkHyperAiConfig()
+    setShowOnboarding(needsOnboarding)
+    setInitComplete(true)
+    setShowSplash(false)
+  }, [checkHyperAiConfig])
+
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false)
+  }
+
+  const handleOnboardingSkip = () => {
+    setShowOnboarding(false)
+  }
 
   // Check URL hash and pathname for page routing
   useEffect(() => {
@@ -627,7 +666,32 @@ function App() {
     positions_value: 0
   } : null)
 
-  if (!user || !account || (!effectiveOverview && tradingMode === 'paper')) return <div className="p-8">Connecting to trading server...</div>
+  // Show splash screen first (all init happens during splash)
+  if (showSplash) {
+    return <SplashScreen onComplete={handleSplashComplete} />
+  }
+
+  // Show onboarding if Hyper AI not configured
+  if (showOnboarding) {
+    return (
+      <HyperAiOnboarding
+        onComplete={handleOnboardingComplete}
+        onSkip={handleOnboardingSkip}
+      />
+    )
+  }
+
+  // Show minimal loading only after init complete but WebSocket not ready
+  if (!user || !account || (!effectiveOverview && tradingMode === 'paper')) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <img src="/static/arena_logo_app_small.png" alt="Loading" className="w-16 h-16" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
+  }
 
   const renderMainContent = () => {
     const refreshData = () => {
@@ -641,6 +705,10 @@ function App() {
 
     return (
       <main className="flex-1 p-4 overflow-hidden flex flex-col min-h-0 min-w-0">
+
+        {currentPage === 'hyper-ai' && (
+          <HyperAiPage />
+        )}
 
         {currentPage === 'comprehensive' && (
           tradingMode === 'paper' ? (

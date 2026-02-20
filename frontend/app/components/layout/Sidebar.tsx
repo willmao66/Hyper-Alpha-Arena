@@ -1,4 +1,4 @@
-import { BarChart3, FileText, NotebookPen, Coins, MessageSquare, Mail } from 'lucide-react'
+import { BarChart3, FileText, NotebookPen, Coins, MessageSquare, Mail, Bot } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ContactDialog from '@/components/contact/ContactDialog'
 
@@ -108,6 +108,7 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
   const { t, i18n } = useTranslation()
 
   const desktopNav = [
+    { label: t('hyperAi.title', 'Hyper AI'), page: 'hyper-ai', icon: Bot },
     { label: t('sidebar.dashboard'), page: 'comprehensive', icon: BarChart3 },
     { label: t('sidebar.aiTrader', 'AI Trader'), page: 'trader-management', icon: AITraderIcon },
     { label: t('sidebar.prompts', 'Prompts'), page: 'prompt-management', icon: NotebookPen },

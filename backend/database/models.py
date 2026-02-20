@@ -1388,6 +1388,163 @@ class BacktestTriggerLog(Base):
 
 
 # ============================================================================
+# Hyper AI - Main Agent for Full-Site AI Intelligence
+# ============================================================================
+# Hyper AI is the master agent that:
+# - Guides users through onboarding and profile setup
+# - Maintains user memory (preferences, decisions, lessons, insights)
+# - Orchestrates sub-agents (Prompt AI, Program AI, Signal AI, Attribution AI)
+# - Handles context compression for long conversations
+# ============================================================================
+
+
+class HyperAiProfile(Base):
+    """
+    Hyper AI User Profile - Stores user trading preferences and LLM configuration.
+
+    This is the core profile for Hyper AI, containing:
+    - Trading style and risk preferences (collected during onboarding)
+    - LLM provider configuration (API endpoint, key, model)
+    - Onboarding status
+
+    Single-user system: only one profile exists per installation.
+    """
+    __tablename__ = "hyper_ai_profile"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # User identity
+    nickname = Column(String(100), nullable=True)  # User's preferred name/nickname
+
+    # Trading preferences (collected during onboarding conversation)
+    trading_style = Column(String(50), nullable=True)  # trend_following / mean_reversion / mixed
+    risk_preference = Column(String(50), nullable=True)  # conservative / moderate / aggressive
+    experience_level = Column(String(50), nullable=True)  # beginner / intermediate / expert
+    preferred_symbols = Column(Text, nullable=True)  # JSON array: ["BTC", "ETH", "SOL"]
+    preferred_timeframe = Column(String(50), nullable=True)  # short / medium / long
+    capital_scale = Column(String(50), nullable=True)  # small / medium / large
+
+    # Onboarding status
+    onboarding_completed = Column(Boolean, default=False)  # True after initial setup conversation
+
+    # LLM provider configuration (user selects during onboarding)
+    llm_provider = Column(String(50), nullable=True)  # openai / anthropic / google / deepseek / zhipu / openrouter / qwen / moonshot / custom
+    llm_base_url = Column(String(500), nullable=True)  # API endpoint URL
+    llm_api_key_encrypted = Column(Text, nullable=True)  # Encrypted API key (use decrypt_private_key to read)
+    llm_model = Column(String(100), nullable=True)  # Model name (e.g., gpt-4o, claude-opus-4-6)
+
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+
+class HyperAiMemory(Base):
+    """
+    Hyper AI User Memory - Stores AI-extracted insights about the user.
+
+    Memory categories:
+    - preference: User preferences (e.g., "likes trend following strategies")
+    - decision: User decisions (e.g., "chose 5-minute timeframe for signals")
+    - lesson: Trading lessons (e.g., "got caught chasing pumps last time")
+    - insight: Strategy insights (e.g., "this strategy underperforms in ranging markets")
+
+    Memory lifecycle:
+    - Created: AI extracts from conversations or trade results
+    - Updated: AI merges similar memories (Mem0-style deduplication)
+    - Soft-deleted: is_active=False when contradicted by newer information
+    """
+    __tablename__ = "hyper_ai_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Memory content
+    category = Column(String(50), nullable=False, index=True)  # preference / decision / lesson / insight
+    content = Column(Text, nullable=False)  # The actual memory text
+
+    # Memory metadata
+    source = Column(String(50), nullable=True)  # onboarding / prompt_chat / program_chat / signal_chat / trade_result / backtest
+    importance = Column(Float, default=0.5)  # 0.0-1.0, higher = more important for retrieval
+    is_active = Column(Boolean, default=True)  # False = soft-deleted (contradicted by newer memory)
+
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+    updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+
+class HyperAiConversation(Base):
+    """
+    Hyper AI Conversation Session - Tracks conversation history with compression support.
+
+    Compression mechanism:
+    - When token count approaches 80% of context window, compression is triggered
+    - AI generates a summary of the conversation
+    - Old messages are deleted, summary is stored in this table
+    - New messages continue from the compressed state
+    """
+    __tablename__ = "hyper_ai_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Conversation metadata
+    title = Column(String(200), nullable=False, default="Hyper AI Chat")
+    is_onboarding = Column(Boolean, default=False)  # True for onboarding conversations (hidden from history)
+
+    # Compression data
+    summary = Column(Text, nullable=True)  # Compressed summary of old messages (after compression)
+    message_count = Column(Integer, default=0)  # Total messages before compression
+    total_tokens = Column(Integer, default=0)  # Estimated total tokens (for compression trigger)
+
+    # Timestamps
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+    updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+    compressed_at = Column(TIMESTAMP, nullable=True)  # When compression was performed
+
+    # Relationships
+    messages = relationship(
+        "HyperAiMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="HyperAiMessage.created_at"
+    )
+
+
+class HyperAiMessage(Base):
+    """
+    Hyper AI Message - Individual messages in a conversation.
+
+    Stores full message details including:
+    - Content and role (user/assistant/system/tool)
+    - AI reasoning process (thinking/chain-of-thought)
+    - Tool calls and results (function calling)
+    - Sub-agent orchestration logs (calls to Prompt/Program/Signal/Attribution AI)
+    - Completion status for retry functionality
+    """
+    __tablename__ = "hyper_ai_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("hyper_ai_conversations.id"), nullable=False, index=True)
+
+    # Message content
+    role = Column(String(20), nullable=False)  # user / assistant / system / tool
+    content = Column(Text, nullable=False)  # Message content (markdown supported)
+
+    # AI reasoning and tool usage (for assistant messages)
+    reasoning_snapshot = Column(Text, nullable=True)  # AI thinking process (chain-of-thought, extended thinking)
+    tool_calls_log = Column(Text, nullable=True)  # JSON: [{name, arguments, result}, ...] - function calling log
+    subagent_calls_log = Column(Text, nullable=True)  # JSON: [{agent, task, result}, ...] - sub-agent orchestration log
+
+    # Completion status (for retry/continue functionality)
+    is_complete = Column(Boolean, default=True)  # False = interrupted, can retry
+    interrupt_reason = Column(Text, nullable=True)  # API error, timeout, user cancel, etc.
+
+    # Token tracking (for compression calculation)
+    token_count = Column(Integer, nullable=True)  # Estimated tokens in this message
+
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+
+    # Relationships
+    conversation = relationship("HyperAiConversation", back_populates="messages")
+
+
+# ============================================================================
 # CRYPTO market trading configuration constants
 # ============================================================================
 CRYPTO_MIN_COMMISSION = 0.1  # $0.1 minimum commission

@@ -64,6 +64,8 @@ MIGRATIONS = [
     "add_prompt_id_to_ai_prompt_conversations.py",
     "unify_ai_message_fields.py",
     "add_interrupt_reason_to_ai_messages.py",
+    "031_hyper_ai_tables.py",
+    "add_nickname_to_hyper_ai_profile.py",
 ]
 
 
