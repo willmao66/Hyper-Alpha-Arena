@@ -1516,9 +1516,10 @@ def call_ai_for_decision(
 
     # Reasoning models that don't support temperature parameter
     # Support multi-vendor reasoning models: OpenAI, DeepSeek, Qwen, Claude, Gemini, Grok
+    # Note: Include both "o1" and "o1-" to match "o1", "o1-mini", "o1-preview" etc.
     is_reasoning_model = any(
         marker in model_lower for marker in [
-            "gpt-5", "o1-preview", "o1-mini", "o1-", "o3-", "o4-",  # OpenAI
+            "gpt-5", "o1-preview", "o1-mini", "o1-", "o1", "o3-", "o3", "o4-", "o4",  # OpenAI
             "deepseek-r1", "deepseek-reasoner",  # DeepSeek
             "qwq", "qwen-plus-thinking", "qwen-max-thinking", "qwen3-thinking", "qwen-turbo-thinking",  # Qwen
             "claude-4", "claude-sonnet-4-5",  # Claude (extended thinking)

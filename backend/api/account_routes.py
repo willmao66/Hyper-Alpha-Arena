@@ -801,8 +801,9 @@ async def test_llm_connection(payload: dict):
             model_lower = model.lower()
 
             # Reasoning models that don't support temperature parameter
+            # Note: Include both "o1" and "o1-" to match "o1", "o1-mini", "o1-preview" etc.
             is_reasoning_model = any(x in model_lower for x in [
-                'gpt-5', 'o1-preview', 'o1-mini', 'o1-', 'o3-', 'o4-',
+                'gpt-5', 'o1-preview', 'o1-mini', 'o1-', 'o1', 'o3-', 'o3', 'o4-', 'o4',
                 'deepseek-r1', 'deepseek-reasoner',
                 'qwq', 'qwen-plus-thinking', 'qwen-max-thinking', 'qwen3-thinking', 'qwen-turbo-thinking',
                 'claude-4', 'claude-sonnet-4-5',
@@ -810,7 +811,7 @@ async def test_llm_connection(payload: dict):
                 'grok-3-mini'
             ])
 
-            is_o1_series = any(x in model_lower for x in ['o1-preview', 'o1-mini', 'o1-'])
+            is_o1_series = any(x in model_lower for x in ['o1-preview', 'o1-mini', 'o1-', 'o1'])
             is_new_model = is_reasoning_model or any(x in model_lower for x in ['gpt-4o'])
 
             if api_format == 'anthropic':
